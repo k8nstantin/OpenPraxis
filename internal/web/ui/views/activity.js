@@ -53,7 +53,7 @@
 
       // Activity item click — cross-navigate
       el.querySelectorAll('.activity-item').forEach(function(item) {
-        item.addEventListener('click', function() {
+        OL.onView(item, 'click', function() {
           var type = item.dataset.activityType;
           var id = item.dataset.activityId;
           if (type === 'conversation') {

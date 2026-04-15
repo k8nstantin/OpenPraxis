@@ -46,7 +46,9 @@
   }
 
   function switchView(view) {
+    var prev = currentView;
     currentView = view;
+    OL._switchLifecycle(prev, view);
     document.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('active'); });
     var navItem = document.querySelector('[data-view="' + view + '"]');
     if (navItem) navItem.classList.add('active');

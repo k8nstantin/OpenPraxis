@@ -59,7 +59,7 @@
       OL.wireTreeToggles(el, 'data-idea-peer');
 
       el.querySelectorAll('.manifest-item').forEach(function(item) {
-        item.addEventListener('click', function() { window._loadIdea(item.dataset.id); });
+        OL.onView(item, 'click', function() { window._loadIdea(item.dataset.id); });
       });
 
       if (_pendingIdeaId) {
@@ -127,14 +127,14 @@
 
       // Bind manifest links — click to navigate to manifest
       bodyEl.querySelectorAll('.manifest-link').forEach(function(el) {
-        el.addEventListener('click', function() {
+        OL.onView(el, 'click', function() {
           OL.switchView('manifests');
           setTimeout(function() { window._loadManifest(el.dataset.mid); }, 300);
         });
       });
 
       // Promote idea to manifest
-      bodyEl.querySelector('.promote-idea-btn').addEventListener('click', function() {
+      OL.onView(bodyEl.querySelector('.promote-idea-btn'), 'click', function() {
         window._promoteToManifest(
           idea.title,
           idea.description || '',

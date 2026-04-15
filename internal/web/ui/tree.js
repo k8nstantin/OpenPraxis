@@ -19,7 +19,7 @@
   // and flips the arrow between down and right.
   OL.wireTreeToggles = function(container, attrName) {
     container.querySelectorAll('[' + attrName + ']').forEach(function(node) {
-      node.addEventListener('click', function(e) {
+      OL.onView(node, 'click', function(e) {
         if (e.target.closest('button')) return;
         var idx = node.getAttribute(attrName);
         var children = container.querySelector('[' + attrName + '-children="' + idx + '"]');
@@ -165,8 +165,8 @@
             }
           }
 
-          node.addEventListener('click', handleToggle);
-          node.addEventListener('keydown', function(e) {
+          OL.onView(node, 'click', handleToggle);
+          OL.onView(node, 'keydown', function(e) {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               handleToggle(e);
@@ -180,7 +180,7 @@
     if (config.onLeafClick) {
       var selector = config.leafSelector || '.tree-leaf';
       container.querySelectorAll(selector).forEach(function(el) {
-        el.addEventListener('click', function(e) {
+        OL.onView(el, 'click', function(e) {
           e.stopPropagation();
           config.onLeafClick(el, e);
         });

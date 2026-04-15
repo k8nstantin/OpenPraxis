@@ -4,7 +4,7 @@
 
   function wireActionLinks(container) {
     container.querySelectorAll('.action-link').forEach(function(link) {
-      link.addEventListener('click', function() {
+      OL.onView(link, 'click', function() {
         OL.switchView('actions');
         setTimeout(function() { OL.loadActionDetail(link.dataset.aid); }, 300);
       });

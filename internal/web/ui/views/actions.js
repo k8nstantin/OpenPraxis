@@ -48,7 +48,7 @@
 
       // Action leaf click — fetch full detail
       el.querySelectorAll('.tree-node.peer-leaf').forEach(node => {
-        node.addEventListener('click', (e) => {
+        OL.onView(node, 'click', (e) => {
           if (e.target.closest('.tree-arrow')) return;
           el.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
           node.classList.add('active');
@@ -97,7 +97,7 @@
 
       // Bind conversation link
       bodyEl.querySelectorAll('.conv-nav').forEach(el => {
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           OL.switchView('conversations');
           setTimeout(() => window._loadConv(el.dataset.convId), 300);
         });
@@ -105,7 +105,7 @@
 
       // Bind task link
       bodyEl.querySelectorAll('.task-nav').forEach(el => {
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           OL.switchView('tasks');
           setTimeout(() => OL.loadTaskDetail(el.dataset.tid), 300);
         });

@@ -1,16 +1,12 @@
 (function(OL) {
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime, formatModel = OL.formatModel;
-  var _convSearchWired = false;
-
   function setupConvSearch() {
-    if (_convSearchWired) return;
-    _convSearchWired = true;
     var input = document.getElementById('conv-search-input');
     var btn = document.getElementById('conv-search-btn');
     if (btn) {
-      btn.addEventListener('click', function() { searchConversations(input.value); });
-      input.addEventListener('keypress', function(e) {
+      OL.onView(btn, 'click', function() { searchConversations(input.value); });
+      OL.onView(input, 'keypress', function(e) {
         if (e.key === 'Enter') searchConversations(input.value);
       });
     }
@@ -68,7 +64,7 @@
 
       // Conversation clicks
       el.querySelectorAll('.conv-item').forEach(function(item) {
-        item.addEventListener('click', function() {
+        OL.onView(item, 'click', function() {
           el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
           item.classList.add('active');
           window._loadConv(item.dataset.id);
@@ -95,7 +91,7 @@
       '</div>';
     }).join('');
     el.querySelectorAll('.conv-item').forEach(function(item) {
-      item.addEventListener('click', function() {
+      OL.onView(item, 'click', function() {
         el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
         item.classList.add('active');
         window._loadConv(item.dataset.id);
@@ -171,7 +167,7 @@
 
   OL.bindActionLinks = function(container) {
     container.querySelectorAll('.action-link').forEach(function(el) {
-      el.addEventListener('click', function() {
+      OL.onView(el, 'click', function() {
         OL.switchView('actions');
         setTimeout(function() { OL.loadActionDetail(el.dataset.aid); }, 300);
       });

@@ -50,14 +50,14 @@
         ],
         afterRender: function(container) {
           container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
-          container.querySelector('#btn-new-product').addEventListener('click', function() { window._createProduct(); });
+          OL.onView(container.querySelector('#btn-new-product'), 'click', function() { window._createProduct(); });
         },
       });
 
       // Handle empty case — still need new product button
       if (!peerGroups || !peerGroups.length) {
         el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
-        el.querySelector('#btn-new-product').addEventListener('click', function() { window._createProduct(); });
+        OL.onView(el.querySelector('#btn-new-product'), 'click', function() { window._createProduct(); });
       }
     } catch (e) {
       console.error('Load products failed:', e);
@@ -113,7 +113,7 @@
           <button class="btn-dismiss" onclick="OL.loadProducts()" style="padding:6px 16px;font-size:13px">Cancel</button>
         </div>
       </div>`;
-    document.getElementById('btn-save-product').addEventListener('click', async () => {
+    OL.onView(document.getElementById('btn-save-product'), 'click', async () => {
       const title = document.getElementById('new-product-title').value.trim();
       if (!title) { alert('Title is required'); return; }
       const desc = document.getElementById('new-product-desc').value.trim();
@@ -289,10 +289,10 @@
       <div id="product-cytoscape" style="flex:1;width:100%"></div>
     `;
     document.body.appendChild(overlay);
-    document.getElementById('diagram-back-btn').addEventListener('click', () => overlay.remove());
+    OL.onView(document.getElementById('diagram-back-btn'), 'click', () => overlay.remove());
     // ESC to close
     const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
-    document.addEventListener('keydown', escHandler);
+    OL.onView(document, 'keydown', escHandler);
     renderProductDiagram(productId);
   };
 
@@ -529,7 +529,7 @@
             <button class="btn-dismiss" onclick="OL.loadProductDetail('${esc(p.id)}')" style="padding:6px 16px;font-size:13px">Cancel</button>
           </div>
         </div>`;
-      document.getElementById('btn-update-product').addEventListener('click', async () => {
+      OL.onView(document.getElementById('btn-update-product'), 'click', async () => {
         const title = document.getElementById('edit-product-title').value.trim();
         if (!title) { alert('Title is required'); return; }
         const description = document.getElementById('edit-product-desc').value.trim();
@@ -574,7 +574,7 @@
       </div>`;
 
     bodyEl.querySelectorAll('[data-link-mid]').forEach(item => {
-      item.addEventListener('click', async () => {
+      OL.onView(item, 'click', async () => {
         const mid = item.dataset.linkMid;
         await fetchJSON('/api/manifests/' + mid, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({project_id: productId}) });
         OL.loadProducts();
@@ -613,7 +613,7 @@
       </div>`;
 
     bodyEl.querySelectorAll('[data-link-iid]').forEach(item => {
-      item.addEventListener('click', async () => {
+      OL.onView(item, 'click', async () => {
         const iid = item.dataset.linkIid;
         const idea = (allIdeas || []).find(i => i.id === iid);
         if (idea) {

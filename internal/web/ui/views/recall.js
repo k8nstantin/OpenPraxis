@@ -38,7 +38,7 @@
       }
       el.innerHTML = html;
       el.querySelectorAll('.recall-restore').forEach(function(btn) {
-        btn.addEventListener('click', async function() {
+        OL.onView(btn, 'click', async function() {
           var type = btn.dataset.type;
           var id = btn.dataset.id;
           await fetch('/api/recall/' + type + '/' + id + '/restore', {method: 'POST'});

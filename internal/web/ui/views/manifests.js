@@ -373,12 +373,12 @@
 
       // Bind idea navigation links
       bodyEl.querySelectorAll('.idea-nav').forEach(el => {
-        el.addEventListener('click', () => window._goToIdea(el.dataset.iid));
+        OL.onView(el, 'click', () => window._goToIdea(el.dataset.iid));
       });
 
       // Bind task navigation links
       bodyEl.querySelectorAll('.task-nav').forEach(el => {
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           OL.switchView('tasks');
           setTimeout(() => OL.loadTaskDetail(el.dataset.tid), 300);
         });
@@ -386,7 +386,7 @@
 
       // Bind status toggle buttons
       bodyEl.querySelectorAll('.manifest-status-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+        OL.onView(btn, 'click', async () => {
           const newStatus = btn.dataset.status;
           if (newStatus === m.status) return;
           try {
@@ -406,7 +406,7 @@
       // Inline edit: Title (click to edit)
       const titleSpan = document.getElementById('manifest-edit-title');
       if (titleSpan) {
-        titleSpan.addEventListener('click', () => {
+        OL.onView(titleSpan, 'click', () => {
           const input = document.createElement('input');
           input.type = 'text';
           input.value = m.title;
@@ -427,15 +427,15 @@
             }
             window._loadManifest(m.id);
           };
-          input.addEventListener('blur', save);
-          input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
+          OL.onView(input, 'blur', save);
+          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
         });
       }
 
       // Inline edit: Description (click to edit)
       const descEl = document.getElementById('manifest-edit-desc');
       if (descEl) {
-        descEl.addEventListener('click', () => {
+        OL.onView(descEl, 'click', () => {
           const input = document.createElement('input');
           input.type = 'text';
           input.value = m.description || '';
@@ -456,15 +456,15 @@
             }
             window._loadManifest(m.id);
           };
-          input.addEventListener('blur', save);
-          input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
+          OL.onView(input, 'blur', save);
+          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
         });
       }
 
       // Inline edit: Product assignment (click to show dropdown)
       const productDisplay = document.getElementById('manifest-product-display');
       if (productDisplay) {
-        productDisplay.addEventListener('click', () => {
+        OL.onView(productDisplay, 'click', () => {
           const productOpts = allProducts.map(p =>
             `<option value="${esc(p.id)}"${m.project_id === p.id ? ' selected' : ''}>${esc(p.marker)} ${esc(p.title)}</option>`
           ).join('');
@@ -487,8 +487,8 @@
             }
             window._loadManifest(m.id);
           };
-          sel.addEventListener('change', save);
-          sel.addEventListener('blur', () => window._loadManifest(m.id));
+          OL.onView(sel, 'change', save);
+          OL.onView(sel, 'blur', () => window._loadManifest(m.id));
         });
       }
 
@@ -497,17 +497,17 @@
       const contentDisplay = document.getElementById('manifest-content-display');
       const contentEditor = document.getElementById('manifest-content-editor');
       if (contentBtn && contentDisplay && contentEditor) {
-        contentBtn.addEventListener('click', () => {
+        OL.onView(contentBtn, 'click', () => {
           contentDisplay.style.display = 'none';
           contentBtn.style.display = 'none';
           contentEditor.style.display = 'block';
         });
-        document.getElementById('manifest-content-cancel').addEventListener('click', () => {
+        OL.onView(document.getElementById('manifest-content-cancel'), 'click', () => {
           contentEditor.style.display = 'none';
           contentDisplay.style.display = '';
           contentBtn.style.display = '';
         });
-        document.getElementById('manifest-content-save').addEventListener('click', async () => {
+        OL.onView(document.getElementById('manifest-content-save'), 'click', async () => {
           const val = document.getElementById('manifest-content-textarea').value;
           await fetch('/api/manifests/' + m.id, {
             method: 'PUT',
@@ -522,7 +522,7 @@
       // Create task button (when no tasks exist for this manifest)
       const createTaskBtn = bodyEl.querySelector('.manifest-create-task-btn');
       if (createTaskBtn) {
-        createTaskBtn.addEventListener('click', () => {
+        OL.onView(createTaskBtn, 'click', () => {
           OL.switchView('tasks');
           setTimeout(() => {
             OL.showTaskCreateForm();

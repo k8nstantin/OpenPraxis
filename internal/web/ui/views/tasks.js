@@ -462,7 +462,7 @@
             if (titleSpan) titleSpan.textContent = m.title;
           }
         }).catch(() => {});
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           OL.switchView('manifests');
           setTimeout(() => window._loadManifest(mid), 300);
         });
@@ -470,7 +470,7 @@
 
       // Action cross-links
       bodyEl.querySelectorAll('.action-link').forEach(el => {
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           OL.switchView('actions');
           setTimeout(() => OL.loadActionDetail(el.dataset.aid), 300);
         });
@@ -478,7 +478,7 @@
 
       // Run history click — show output for that run
       bodyEl.querySelectorAll('.task-run-item').forEach(el => {
-        el.addEventListener('click', () => {
+        OL.onView(el, 'click', () => {
           const runId = el.dataset.runId;
           const taskId = el.dataset.taskId;
           loadRunOutput(taskId, runId, el);
@@ -487,7 +487,7 @@
 
       // Schedule mode radio toggle — show/hide one-shot vs recurring options
       bodyEl.querySelectorAll('input[name="task-sched-mode"]').forEach(radio => {
-        radio.addEventListener('change', () => {
+        OL.onView(radio, 'change', () => {
           const oneshotEl = bodyEl.querySelector('#task-sched-oneshot');
           const recurringEl = bodyEl.querySelector('#task-sched-recurring');
           if (oneshotEl && recurringEl) {
@@ -551,7 +551,7 @@
             depSetBtn.style.display = hasMatches ? '' : 'none';
           };
 
-          depSearch.addEventListener('input', () => populateOptions(depSearch.value));
+          OL.onView(depSearch, 'input', () => populateOptions(depSearch.value));
         }
       })();
 
@@ -577,7 +577,7 @@
               liveEl.innerHTML = '<span style="color:var(--text-muted)">Waiting for output...</span>';
             }
             if (data && data.running) {
-              setTimeout(pollOutput, 2000);
+              OL.viewTimeout(pollOutput, 2000);
             } else {
               // Task finished — reload full detail
               OL.loadTaskDetail(t.id);
@@ -676,7 +676,7 @@
     const searchInput = bodyEl.querySelector('#tc-manifest-search');
     const selectEl = bodyEl.querySelector('#tc-manifest-id');
     const allOptions = Array.from(selectEl.options);
-    searchInput.addEventListener('input', () => {
+    OL.onView(searchInput, 'input', () => {
       const q = searchInput.value.toLowerCase();
       selectEl.innerHTML = '';
       allOptions.forEach(opt => {

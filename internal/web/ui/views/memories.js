@@ -97,7 +97,7 @@
       </div>
     `;
 
-    detail.querySelector('#mem-promote-btn').addEventListener('click', () => {
+    OL.onView(detail.querySelector('#mem-promote-btn'), 'click', () => {
       window._promoteToManifest(
         tierContent.l0,
         tierContent.l1,
@@ -106,7 +106,7 @@
     });
 
     detail.querySelectorAll('.tier-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
+      OL.onView(tab, 'click', () => {
         detail.querySelectorAll('.tier-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById('memory-peer-content-text').textContent = tierContent[tab.dataset.tier];

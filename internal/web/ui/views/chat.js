@@ -97,16 +97,16 @@
 
     // Tab click handlers
     container.querySelectorAll('.chat-tab').forEach(function(tab) {
-      tab.addEventListener('click', function(e) {
+      OL.onView(tab, 'click', function(e) {
         if (e.target.classList.contains('chat-tab-close')) return;
         switchChatTab(tab.dataset.id);
       });
-      tab.querySelector('.chat-tab-close').addEventListener('click', function(e) {
+      OL.onView(tab.querySelector('.chat-tab-close'), 'click', function(e) {
         e.stopPropagation();
         deleteChatSession(tab.dataset.id);
       });
       // Double-click to rename
-      tab.querySelector('.chat-tab-title').addEventListener('dblclick', function(e) {
+      OL.onView(tab.querySelector('.chat-tab-title'), 'dblclick', function(e) {
         e.stopPropagation();
         var titleEl = e.target;
         var id = tab.dataset.id;
@@ -129,8 +129,8 @@
           sess.title = newTitle;
           renderChatTabs();
         };
-        input.addEventListener('blur', finish);
-        input.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); finish(); }});
+        OL.onView(input, 'blur', finish);
+        OL.onView(input, 'keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); finish(); }});
       });
     });
   }
@@ -432,7 +432,7 @@
       '</div>';
     }).join('');
     container.querySelectorAll('.chat-remove-attach').forEach(function(btn) {
-      btn.addEventListener('click', function() {
+      OL.onView(btn, 'click', function() {
         chatAttachments.splice(parseInt(btn.dataset.idx), 1);
         renderAttachmentPreviews();
       });

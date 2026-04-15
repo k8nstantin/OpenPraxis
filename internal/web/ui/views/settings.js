@@ -42,15 +42,15 @@
       `<span class="emoji-btn" style="font-size:22px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:background 0.1s">${e}</span>`
     ).join('');
     pickerEl.querySelectorAll('.emoji-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      OL.onView(btn, 'click', () => {
         avatarInput.value = btn.textContent;
         previewSm.textContent = btn.textContent;
         updateProfilePreview({display_name: document.getElementById('profile-name').value, email: document.getElementById('profile-email').value, avatar: btn.textContent});
       });
-      btn.addEventListener('mouseenter', () => btn.style.background = 'var(--bg-card-hover)');
-      btn.addEventListener('mouseleave', () => btn.style.background = '');
+      OL.onView(btn, 'mouseenter', () => btn.style.background = 'var(--bg-card-hover)');
+      OL.onView(btn, 'mouseleave', () => btn.style.background = '');
     });
-    avatarInput.addEventListener('input', () => {
+    OL.onView(avatarInput, 'input', () => {
       previewSm.textContent = avatarInput.value.startsWith('http') ? '' : avatarInput.value;
     });
     previewSm.textContent = avatarInput.value.startsWith('http') ? '' : avatarInput.value;
