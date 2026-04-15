@@ -1,0 +1,368 @@
+package node
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"openloom/internal/action"
+	"openloom/internal/chat"
+	"openloom/internal/config"
+	"openloom/internal/conversation"
+	"openloom/internal/embedding"
+	"openloom/internal/idea"
+	"openloom/internal/manifest"
+	"openloom/internal/marker"
+	"openloom/internal/memory"
+	"openloom/internal/product"
+	"openloom/internal/task"
+	"openloom/internal/watcher"
+)
+
+// Node is the central orchestrator that wires all components together.
+type Node struct {
+	Config        *config.Config
+	Store         *memory.Store
+	Index         *memory.Index
+	Conversations *conversation.Store
+	Markers       *marker.Store
+	Actions       *action.Store
+	Products      *product.Store
+	Manifests     *manifest.Store
+	Ideas         *idea.Store
+	Tasks         *task.Store
+	ChatSessions  *chat.SessionStore
+	Watcher       *watcher.Store
+	runner        *task.Runner
+	Embedder      *embedding.Engine
+	StartedAt     time.Time
+}
+
+// New creates and initializes a Node.
+func New(cfg *config.Config) (*Node, error) {
+	store, err := memory.NewStore(cfg.Storage.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("init store: %w", err)
+	}
+
+	index, err := memory.NewIndex(cfg.Storage.DataDir, cfg.Embedding.Dimension)
+	if err != nil {
+		return nil, fmt.Errorf("init index: %w", err)
+	}
+
+	// Share the same SQLite DB for conversations and markers
+	convStore, err := conversation.NewStore(index.DB(), cfg.Embedding.Dimension)
+	if err != nil {
+		return nil, fmt.Errorf("init conversation store: %w", err)
+	}
+
+	markerStore, err := marker.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init marker store: %w", err)
+	}
+
+	actionStore, err := action.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init action store: %w", err)
+	}
+
+	ideaStore, err := idea.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init idea store: %w", err)
+	}
+
+	productStore, err := product.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init product store: %w", err)
+	}
+
+	manifestStore, err := manifest.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init manifest store: %w", err)
+	}
+
+	taskStore, err := task.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init task store: %w", err)
+	}
+
+	chatStore, err := chat.NewSessionStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init chat store: %w", err)
+	}
+
+	watcherStore, err := watcher.NewStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init watcher store: %w", err)
+	}
+
+	embedder := embedding.NewEngine(cfg.Embedding.OllamaURL, cfg.Embedding.Model, cfg.Embedding.Dimension)
+
+	n := &Node{
+		Config:        cfg,
+		Store:         store,
+		Index:         index,
+		Conversations: convStore,
+		Markers:       markerStore,
+		Actions:       actionStore,
+		Products:      productStore,
+		Manifests:     manifestStore,
+		Ideas:         ideaStore,
+		Tasks:         taskStore,
+		ChatSessions:  chatStore,
+		Watcher:       watcherStore,
+		Embedder:      embedder,
+		StartedAt:     time.Now(),
+	}
+
+	// One-time migration: normalize source_node from hostname to UUID
+	n.migrateSourceNodeToUUID()
+
+	return n, nil
+}
+
+// InitRunner creates and sets the task Runner using the Node's own stores.
+// Must be called after New() and before serving requests.
+// Returns the Runner for use by the task scheduler.
+func (n *Node) InitRunner(maxParallel int, onEvent func(string, map[string]string)) *task.Runner {
+	n.runner = task.NewRunner(n.Tasks, n.Actions, maxParallel, onEvent)
+	return n.runner
+}
+
+// GetRunner returns the task Runner, or nil if not yet initialized.
+func (n *Node) GetRunner() *task.Runner {
+	return n.runner
+}
+
+// StoreMemory stores a memory: writes to CRDT, embeds, indexes.
+func (n *Node) StoreMemory(ctx context.Context, content, path, memType, scope, project, domain, sourceAgent string, tags []string) (*memory.Memory, error) {
+	if project == "" {
+		project = n.Config.Defaults.Project
+	}
+	if scope == "" {
+		scope = n.Config.Defaults.Scope
+	}
+
+	mem, err := memory.NewMemory(content, path, memType, scope, project, domain, sourceAgent, n.PeerID(), tags)
+	if err != nil {
+		return nil, fmt.Errorf("create memory: %w", err)
+	}
+
+	vec, err := n.Embedder.EmbedDocument(ctx, mem.L1)
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+
+	if err := n.Store.Put(mem); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+
+	if err := n.Index.Upsert(mem, vec); err != nil {
+		return nil, fmt.Errorf("index: %w", err)
+	}
+
+	return mem, nil
+}
+
+// SaveConversation saves a full agent conversation with embedding.
+func (n *Node) SaveConversation(ctx context.Context, title, agent, project string, turns []conversation.Turn, tags []string) (*conversation.Conversation, error) {
+	if project == "" {
+		project = n.Config.Defaults.Project
+	}
+
+	conv := conversation.NewConversation(title, agent, project, n.PeerID(), turns, tags)
+
+	// Embed the summary for semantic search
+	vec, err := n.Embedder.EmbedDocument(ctx, conv.Summary)
+	if err != nil {
+		return nil, fmt.Errorf("embed conversation: %w", err)
+	}
+
+	if err := n.Conversations.Save(conv, vec); err != nil {
+		return nil, fmt.Errorf("save conversation: %w", err)
+	}
+
+	return conv, nil
+}
+
+// UpdateConversation updates an existing conversation with new turns and re-embeds.
+func (n *Node) UpdateConversation(ctx context.Context, id, title, agent, project string, turns []conversation.Turn) error {
+	if project == "" {
+		project = n.Config.Defaults.Project
+	}
+
+	now := time.Now()
+	// Preserve original created_at if conversation already exists
+	createdAt := now
+	if existing, _ := n.Conversations.GetByID(id); existing != nil {
+		createdAt = existing.CreatedAt
+	}
+	conv := &conversation.Conversation{
+		ID:         id,
+		Title:      title,
+		Agent:      agent,
+		Project:    project,
+		SourceNode: n.PeerID(),
+		Turns:      turns,
+		TurnCount:  len(turns),
+		CreatedAt:  createdAt,
+		UpdatedAt:  now,
+		AccessedAt: now,
+	}
+	conv.Summary = conversation.BuildSummary(turns)
+
+	vec, err := n.Embedder.EmbedDocument(ctx, conv.Summary)
+	if err != nil {
+		return fmt.Errorf("embed conversation: %w", err)
+	}
+
+	return n.Conversations.Save(conv, vec)
+}
+
+// SearchConversations performs semantic search over saved conversations.
+func (n *Node) SearchConversations(ctx context.Context, query string, limit int, agent, project string) ([]conversation.SearchResult, error) {
+	vec, err := n.Embedder.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+
+	return n.Conversations.Search(vec, limit, agent, project)
+}
+
+// SearchMemories performs semantic search over memories.
+func (n *Node) SearchMemories(ctx context.Context, query string, limit int, scope, project, domain string) ([]memory.SearchResult, error) {
+	vec, err := n.Embedder.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+
+	return n.Index.Search(vec, limit, scope, project, domain)
+}
+
+// DeleteMemory removes a memory from both stores.
+func (n *Node) DeleteMemory(id string) error {
+	if err := n.Store.Delete(id); err != nil {
+		return err
+	}
+	return n.Index.Delete(id)
+}
+
+// DeleteByPrefix removes all memories under a path prefix.
+func (n *Node) DeleteByPrefix(prefix string) (int, error) {
+	mems, err := n.Index.ListByPrefix(prefix, 10000)
+	if err != nil {
+		return 0, err
+	}
+	for _, m := range mems {
+		_ = n.Store.Delete(m.ID)
+		_ = n.Index.Delete(m.ID)
+	}
+	return len(mems), nil
+}
+
+// PeerID returns the stable UUID for this node — the canonical identifier for all stored data.
+func (n *Node) PeerID() string {
+	return n.Config.Node.PeerID()
+}
+
+// migrateSourceNodeToUUID normalizes all source_node columns from hostname (or empty) to UUID.
+// This is idempotent — once all rows match the UUID, the UPDATE WHERE clauses match zero rows.
+func (n *Node) migrateSourceNodeToUUID() {
+	db := n.Index.DB()
+	peerID := n.PeerID()
+	hostname := n.Config.Node.Hostname
+
+	// Tables with source_node column
+	tables := []string{
+		"memories", "conversations", "actions", "amnesia",
+		"manifests", "ideas", "tasks", "chat_sessions",
+		"watcher_audits", "delusions",
+	}
+	for _, table := range tables {
+		// Update hostname → UUID
+		if hostname != "" {
+			res, err := db.Exec(
+				fmt.Sprintf("UPDATE %s SET source_node = ? WHERE source_node = ?", table),
+				peerID, hostname,
+			)
+			if err == nil {
+				if cnt, _ := res.RowsAffected(); cnt > 0 {
+					fmt.Printf("  Migration: %s — %d rows hostname→UUID\n", table, cnt)
+				}
+			}
+		}
+		// Update empty → UUID
+		res, err := db.Exec(
+			fmt.Sprintf("UPDATE %s SET source_node = ? WHERE source_node = ''", table),
+			peerID,
+		)
+		if err == nil {
+			if cnt, _ := res.RowsAffected(); cnt > 0 {
+				fmt.Printf("  Migration: %s — %d rows empty→UUID\n", table, cnt)
+			}
+		}
+	}
+
+	// sessions table uses 'node' column instead of 'source_node'
+	if hostname != "" {
+		db.Exec("UPDATE sessions SET node = ? WHERE node = ?", peerID, hostname)
+	}
+	db.Exec("UPDATE sessions SET node = ? WHERE node = ''", peerID)
+
+	// markers table uses 'from_node' and 'to_node'
+	if hostname != "" {
+		db.Exec("UPDATE markers SET from_node = ? WHERE from_node = ?", peerID, hostname)
+		db.Exec("UPDATE markers SET to_node = ? WHERE to_node = ?", peerID, hostname)
+	}
+	db.Exec("UPDATE markers SET from_node = ? WHERE from_node = ''", peerID)
+}
+
+// Close shuts down all components.
+func (n *Node) Close() error {
+	return n.Index.Close()
+}
+
+// ReindexMemories re-embeds and re-indexes memories that changed via CRDT sync.
+func (n *Node) ReindexMemories(ids []string) {
+	ctx := context.Background()
+	for _, id := range ids {
+		mem, err := n.Store.Get(id)
+		if err != nil || mem == nil {
+			continue
+		}
+		vec, err := n.Embedder.EmbedDocument(ctx, mem.L1)
+		if err != nil {
+			continue
+		}
+		_ = n.Index.Upsert(mem, vec)
+	}
+}
+
+// ValidateArchiveProduct checks that all linked manifests are "archive" before allowing a product to be archived.
+func (n *Node) ValidateArchiveProduct(productID string) error {
+	manifests, err := n.Manifests.ListByProject(productID, 1000)
+	if err != nil {
+		return fmt.Errorf("check manifests: %w", err)
+	}
+	for _, m := range manifests {
+		if m.Status != "archive" {
+			return fmt.Errorf("cannot archive product: manifest [%s] %s is still '%s' — archive all manifests first", m.Marker, m.Title, m.Status)
+		}
+	}
+	return nil
+}
+
+// ValidateArchiveManifest checks that all linked tasks are terminal before allowing a manifest to be archived.
+func (n *Node) ValidateArchiveManifest(manifestID string) error {
+	tasks, err := n.Tasks.ListByManifest(manifestID, 1000)
+	if err != nil {
+		return fmt.Errorf("check tasks: %w", err)
+	}
+	terminal := map[string]bool{"completed": true, "failed": true, "cancelled": true}
+	for _, t := range tasks {
+		if !terminal[t.Status] {
+			return fmt.Errorf("cannot archive manifest: task [%s] %s is still '%s' — all tasks must be completed, failed, or cancelled first", t.Marker, t.Title, t.Status)
+		}
+	}
+	return nil
+}

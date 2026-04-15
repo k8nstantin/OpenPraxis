@@ -1,0 +1,31 @@
+# Binary
+openloom
+*.exe
+*.test
+*.out
+
+# Data directory
+data/
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.env
+.env.local
+
+# Config (track example, not actual)
+!config.example.yaml
+
+# Local config
+.claude/
+.mcp.json
+agent-memory
+mobile/package-lock.json

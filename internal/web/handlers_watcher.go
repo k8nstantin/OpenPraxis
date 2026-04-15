@@ -1,0 +1,120 @@
+package web
+
+import (
+	"log/slog"
+	"net/http"
+	"os"
+
+	"openloom/internal/node"
+	"openloom/internal/watcher"
+
+	"github.com/gorilla/mux"
+)
+
+func apiWatcherList(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := r.URL.Query().Get("status")
+		audits, err := n.Watcher.List(status, 50)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if audits == nil {
+			audits = make([]*watcher.Audit, 0)
+		}
+		writeJSON(w, audits)
+	}
+}
+
+func apiWatcherStats(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stats, err := n.Watcher.Stats()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, stats)
+	}
+}
+
+func apiWatcherGet(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		audit, err := n.Watcher.Get(id)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if audit == nil {
+			http.Error(w, "audit not found", 404)
+			return
+		}
+		writeJSON(w, audit)
+	}
+}
+
+func apiWatcherForTask(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		taskID := mux.Vars(r)["id"]
+		audit, err := n.Watcher.GetByTask(taskID)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if audit == nil {
+			http.Error(w, "no audit for this task", 404)
+			return
+		}
+		writeJSON(w, audit)
+	}
+}
+
+func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		taskID := mux.Vars(r)["id"]
+		t, err := n.Tasks.Get(taskID)
+		if err != nil || t == nil {
+			http.Error(w, "task not found", 404)
+			return
+		}
+
+		// Resolve manifest
+		var manifestTitle, manifestContent string
+		if t.ManifestID != "" {
+			m, _ := n.Manifests.Get(t.ManifestID)
+			if m != nil {
+				manifestTitle = m.Title
+				manifestContent = m.Content
+			}
+		}
+
+		// Count actions
+		actions, _ := n.Actions.ListByTask(taskID, 1000)
+		actionCount := len(actions)
+
+		// Get cost
+		var costUSD float64
+		runs, _ := n.Tasks.ListRuns(taskID, 1)
+		if len(runs) > 0 {
+			costUSD = runs[0].CostUSD
+		}
+
+		// Create the watcher and run audit
+		cwd, _ := os.Getwd()
+		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", n.PeerID())
+		audit := taskWatcher.AuditTask(
+			t.ID, t.Marker, t.Title,
+			t.ManifestID, manifestTitle, manifestContent,
+			t.Status, actionCount, costUSD,
+		)
+
+		// If audit failed and task was "completed", downgrade
+		if audit.Status == "failed" && t.Status == "completed" {
+			if err := n.Tasks.UpdateStatus(t.ID, "failed"); err != nil {
+				slog.Warn("update task status to failed after audit", "error", err)
+			}
+		}
+
+		writeJSON(w, audit)
+	}
+}
