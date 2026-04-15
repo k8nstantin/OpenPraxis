@@ -122,19 +122,19 @@
         </div>
 
         <div class="metrics-grid" style="grid-template-columns:repeat(4,1fr)">
-          <div class="metric-card metric-card-primary" id="metric-running-card" style="cursor:pointer" onclick="OL.switchView('tasks')">
+          <div class="metric-card metric-card-primary" id="metric-running-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-running" style="color:var(--green)">0</div>
             <div class="metric-label">running</div>
           </div>
-          <div class="metric-card metric-card-primary" style="cursor:pointer" onclick="OL.switchView('tasks')">
+          <div class="metric-card metric-card-primary" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-turns-today">-</div>
             <div class="metric-label">turns today</div>
           </div>
-          <div class="metric-card metric-card-primary" id="metric-cost-card" style="cursor:pointer" onclick="OL.switchView('cost-history')">
+          <div class="metric-card metric-card-primary" id="metric-cost-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('cost-history')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-cost-today">-</div>
             <div class="metric-label" id="metric-cost-label">cost today</div>
           </div>
-          <div class="metric-card metric-card-primary" style="cursor:pointer" onclick="OL.switchView('tasks')">
+          <div class="metric-card metric-card-primary" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-tasks-total">-</div>
             <div class="metric-label">tasks</div>
           </div>

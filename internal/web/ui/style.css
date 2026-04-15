@@ -415,6 +415,15 @@ body {
 
 .clickable { cursor: pointer; transition: background 0.1s; }
 .clickable:hover { background: var(--bg-input); }
+.clickable:focus-visible, .tree-node:focus-visible, [role="button"]:focus-visible, [role="tab"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg-input);
+}
+.btn-copy:focus-visible, .btn-copy-sm:focus-visible, .btn-dismiss:focus-visible, .btn-search:focus-visible, .btn-confirm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .memory-list-item {
   padding: 12px 0;

@@ -29,7 +29,7 @@
           return '<div class="tree-node peer-leaf clickable tree-leaf" data-memory-id="' + esc(m.id) + '">' +
             '<span class="session-uuid">' + esc(m.marker) + '</span>' +
             '<span style="font-size:12px;color:var(--text-primary);flex:1">' + esc(m.l0.length > 50 ? m.l0.substring(0, 50) + '...' : m.l0) + '</span>' +
-            '<button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy(\'recall memory ' + esc(m.marker) + '\')" title="Copy ref">&#x2398;</button>' +
+            '<button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy(\'recall memory ' + esc(m.marker) + '\')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>' +
           '</div>';
         },
         leafSelector: '.tree-leaf',
@@ -66,7 +66,7 @@
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
           <span class="session-uuid" style="font-size:14px">${esc(marker)}</span>
           <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent);flex:1">${esc(mem.path)}</span>
-          <button class="btn-copy" onclick="OL.copy('recall memory ${marker}')" title="Copy reference">&#x2398;</button>
+          <button class="btn-copy" onclick="OL.copy('recall memory ${marker}')" title="Copy reference" aria-label="Copy reference">&#x2398;</button>
         </div>
         <div class="memory-meta">
           <span class="badge type">${esc(mem.type || 'insight')}</span>
@@ -76,10 +76,10 @@
           <span class="badge" style="color:var(--green)">${esc(session)}</span>
           <span class="badge" style="color:var(--accent)">${esc(node)}</span>
         </div>
-        <div class="tier-tabs">
-          <div class="tier-tab" data-tier="l0">L0 — One-liner</div>
-          <div class="tier-tab" data-tier="l1">L1 — Summary</div>
-          <div class="tier-tab active" data-tier="l2">L2 — Full</div>
+        <div class="tier-tabs" role="tablist">
+          <div class="tier-tab" data-tier="l0" role="tab" tabindex="0" aria-selected="false">L0 — One-liner</div>
+          <div class="tier-tab" data-tier="l1" role="tab" tabindex="0" aria-selected="false">L1 — Summary</div>
+          <div class="tier-tab active" data-tier="l2" role="tab" tabindex="0" aria-selected="true">L2 — Full</div>
         </div>
         <div class="memory-content" id="memory-peer-content-text">${esc(tierContent.l2)}</div>
         <div class="memory-timestamps" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap">
@@ -106,10 +106,15 @@
     });
 
     detail.querySelectorAll('.tier-tab').forEach(tab => {
-      OL.onView(tab, 'click', () => {
-        detail.querySelectorAll('.tier-tab').forEach(t => t.classList.remove('active'));
+      var handler = function() {
+        detail.querySelectorAll('.tier-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
         tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
         document.getElementById('memory-peer-content-text').textContent = tierContent[tab.dataset.tier];
+      };
+      OL.onView(tab, 'click', handler);
+      OL.onView(tab, 'keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
       });
     });
   }

@@ -74,7 +74,7 @@
       let html = '';
       for (const m of manifests) {
         const statusClass = m.status === 'open' ? 'confirmed' : m.status === 'closed' ? 'flagged' : 'dismissed';
-        html += `<div class="amnesia-item ${statusClass}" style="cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest&&OL.loadManifest('${esc(m.id)}'),300)">
+        html += `<div class="amnesia-item ${statusClass}" role="button" tabindex="0" style="cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest&&OL.loadManifest('${esc(m.id)}'),300)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
           <div class="amnesia-header">
             <span class="amnesia-status-label">${esc(m.status)}</span>
             <span class="session-uuid">${esc(m.marker)}</span>
@@ -156,7 +156,7 @@
             if (m.total_turns > 0) mCostParts.push(`${m.total_turns} turns`);
             if (m.total_cost > 0) mCostParts.push(`<span style="color:var(--green)">$${m.total_cost.toFixed(2)}</span>`);
             return `<div class="manifest-item" style="border-bottom:1px solid var(--border);padding:10px 12px;display:flex;align-items:center">
-              <div style="flex:1;cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(m.id)}'),300)">
+              <div role="button" tabindex="0" style="flex:1;cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(m.id)}'),300)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
                 <div style="display:flex;align-items:center;gap:8px">
                   <span class="session-uuid" style="font-size:11px">${esc(m.marker)}</span>
                   <span class="badge ${mStatusClass}" style="font-size:10px">${esc(m.status)}</span>
@@ -164,7 +164,7 @@
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:4px">${esc(m.title)}</div>
               </div>
-              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkManifestFromProduct('${esc(m.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
+              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkManifestFromProduct('${esc(m.id)}','${esc(p.id)}')" title="Remove from product" aria-label="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
           manifestsHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
@@ -195,7 +195,7 @@
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:2px">${esc(i.title)}</div>
               </div>
-              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkIdeaFromProduct('${esc(i.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
+              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkIdeaFromProduct('${esc(i.id)}','${esc(p.id)}')" title="Remove from product" aria-label="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
           ideasHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
@@ -229,7 +229,7 @@
             <span class="session-uuid" style="font-size:14px">${esc(p.marker)}</span>
             <span class="badge ${statusClass}">${esc(p.status)}</span>
             ${tags}
-            <button class="btn-copy" onclick="OL.copy('get product ${esc(p.marker)}')" title="Copy ref">&#x2398;</button>
+            <button class="btn-copy" onclick="OL.copy('get product ${esc(p.marker)}')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>
           </div>
           <!-- METRICS BAR -->
           <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:12px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-mono)">
@@ -558,7 +558,7 @@
     const bodyEl = document.getElementById('product-detail');
     const origHtml = bodyEl.innerHTML;
     let listHtml = unlinked.map(m =>
-      `<div class="manifest-item clickable" data-link-mid="${esc(m.id)}" style="padding:8px 12px;border-bottom:1px solid var(--border)">
+      `<div class="manifest-item clickable" data-link-mid="${esc(m.id)}" role="button" tabindex="0" style="padding:8px 12px;border-bottom:1px solid var(--border)">
         <span class="session-uuid" style="font-size:11px">${esc(m.marker)}</span>
         <span class="badge" style="font-size:10px">${esc(m.status)}</span>
         <span style="font-size:12px">${esc(m.title)}</span>
@@ -596,7 +596,7 @@
 
     const bodyEl = document.getElementById('product-detail');
     let listHtml = unlinked.map(i =>
-      `<div class="manifest-item clickable" data-link-iid="${esc(i.id)}" style="padding:8px 12px;border-bottom:1px solid var(--border)">
+      `<div class="manifest-item clickable" data-link-iid="${esc(i.id)}" role="button" tabindex="0" style="padding:8px 12px;border-bottom:1px solid var(--border)">
         <span class="session-uuid" style="font-size:11px">${esc(i.marker)}</span>
         <span class="badge" style="font-size:10px">${esc(i.status)}</span>
         <span style="font-size:10px;color:var(--text-muted)">${esc(i.priority)}</span>

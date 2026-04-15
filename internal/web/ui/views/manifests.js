@@ -113,12 +113,12 @@
     el.innerHTML = manifests.map(m => {
       const statusClass = m.status === 'open' ? 'scope' : m.status === 'closed' ? 'type' : m.status === 'archive' ? 'type' : '';
       const jira = (m.jira_refs || []).join(', ');
-      return `<div class="manifest-item clickable" data-id="${esc(m.id)}" onclick="OL.loadManifest('${esc(m.id)}')">
+      return `<div class="manifest-item clickable" data-id="${esc(m.id)}" role="button" tabindex="0" onclick="OL.loadManifest('${esc(m.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span class="session-uuid">${esc(m.marker)}</span>
           <span class="badge ${statusClass}">${esc(m.status)}</span>
           <span style="font-size:11px;color:var(--text-muted)">v${m.version}</span>
-          <button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>
+          <button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>
         </div>
         <div class="manifest-item-title">${esc(m.title)}</div>
         <div style="font-size:12px;color:var(--text-secondary)">${esc(m.description)}</div>
@@ -232,7 +232,7 @@
       const jira = (m.jira_refs || []).map(r => `<a href="https://gryphonnetworks.atlassian.net/browse/${r}" target="_blank" style="color:var(--accent)">${esc(r)}</a>`).join(', ');
       const tags = (m.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join(' ');
 
-      titleEl.innerHTML = `<span id="manifest-edit-title" class="manifest-editable" style="cursor:pointer;border-radius:4px;padding:2px 4px" title="Click to edit title">${esc(m.title)}</span> <button class="btn-copy" onclick="OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>`;
+      titleEl.innerHTML = `<span id="manifest-edit-title" class="manifest-editable" style="cursor:pointer;border-radius:4px;padding:2px 4px" title="Click to edit title">${esc(m.title)}</span> <button class="btn-copy" onclick="OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>`;
 
       // Fetch linked product for breadcrumb
       let product = null;
@@ -281,7 +281,7 @@
             const costStr = (t.total_cost || t.cost || 0) > 0 ? `$${(t.total_cost || t.cost).toFixed(2)}` : '';
             const runsStr = t.run_count > 0 ? `${t.run_count} runs` : '';
             const lastRunStr = t.last_run_at ? `last: ${new Date(t.last_run_at).toLocaleString()}` : '';
-            return `<div class="task-nav" data-tid="${t.id}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px">
+            return `<div class="task-nav" data-tid="${t.id}" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px">
               <span style="color:${color};font-size:14px;min-width:16px">${icon}</span>
               <span class="session-uuid" style="font-size:11px">${esc(t.marker)}</span>
               <span style="flex:1;color:var(--text-primary)">${esc(t.title)}</span>

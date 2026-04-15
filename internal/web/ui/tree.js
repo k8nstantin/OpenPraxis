@@ -19,9 +19,17 @@
   // and flips the arrow between down and right.
   OL.wireTreeToggles = function(container, attrName) {
     container.querySelectorAll('[' + attrName + ']').forEach(function(node) {
-      OL.onView(node, 'click', function(e) {
+      // Ensure a11y attributes on manually-built tree nodes
+      if (!node.getAttribute('role')) node.setAttribute('role', 'button');
+      if (!node.getAttribute('tabindex')) node.setAttribute('tabindex', '0');
+      var idx = node.getAttribute(attrName);
+      var children = container.querySelector('[' + attrName + '-children="' + idx + '"]');
+      if (children && !node.hasAttribute('aria-expanded')) {
+        node.setAttribute('aria-expanded', String(children.style.display !== 'none'));
+      }
+
+      function handleToggle(e) {
         if (e.target.closest('button')) return;
-        var idx = node.getAttribute(attrName);
         var children = container.querySelector('[' + attrName + '-children="' + idx + '"]');
         if (!children) return;
         var arrow = node.querySelector('.tree-arrow');
@@ -30,6 +38,14 @@
         children.style.display = hidden ? '' : 'none';
         arrow.innerHTML = hidden ? '\u25BC' : '\u25B6';
         node.setAttribute('aria-expanded', String(hidden));
+      }
+
+      OL.onView(node, 'click', handleToggle);
+      OL.onView(node, 'keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleToggle(e);
+        }
       });
     });
   };
@@ -180,9 +196,18 @@
     if (config.onLeafClick) {
       var selector = config.leafSelector || '.tree-leaf';
       container.querySelectorAll(selector).forEach(function(el) {
+        if (!el.getAttribute('role')) el.setAttribute('role', 'button');
+        if (!el.getAttribute('tabindex')) el.setAttribute('tabindex', '0');
         OL.onView(el, 'click', function(e) {
           e.stopPropagation();
           config.onLeafClick(el, e);
+        });
+        OL.onView(el, 'keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            config.onLeafClick(el, e);
+          }
         });
       });
     }

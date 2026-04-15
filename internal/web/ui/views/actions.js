@@ -13,7 +13,7 @@
       let html = '';
       for (let pi = 0; pi < peerGroups.length; pi++) {
         const pg = peerGroups[pi];
-        html += `<div class="tree-node peer-header clickable" data-action-peer="${pi}">
+        html += `<div class="tree-node peer-header clickable" data-action-peer="${pi}" role="button" tabindex="0" aria-expanded="true">
           <span class="tree-arrow">&#x25BC;</span>
           <span class="status-dot green"></span>
           <span>${esc(pg.peer_id)}</span>
@@ -23,7 +23,7 @@
         for (let si = 0; si < pg.sessions.length; si++) {
           const sg = pg.sessions[si];
           const sid = sg.session.length > 12 ? sg.session.substring(0, 12) : sg.session;
-          html += `<div class="tree-node session-header clickable" data-action-session="${pi}-${si}">
+          html += `<div class="tree-node session-header clickable" data-action-session="${pi}-${si}" role="button" tabindex="0" aria-expanded="false">
             <span class="tree-arrow" style="font-size:10px">&#x25BC;</span>
             <span class="status-dot green" style="width:6px;height:6px"></span>
             <span>${esc(sid)}</span>
@@ -31,7 +31,7 @@
           </div>`;
           html += `<div class="session-children" data-action-session-children="${pi}-${si}" style="display:none">`;
           for (const a of sg.actions) {
-            html += `<div class="tree-node peer-leaf clickable" data-action-id="${esc(a.id)}">
+            html += `<div class="tree-node peer-leaf clickable" data-action-id="${esc(a.id)}" role="button" tabindex="0">
               <span class="badge type" style="font-size:10px">${esc(a.tool_name)}</span>
               <span style="font-size:11px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.tool_input.length > 40 ? a.tool_input.substring(0,40) + '...' : a.tool_input)}</span>
               <span style="color:var(--text-muted);font-size:10px">${formatTime(a.created_at)}</span>
@@ -48,11 +48,15 @@
 
       // Action leaf click — fetch full detail
       el.querySelectorAll('.tree-node.peer-leaf').forEach(node => {
-        OL.onView(node, 'click', (e) => {
+        var handler = function(e) {
           if (e.target.closest('.tree-arrow')) return;
           el.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
           node.classList.add('active');
           OL.loadActionDetail(node.dataset.actionId);
+        };
+        OL.onView(node, 'click', handler);
+        OL.onView(node, 'keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); }
         });
       });
     } catch (e) {

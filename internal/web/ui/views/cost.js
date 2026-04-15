@@ -108,7 +108,7 @@
           var h = maxCost > 0 ? Math.max(2, Math.round((d.cost / maxCost) * 100)) : 2;
           var overBudget = budget > 0 && d.cost >= budget;
           var color = overBudget ? 'var(--red)' : (budget > 0 && d.cost >= budget * 0.8) ? 'var(--yellow)' : 'var(--green)';
-          chartHtml += '<div title="' + d.period + ': $' + d.cost.toFixed(2) + '" style="width:' + barWidth + 'px;height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;flex-shrink:0;opacity:' + (d.cost === 0 ? '0.2' : '0.8') + ';cursor:' + (_costPeriod === 'day' ? 'pointer' : 'default') + '" ' + (_costPeriod === 'day' ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')"' : '') + '></div>';
+          chartHtml += '<div title="' + d.period + ': $' + d.cost.toFixed(2) + '"' + (_costPeriod === 'day' ? ' role="button" tabindex="0"' : '') + ' style="width:' + barWidth + 'px;height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;flex-shrink:0;opacity:' + (d.cost === 0 ? '0.2' : '0.8') + ';cursor:' + (_costPeriod === 'day' ? 'pointer' : 'default') + '" ' + (_costPeriod === 'day' ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}"' : '') + '></div>';
         }
         chartHtml += '</div>';
         chartEl.innerHTML = chartHtml;
@@ -143,7 +143,7 @@
         totalTurns += d.turns;
         totalTasks += d.tasks;
         totalRuns += (d.runs || 0);
-        html += '<tr class="top-task-row" style="' + rowBg + ';' + (clickable ? 'cursor:pointer' : '') + '" ' + (clickable ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')"' : '') + '>' +
+        html += '<tr class="top-task-row"' + (clickable ? ' role="button" tabindex="0"' : '') + ' style="' + rowBg + ';' + (clickable ? 'cursor:pointer' : '') + '" ' + (clickable ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}"' : '') + '>' +
           '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:12px;color:var(--accent)">' + d.period + (isToday ? ' <span style="font-size:10px;color:var(--green)">(today)</span>' : '') + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + d.tasks + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + (d.runs || d.tasks) + '</td>' +
@@ -246,7 +246,7 @@
           var statusColor = e.status === 'completed' ? 'var(--green)' : e.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
           var dur = e.duration_sec > 0 ? formatDuration(e.duration_sec * 1000) : '-';
           var marker = e.task_marker || e.task_id.substring(0, 12);
-          html += '<tr class="top-task-row" style="cursor:pointer" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail(\'' + esc(e.task_id) + '\')},300)">' +
+          html += '<tr class="top-task-row" role="button" tabindex="0" style="cursor:pointer" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail(\'' + esc(e.task_id) + '\')},300)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
             '<td style="padding:5px 12px;font-size:12px">' +
               '<span class="session-uuid" style="font-size:11px">' + esc(marker) + '</span>' +
               '<span style="color:var(--text-secondary);margin-left:4px">' + esc(e.task_title || 'Unknown') + '</span>' +

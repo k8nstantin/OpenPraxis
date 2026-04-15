@@ -84,4 +84,21 @@
   // Get the currently active lifecycle view name.
   OL._activeLifecycleView = function() { return _activeView; };
 
+  // Make elements keyboard-accessible: add role="button", tabindex="0",
+  // and Enter/Space keydown handler that triggers click.
+  // container: parent DOM element
+  // selector:  CSS selector for clickable elements
+  OL.a11yClick = function(container, selector) {
+    container.querySelectorAll(selector).forEach(function(el) {
+      if (!el.getAttribute('role')) el.setAttribute('role', 'button');
+      if (!el.getAttribute('tabindex')) el.setAttribute('tabindex', '0');
+      OL.onView(el, 'keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          el.click();
+        }
+      });
+    });
+  };
+
 })(window.OL);

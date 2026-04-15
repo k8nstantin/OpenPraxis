@@ -32,7 +32,7 @@
       var allIdeas = [];
       for (var pi = 0; pi < peerGroups.length; pi++) {
         var pg = peerGroups[pi];
-        html += '<div class="tree-node peer-header clickable" data-idea-peer="' + pi + '">' +
+        html += '<div class="tree-node peer-header clickable" data-idea-peer="' + pi + '" role="button" tabindex="0" aria-expanded="true">' +
           '<span class="tree-arrow">&#x25BC;</span>' +
           '<span class="status-dot green"></span>' +
           '<span>' + esc(pg.peer_id) + '</span>' +
@@ -43,7 +43,7 @@
           var i = pg.ideas[ii];
           allIdeas.push(i);
           var prioClass = i.priority === 'critical' || i.priority === 'high' ? 'high' : i.priority === 'low' ? 'low' : 'medium';
-          html += '<div class="manifest-item clickable" data-id="' + esc(i.id) + '">' +
+          html += '<div class="manifest-item clickable" data-id="' + esc(i.id) + '" role="button" tabindex="0">' +
             '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
               '<span class="amnesia-score ' + prioClass + '" style="font-size:10px">' + esc(i.priority) + '</span>' +
               '<span class="session-uuid">' + esc(i.marker) + '</span>' +
@@ -60,6 +60,9 @@
 
       el.querySelectorAll('.manifest-item').forEach(function(item) {
         OL.onView(item, 'click', function() { OL.loadIdea(item.dataset.id); });
+        OL.onView(item, 'keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); OL.loadIdea(item.dataset.id); }
+        });
       });
 
       if (_pendingIdeaId) {
@@ -112,7 +115,7 @@
             '<span class="amnesia-score ' + prioClass + '">' + esc(idea.priority) + '</span>' +
             '<span class="badge">' + esc(idea.status) + '</span>' +
             '<span style="font-size:12px;color:var(--text-muted)">by ' + esc(idea.author) + '</span>' +
-            '<button class="btn-copy" onclick="OL.copy(\'get idea ' + idea.marker + '\')" title="Copy ref">&#x2398;</button>' +
+            '<button class="btn-copy" onclick="OL.copy(\'get idea ' + idea.marker + '\')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>' +
           '</div>' +
           (idea.description ? '<div style="font-size:14px;color:var(--text-primary);margin:12px 0;line-height:1.5">' + esc(idea.description) + '</div>' : '') +
           linkedHtml +

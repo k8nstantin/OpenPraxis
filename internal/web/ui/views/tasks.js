@@ -183,7 +183,7 @@
                 const inputPreview = a.tool_input ? (a.tool_input.length > 80 ? a.tool_input.substring(0, 80) + '...' : a.tool_input) : '';
                 const hasResponse = a.tool_response && a.tool_response.length > 0;
                 return `<div class="task-action-item" style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px">
-                  <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="this.parentElement.querySelector('.task-action-detail').style.display=this.parentElement.querySelector('.task-action-detail').style.display==='none'?'':'none'">
+                  <div role="button" tabindex="0" aria-expanded="false" style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="var d=this.parentElement.querySelector('.task-action-detail');var v=d.style.display==='none';d.style.display=v?'':'none';this.setAttribute('aria-expanded',v)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
                     <span style="color:var(--text-muted);font-size:10px;min-width:16px">#${actions.length - i}</span>
                     <span class="badge type" style="font-size:10px">${esc(a.tool_name)}</span>
                     ${hasResponse ? '<span style="color:var(--green);font-size:9px">&#x2713;</span>' : '<span style="color:var(--yellow);font-size:9px">&#x25CB;</span>'}
@@ -232,7 +232,7 @@
                 const duration = r.completed_at && r.started_at ? formatDuration(new Date(r.completed_at) - new Date(r.started_at)) : '';
                 const runCost = r.cost_usd ? `$${r.cost_usd.toFixed(2)}` : '';
                 const runTurns = r.turns ? `${r.turns}t` : '';
-                return `<div class="task-run-item" style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;cursor:pointer" data-run-id="${r.id}" data-task-id="${esc(t.id)}">
+                return `<div class="task-run-item" role="button" tabindex="0" style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;cursor:pointer" data-run-id="${r.id}" data-task-id="${esc(t.id)}">
                   <div style="display:flex;align-items:center;gap:8px">
                     <span style="font-weight:600;min-width:24px">#${r.run_number}</span>
                     <span style="color:${statusColor};font-weight:600;text-transform:uppercase;font-size:10px">${esc(r.status)}</span>
@@ -440,7 +440,7 @@
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500">Output</div>
             <div id="task-parsed-output" style="max-height:400px;overflow-y:auto"></div>
             <div style="margin-top:6px">
-              <span style="font-size:11px;color:var(--text-muted);cursor:pointer;text-decoration:underline" onclick="document.getElementById('task-raw-output').style.display=document.getElementById('task-raw-output').style.display==='none'?'':'none'">Toggle raw JSON</span>
+              <span role="button" tabindex="0" style="font-size:11px;color:var(--text-muted);cursor:pointer;text-decoration:underline" onclick="var el=document.getElementById('task-raw-output');var v=el.style.display==='none';el.style.display=v?'':'none'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" aria-expanded="false">Toggle raw JSON</span>
             </div>
             <div class="action-response" id="task-raw-output" style="max-height:200px;overflow-y:auto;display:none;font-size:10px">${esc(t.last_output.length > 50000 ? t.last_output.substring(0, 50000) + '\n... (truncated for display, full output in DB)' : t.last_output)}</div>
           ` : ''}

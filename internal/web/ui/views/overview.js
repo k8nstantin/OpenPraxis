@@ -96,7 +96,7 @@
       var costColor = t.cost > 5 ? 'var(--red)' : t.cost > 1 ? 'var(--yellow)' : 'var(--green)';
       var sColor = statusColors[t.status] || 'var(--text-muted)';
       var titleTrunc = t.title.length > 40 ? t.title.substring(0, 40) + '...' : t.title;
-      html += '<tr class="top-task-row clickable" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail&&OL.loadTaskDetail(\'' + esc(t.marker) + '\')},200)">' +
+      html += '<tr class="top-task-row clickable" role="button" tabindex="0" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail&&OL.loadTaskDetail(\'' + esc(t.marker) + '\')},200)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
         '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:11px;color:var(--accent)">' + esc(t.marker) + '</td>' +
         '<td style="padding:6px 12px;font-size:12px">' + esc(titleTrunc) + '</td>' +
         '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">openloom/' + esc(t.marker) + '</td>' +
@@ -132,7 +132,7 @@
           when = diff > 0 ? 'in ' + diff + 'm' : 'due';
         }
         if (pt.depends_on) when = 'after ' + pt.depends_on;
-        phtml += '<div class="peer-row clickable" onclick="OL.switchView(\'tasks\')" style="padding:6px 0">' +
+        phtml += '<div class="peer-row clickable" role="button" tabindex="0" onclick="OL.switchView(\'tasks\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}" style="padding:6px 0">' +
           '<span style="color:' + sc + ';font-size:12px">' + (statusIcons[pt.status] || '') + '</span>' +
           '<span class="session-uuid">' + esc(pt.marker) + '</span>' +
           '<span style="font-size:12px;flex:1">' + esc(pt.title.length > 40 ? pt.title.substring(0, 40) + '...' : pt.title) + '</span>' +
@@ -217,7 +217,7 @@
     el.innerHTML = mems.slice(0, 10).map(function(m) {
       var marker = m.id ? m.id.substring(0, 12) : '';
       var session = m.source_agent || '';
-      return '<div class="memory-row clickable" data-memory-id="' + esc(m.id) + '">' +
+      return '<div class="memory-row clickable" data-memory-id="' + esc(m.id) + '" role="button" tabindex="0">' +
         '<span class="session-uuid">' + esc(marker) + '</span>' +
         '<span class="badge type">' + esc(m.type) + '</span>' +
         '<span style="color:var(--text-primary);font-size:13px">' + esc(m.l0) + '</span>' +
@@ -225,9 +225,13 @@
       '</div>';
     }).join('');
     el.querySelectorAll('.memory-row').forEach(function(row) {
-      row.addEventListener('click', function() {
+      var handler = function() {
         OL.switchView('memories');
         OL.loadMemoryPeerDetail(row.dataset.memoryId);
+      };
+      row.addEventListener('click', handler);
+      row.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
       });
     });
   };
@@ -272,7 +276,7 @@
           var elapsed = Math.round((Date.now() - new Date(rt.started_at).getTime()) / 1000);
           var mins = Math.floor(elapsed / 60);
           var secs = elapsed % 60;
-          return '<div class="peer-row clickable running-task-row" data-task-id="' + esc(rt.task_id) + '" style="flex-wrap:wrap;cursor:pointer">' +
+          return '<div class="peer-row clickable running-task-row" data-task-id="' + esc(rt.task_id) + '" role="button" tabindex="0" style="flex-wrap:wrap;cursor:pointer">' +
             '<span class="status-dot ' + (rt.paused ? 'yellow' : 'green') + '" style="' + (rt.paused ? '' : 'animation:pulse 1s infinite') + '"></span>' +
             '<span class="session-uuid">' + esc(rt.marker) + '</span>' +
             '<span style="font-weight:500;font-size:13px;flex:1">' + esc(rt.title) + '</span>' +
@@ -288,9 +292,13 @@
 
         // Click row -> go to Tasks tab -> open task detail with live output
         el.querySelectorAll('.running-task-row').forEach(function(row) {
-          row.addEventListener('click', function() {
+          var handler = function() {
             OL.switchView('tasks');
             setTimeout(function() { OL.loadTaskDetail(row.dataset.taskId); }, 300);
+          };
+          row.addEventListener('click', handler);
+          row.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
           });
         });
       }

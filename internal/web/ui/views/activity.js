@@ -13,7 +13,7 @@
       var html = '';
       for (var pi = 0; pi < peerGroups.length; pi++) {
         var pg = peerGroups[pi];
-        html += '<div class="tree-node peer-header clickable" data-act-peer="' + pi + '">';
+        html += '<div class="tree-node peer-header clickable" data-act-peer="' + pi + '" role="button" tabindex="0" aria-expanded="true">';
         html += '<span class="tree-arrow">\u25BC</span>';
         html += '<span class="status-dot green"></span>';
         html += '<span>' + esc(pg.peer_id) + '</span>';
@@ -22,7 +22,7 @@
         html += '<div class="peer-children" data-act-peer-children="' + pi + '">';
         for (var si = 0; si < pg.sessions.length; si++) {
           var sg = pg.sessions[si];
-          html += '<div class="tree-node session-header clickable" data-act-session="' + pi + '-' + si + '">';
+          html += '<div class="tree-node session-header clickable" data-act-session="' + pi + '-' + si + '" role="button" tabindex="0" aria-expanded="true">';
           html += '<span class="tree-arrow" style="font-size:10px">\u25BC</span>';
           html += '<span class="status-dot green" style="width:6px;height:6px"></span>';
           html += '<span>' + esc(sg.session) + '</span>';
@@ -35,7 +35,7 @@
             var badge = a.type === 'memory'
               ? '<span class="badge type" style="font-size:10px">memory</span>'
               : '<span class="badge scope" style="font-size:10px">conversation</span>';
-            html += '<div class="activity-item clickable" data-activity-type="' + esc(a.type) + '" data-activity-id="' + esc(a.id) + '">';
+            html += '<div class="activity-item clickable" data-activity-type="' + esc(a.type) + '" data-activity-id="' + esc(a.id) + '" role="button" tabindex="0">';
             html += '<span class="activity-time">' + formatTime(a.time) + '</span>';
             html += '<span class="activity-icon">' + icon + '</span>';
             html += badge;
@@ -53,7 +53,7 @@
 
       // Activity item click — cross-navigate
       el.querySelectorAll('.activity-item').forEach(function(item) {
-        OL.onView(item, 'click', function() {
+        var handler = function() {
           var type = item.dataset.activityType;
           var id = item.dataset.activityId;
           if (type === 'conversation') {
@@ -63,6 +63,10 @@
             OL.switchView('memories');
             setTimeout(function() { OL.loadMemoryPeerDetail(id); }, 300);
           }
+        };
+        OL.onView(item, 'click', handler);
+        OL.onView(item, 'keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
         });
       });
     } catch (e) {

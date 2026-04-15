@@ -217,8 +217,8 @@
             '<span class="session-uuid">' + esc(r.marker) + '</span>' +
             '<span class="visceral-text">' + esc(r.text) + '</span>' +
             '<span style="color:var(--text-muted);font-size:11px">' + esc(r.source || '') + '</span>' +
-            '<button class="btn-copy" onclick="OL.copy(\'recall memory ' + esc(r.marker) + '\')" title="Copy reference">&#x2398;</button>' +
-            '<button class="visceral-delete" onclick="OL.deleteVisceral(\'' + esc(r.id) + '\')" title="Remove rule">&times;</button>' +
+            '<button class="btn-copy" onclick="OL.copy(\'recall memory ' + esc(r.marker) + '\')" title="Copy reference" aria-label="Copy reference">&#x2398;</button>' +
+            '<button class="visceral-delete" onclick="OL.deleteVisceral(\'' + esc(r.id) + '\')" title="Remove rule" aria-label="Remove rule">&times;</button>' +
           '</div>';
         },
       });

@@ -24,7 +24,7 @@
       var html = '';
       for (var pi = 0; pi < peerGroups.length; pi++) {
         var pg = peerGroups[pi];
-        html += '<div class="tree-node peer-header clickable" data-conv-peer="' + pi + '">' +
+        html += '<div class="tree-node peer-header clickable" data-conv-peer="' + pi + '" role="button" tabindex="0" aria-expanded="true">' +
           '<span class="tree-arrow">&#x25BC;</span>' +
           '<span class="status-dot green"></span>' +
           '<span>' + esc(pg.peer_id) + '</span>' +
@@ -33,7 +33,7 @@
         html += '<div class="peer-children" data-conv-peer-children="' + pi + '">';
         for (var si = 0; si < pg.sessions.length; si++) {
           var sg = pg.sessions[si];
-          html += '<div class="tree-node session-header clickable" data-conv-session="' + pi + '-' + si + '">' +
+          html += '<div class="tree-node session-header clickable" data-conv-session="' + pi + '-' + si + '" role="button" tabindex="0" aria-expanded="true">' +
             '<span class="tree-arrow" style="font-size:10px">&#x25BC;</span>' +
             '<span class="status-dot green" style="width:6px;height:6px"></span>' +
             '<span>' + esc(sg.session) + '</span>' +
@@ -42,7 +42,7 @@
           html += '<div class="session-children" data-conv-session-children="' + pi + '-' + si + '">';
           for (var ci = 0; ci < sg.conversations.length; ci++) {
             var c = sg.conversations[ci];
-            html += '<div class="conv-item" data-id="' + esc(c.id) + '">' +
+            html += '<div class="conv-item" data-id="' + esc(c.id) + '" role="button" tabindex="0">' +
               '<div class="conv-item-title">' + esc(c.title) + '</div>' +
               '<div class="conv-item-meta">' +
                 '<span>' + c.turn_count + ' turns</span>' +
@@ -64,10 +64,14 @@
 
       // Conversation clicks
       el.querySelectorAll('.conv-item').forEach(function(item) {
-        OL.onView(item, 'click', function() {
+        var handler = function() {
           el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
           item.classList.add('active');
           OL.loadConv(item.dataset.id);
+        };
+        OL.onView(item, 'click', handler);
+        OL.onView(item, 'keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
         });
       });
     } catch (e) {
@@ -82,7 +86,7 @@
       return;
     }
     el.innerHTML = convos.map(function(c) {
-      return '<div class="conv-item" data-id="' + esc(c.id) + '">' +
+      return '<div class="conv-item" data-id="' + esc(c.id) + '" role="button" tabindex="0">' +
         '<div class="conv-item-title">' + esc(c.title) + '</div>' +
         '<div class="conv-item-meta">' +
           '<span class="conv-item-agent">' + esc(c.agent || 'unknown') + '</span>' +
@@ -91,10 +95,14 @@
       '</div>';
     }).join('');
     el.querySelectorAll('.conv-item').forEach(function(item) {
-      OL.onView(item, 'click', function() {
+      var handler = function() {
         el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
         item.classList.add('active');
         OL.loadConv(item.dataset.id);
+      };
+      OL.onView(item, 'click', handler);
+      OL.onView(item, 'keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
       });
     });
   }
@@ -119,7 +127,7 @@
     var bodyEl = document.getElementById('conv-detail');
 
     var convRef = conv.id ? conv.id.substring(0, 12) : '';
-    titleEl.innerHTML = esc(conv.title || 'Conversation') + ' <button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + '\')" title="Copy reference">&#x2398;</button>';
+    titleEl.innerHTML = esc(conv.title || 'Conversation') + ' <button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + '\')" title="Copy reference" aria-label="Copy reference">&#x2398;</button>';
 
     // Fetch linked actions
     var actionsHtml = '';
@@ -156,7 +164,7 @@
         '<div class="conv-turn-header">' +
           '<span class="conv-turn-role">' + esc(label) + '</span>' +
           '<span class="conv-turn-index">#' + (i + 1) + '</span>' +
-          '<button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + ' turn ' + (i + 1) + ': ' + esc(t.content.substring(0, 80)).replace(/'/g, '') + '\')" title="Copy this turn">&#x2398;</button>' +
+          '<button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + ' turn ' + (i + 1) + ': ' + esc(t.content.substring(0, 80)).replace(/'/g, '') + '\')" title="Copy this turn" aria-label="Copy this turn">&#x2398;</button>' +
         '</div>' +
         '<div class="conv-turn-content">' + esc(t.content) + '</div>' +
       '</div>';
