@@ -81,7 +81,12 @@ func apiManifestCreate(n *node.Node) http.HandlerFunc {
 			http.Error(w, "title is required", 400)
 			return
 		}
-		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), req.ProjectID, req.JiraRefs, req.Tags)
+		projectID, err := n.ResolveProductID(req.ProjectID)
+		if err != nil {
+			writeError(w, err.Error(), 400)
+			return
+		}
+		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), projectID, req.JiraRefs, req.Tags)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -149,7 +154,11 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 		}
 		projectID := existing.ProjectID
 		if req.ProjectID != nil {
-			projectID = *req.ProjectID
+			projectID, err = n.ResolveProductID(*req.ProjectID)
+			if err != nil {
+				writeError(w, err.Error(), 400)
+				return
+			}
 		}
 		jiraRefs := existing.JiraRefs
 		if req.JiraRefs != nil {

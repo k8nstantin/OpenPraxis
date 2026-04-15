@@ -127,7 +127,13 @@ func apiIdeaUpdate(n *node.Node) http.HandlerFunc {
 		priority := existing.Priority
 		if req.Priority != nil { priority = *req.Priority }
 		projectID := existing.ProjectID
-		if req.ProjectID != nil { projectID = *req.ProjectID }
+		if req.ProjectID != nil {
+			projectID, err = n.ResolveProductID(*req.ProjectID)
+			if err != nil {
+				writeError(w, err.Error(), 400)
+				return
+			}
+		}
 		tags := existing.Tags
 		if req.Tags != nil { tags = req.Tags }
 		if err := n.Ideas.Update(existing.ID, title, desc, status, priority, projectID, tags); err != nil {
