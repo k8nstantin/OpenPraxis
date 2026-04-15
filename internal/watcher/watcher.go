@@ -216,11 +216,7 @@ func (w *Watcher) RunBuildGate() BuildResult {
 	}
 
 	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Dir = filepath.Dir(w.repoDir)
-	// Try the agent-shared-memory directory specifically
-	if strings.Contains(w.repoDir, "agent-shared-memory") {
-		cmd.Dir = w.repoDir
-	}
+	cmd.Dir = w.repoDir
 
 	out, err := cmd.CombinedOutput()
 	output := string(out)

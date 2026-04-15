@@ -186,6 +186,8 @@ var serveCmd = &cobra.Command{
 			// Watcher hook: audit completed tasks
 			if event == "task_completed" {
 				go func() {
+					// Wait for agent's final git push / PR creation to complete
+					time.Sleep(5 * time.Second)
 					taskID := data["task_id"]
 					status := data["status"]
 					t, err := n.Tasks.Get(taskID)
