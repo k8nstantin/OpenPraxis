@@ -11,127 +11,78 @@
     searchInput.onkeypress = (e) => { if (e.key === 'Enter') searchManifests(searchInput.value); };
 
     try {
-      const [peerGroups, products] = await Promise.all([
+      var results = await Promise.all([
         fetchJSON('/api/manifests/by-peer'),
         fetchJSON('/api/products'),
       ]);
-      if (!peerGroups || !peerGroups.length) {
-        el.innerHTML = '<div class="empty-state">No manifests yet</div>';
-        return;
-      }
+      var peerGroups = results[0];
+      var products = results[1];
 
       // Build product lookup
-      const prodMap = {};
-      for (const p of (products || [])) {
-        prodMap[p.id] = p;
+      var prodMap = {};
+      for (var pi = 0; pi < (products || []).length; pi++) {
+        prodMap[products[pi].id] = products[pi];
       }
 
-      // Peer -> Product -> Manifests (mirrors tasks: Peer -> Manifest -> Tasks)
-      let html = '';
-      for (let pi = 0; pi < peerGroups.length; pi++) {
-        const pg = peerGroups[pi];
-
-        // Peer header (L1)
-        html += `<div class="tree-node peer-header clickable" data-mfst-peer="${pi}">
-          <span class="tree-arrow">&#x25BC;</span>
-          <span class="status-dot green"></span>
-          <span>${esc(pg.peer_id)}</span>
-          <span class="count">${pg.count}</span>
-        </div>`;
-        html += `<div class="peer-children" data-mfst-peer-children="${pi}">`;
-
-        // Group manifests by product
-        const byProduct = {};
-        const productOrder = [];
-        for (const m of pg.manifests) {
-          const pid = (m.project_id && prodMap[m.project_id]) ? m.project_id : '__unassigned__';
+      // Transform: group manifests by product within each peer
+      var treeData = (peerGroups || []).map(function(pg) {
+        var byProduct = {};
+        var productOrder = [];
+        for (var i = 0; i < pg.manifests.length; i++) {
+          var m = pg.manifests[i];
+          var pid = (m.project_id && prodMap[m.project_id]) ? m.project_id : '__unassigned__';
           if (!byProduct[pid]) {
-            byProduct[pid] = [];
+            byProduct[pid] = { pid: pid, prod: prodMap[pid] || null, items: [] };
             productOrder.push(pid);
           }
-          byProduct[pid].push(m);
+          byProduct[pid].items.push(m);
         }
-
-        // Product headers (L2)
-        for (let pri = 0; pri < productOrder.length; pri++) {
-          const pid = productOrder[pri];
-          const items = byProduct[pid];
-          const prod = prodMap[pid];
-          const prodTitle = prod ? prod.title : 'Unassigned';
-          const prodMarker = prod ? prod.marker : '';
-          const dotColor = prod ? 'green' : '';
-
-          html += `<div class="tree-node clickable" style="padding-left:24px" data-mfst-prod="${pi}-${pri}">
-            <span class="tree-arrow">&#x25B6;</span>
-            ${dotColor ? `<span class="status-dot ${dotColor}"></span>` : ''}
-            <span>${esc(prodTitle)}</span>
-            ${prodMarker ? `<span class="session-uuid">${esc(prodMarker)}</span>` : ''}
-            <span class="count">${items.length}</span>
-          </div>`;
-          html += `<div style="display:none" data-mfst-prod-children="${pi}-${pri}">`;
-
-          // Manifest items (L3)
-          for (const m of items) {
-            const statusClass = m.status === 'open' ? 'confirmed' : m.status === 'closed' ? 'flagged' : 'dismissed';
-            const metaParts = [];
-            if (m.total_tasks > 0) metaParts.push(`${m.total_tasks} tasks`);
-            if (m.total_turns > 0) metaParts.push(`${m.total_turns} turns`);
-            if (m.total_cost > 0) metaParts.push(`$${m.total_cost.toFixed(2)}`);
-
-            html += `<div class="amnesia-item ${statusClass} clickable" data-id="${esc(m.id)}" style="margin-left:24px;cursor:pointer">
-              <div class="amnesia-header">
-                <span class="amnesia-status-label">${esc(m.status)}</span>
-                <span class="session-uuid">${esc(m.marker)}</span>
-                ${metaParts.length ? `<span style="font-size:11px;color:var(--text-muted)">${metaParts.join(' &middot; ')}</span>` : ''}
-                <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${formatTime(m.updated_at || '')}</span>
-              </div>
-              <div class="amnesia-rule">${esc(m.title)}</div>
-            </div>`;
-          }
-          html += `</div>`;
-        }
-        html += `</div>`;
-      }
-      el.innerHTML = html;
-
-      // Peer toggle (L1)
-      el.querySelectorAll('[data-mfst-peer]').forEach(node => {
-        node.addEventListener('click', () => {
-          const idx = node.dataset.mfstPeer;
-          const children = el.querySelector(`[data-mfst-peer-children="${idx}"]`);
-          const arrow = node.querySelector('.tree-arrow');
-          if (children.style.display === 'none') {
-            children.style.display = '';
-            arrow.innerHTML = '&#x25BC;';
-          } else {
-            children.style.display = 'none';
-            arrow.innerHTML = '&#x25B6;';
-          }
-        });
+        return {
+          peer_id: pg.peer_id,
+          count: pg.count,
+          productGroups: productOrder.map(function(p) { return byProduct[p]; }),
+        };
       });
 
-      // Product toggle (L2)
-      el.querySelectorAll('[data-mfst-prod]').forEach(node => {
-        node.addEventListener('click', () => {
-          const idx = node.dataset.mfstProd;
-          const children = el.querySelector(`[data-mfst-prod-children="${idx}"]`);
-          const arrow = node.querySelector('.tree-arrow');
-          if (children.style.display === 'none') {
-            children.style.display = '';
-            arrow.innerHTML = '&#x25BC;';
-          } else {
-            children.style.display = 'none';
-            arrow.innerHTML = '&#x25B6;';
+      OL.renderTree(el, treeData, {
+        prefix: 'mfst',
+        emptyMessage: 'No manifests yet',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.count; },
+            children: function(pg) { return pg.productGroups; },
+          },
+          {
+            label: function(grp) { return esc(grp.prod ? grp.prod.title : 'Unassigned'); },
+            extra: function(grp) {
+              return grp.prod && grp.prod.marker ? '<span class="session-uuid">' + esc(grp.prod.marker) + '</span>' : '';
+            },
+            count: function(grp) { return grp.items.length; },
+            children: function(grp) { return grp.items; },
+            dotColor: function(grp) { return grp.prod ? 'green' : ''; },
+            expanded: false,
           }
-        });
-      });
+        ],
+        renderLeaf: function(m) {
+          var statusClass = m.status === 'open' ? 'confirmed' : m.status === 'closed' ? 'flagged' : 'dismissed';
+          var metaParts = [];
+          if (m.total_tasks > 0) metaParts.push(m.total_tasks + ' tasks');
+          if (m.total_turns > 0) metaParts.push(m.total_turns + ' turns');
+          if (m.total_cost > 0) metaParts.push('$' + m.total_cost.toFixed(2));
 
-      // Manifest clicks (L3)
-      el.querySelectorAll('.amnesia-item.clickable').forEach(item => {
-        item.addEventListener('click', (e) => {
-          e.stopPropagation();
-          window._loadManifest(item.dataset.id);
-        });
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(m.id) + '" style="margin-left:24px;cursor:pointer">' +
+            '<div class="amnesia-header">' +
+              '<span class="amnesia-status-label">' + esc(m.status) + '</span>' +
+              '<span class="session-uuid">' + esc(m.marker) + '</span>' +
+              (metaParts.length ? '<span style="font-size:11px;color:var(--text-muted)">' + metaParts.join(' &middot; ') + '</span>' : '') +
+              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(m.updated_at || '') + '</span>' +
+            '</div>' +
+            '<div class="amnesia-rule">' + esc(m.title) + '</div>' +
+          '</div>';
+        },
+        leafSelector: '.tree-leaf',
+        onLeafClick: function(item) { window._loadManifest(item.dataset.id); },
       });
     } catch (e) {
       console.error('Load manifests failed:', e);

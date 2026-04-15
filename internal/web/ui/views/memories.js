@@ -4,54 +4,40 @@
 
   OL.loadMemoryPeerTree = async function() {
     try {
-      const peerGroups = await fetchJSON('/api/memories/by-peer');
-      const el = document.getElementById('memory-peer-tree');
-      if (!peerGroups || !peerGroups.length) {
-        el.innerHTML = '<div class="empty-state">No peers</div>';
-        return;
-      }
-      let html = '';
-      for (let pi = 0; pi < peerGroups.length; pi++) {
-        const pg = peerGroups[pi];
-        html += `<div class="tree-node peer-header clickable" data-peer="${pi}">
-          <span class="tree-arrow">&#x25BC;</span>
-          <span class="status-dot green"></span>
-          <span>${esc(pg.peer_id)}</span>
-          <span class="count">${pg.count}</span>
-        </div>`;
-        html += `<div class="peer-children" data-peer-children="${pi}">`;
-        for (let si = 0; si < pg.sessions.length; si++) {
-          const sg = pg.sessions[si];
-          html += `<div class="tree-node session-header clickable" data-session="${pi}-${si}">
-            <span class="tree-arrow" style="font-size:10px">&#x25BC;</span>
-            <span class="status-dot green" style="width:6px;height:6px"></span>
-            <span>${esc(sg.session)}</span>
-            <span class="count">${sg.count}</span>
-          </div>`;
-          html += `<div class="session-children" data-session-children="${pi}-${si}">`;
-          for (const m of sg.memories) {
-            html += `<div class="tree-node peer-leaf clickable" data-memory-id="${esc(m.id)}">
-              <span class="session-uuid">${esc(m.marker)}</span>
-              <span style="font-size:12px;color:var(--text-primary);flex:1">${esc(m.l0.length > 50 ? m.l0.substring(0,50) + '...' : m.l0)}</span>
-              <button class="btn-copy-sm" onclick="event.stopPropagation();window._copy('recall memory ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>
-            </div>`;
+      var peerGroups = await fetchJSON('/api/memories/by-peer');
+      var el = document.getElementById('memory-peer-tree');
+
+      OL.renderTree(el, peerGroups, {
+        prefix: 'mem',
+        emptyMessage: 'No peers',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.count; },
+            children: function(pg) { return pg.sessions; },
+          },
+          {
+            label: function(sg) { return esc(sg.session); },
+            count: function(sg) { return sg.count; },
+            children: function(sg) { return sg.memories; },
+            dotColor: 'green',
+            dotStyle: 'width:6px;height:6px',
+            expanded: true,
           }
-          html += `</div>`;
-        }
-        html += `</div>`;
-      }
-      el.innerHTML = html;
-
-      OL.wireTreeToggles(el, 'data-peer');
-      OL.wireTreeToggles(el, 'data-session');
-
-      // Memory leaf clicks
-      el.querySelectorAll('.tree-node.peer-leaf').forEach(node => {
-        node.addEventListener('click', () => {
-          el.querySelectorAll('.tree-node').forEach(n => n.classList.remove('active'));
+        ],
+        renderLeaf: function(m) {
+          return '<div class="tree-node peer-leaf clickable tree-leaf" data-memory-id="' + esc(m.id) + '">' +
+            '<span class="session-uuid">' + esc(m.marker) + '</span>' +
+            '<span style="font-size:12px;color:var(--text-primary);flex:1">' + esc(m.l0.length > 50 ? m.l0.substring(0, 50) + '...' : m.l0) + '</span>' +
+            '<button class="btn-copy-sm" onclick="event.stopPropagation();window._copy(\'recall memory ' + esc(m.marker) + '\')" title="Copy ref">&#x2398;</button>' +
+          '</div>';
+        },
+        leafSelector: '.tree-leaf',
+        onLeafClick: function(node) {
+          el.querySelectorAll('.tree-node').forEach(function(n) { n.classList.remove('active'); });
           node.classList.add('active');
           OL.loadMemoryPeerDetail(node.dataset.memoryId);
-        });
+        },
       });
     } catch (e) {
       console.error('Load peer memories failed:', e);

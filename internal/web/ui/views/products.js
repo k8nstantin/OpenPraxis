@@ -3,92 +3,62 @@
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime;
 
   OL.loadProducts = async function() {
-    const el = document.getElementById('products-list');
+    var el = document.getElementById('products-list');
     try {
-      const peerGroups = await fetchJSON('/api/products/by-peer');
-      let html = `<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>`;
-      if (!peerGroups || !peerGroups.length) {
-        el.innerHTML = html + '<div class="empty-state" style="padding:16px">No products yet. Create one to group your manifests.</div>';
-        el.querySelector('#btn-new-product').addEventListener('click', () => window._createProduct());
-        return;
-      }
+      var peerGroups = await fetchJSON('/api/products/by-peer');
 
-      // Peer -> Product -> Manifests (mirrors amnesia: Peer -> Session -> Violations)
-      for (let pi = 0; pi < peerGroups.length; pi++) {
-        const pg = peerGroups[pi];
-
-        // Peer header (L1)
-        html += `<div class="tree-node peer-header clickable" data-prod-peer="${pi}">
-          <span class="tree-arrow">&#x25BC;</span>
-          <span class="status-dot green"></span>
-          <span>${esc(pg.peer_id)}</span>
-          <span class="count">${pg.count}</span>
-        </div>`;
-        html += `<div class="peer-children" data-prod-peer-children="${pi}">`;
-
-        // Product headers (L2) -- same as amnesia sessions
-        for (let pri = 0; pri < pg.products.length; pri++) {
-          const p = pg.products[pri];
-          const dotColor = p.status === 'open' ? 'green' : p.status === 'closed' ? 'red' : p.status === 'archive' ? 'red' : 'yellow';
-          const metaParts = [];
-          if (p.total_tasks > 0) metaParts.push(`${p.total_tasks} tasks`);
-          if (p.total_turns > 0) metaParts.push(`${p.total_turns} turns`);
-          if (p.total_cost > 0) metaParts.push(`$${p.total_cost.toFixed(2)}`);
-
-          html += `<div class="tree-node clickable" style="padding-left:24px" data-prod-item="${pi}-${pri}" data-product-id="${esc(p.id)}">
-            <span class="tree-arrow">&#x25B6;</span>
-            <span class="status-dot ${dotColor}"></span>
-            <span>${esc(p.title)}</span>
-            <span class="session-uuid">${esc(p.marker)}</span>
-            ${p.total_manifests > 0 ? `<span class="count">${p.total_manifests}</span>` : ''}
-          </div>`;
-          html += `<div style="display:none" data-prod-item-children="${pi}-${pri}">`;
-
-          // Manifest placeholder -- loaded on expand
-          html += `<div class="prod-manifests-placeholder" data-prod-manifests-for="${esc(p.id)}" style="margin-left:24px">
-            <div style="padding:8px 12px;color:var(--text-muted);font-size:12px">
-              ${metaParts.length ? metaParts.join(' &middot; ') : ''}
-              ${p.total_manifests > 0 ? '<div style="margin-top:4px;font-style:italic">Loading manifests...</div>' : '<div style="margin-top:4px;font-style:italic">No manifests linked</div>'}
-            </div>
-          </div>`;
-          html += `</div>`;
-        }
-        html += `</div>`;
-      }
-      el.innerHTML = html;
-
-      // Peer toggle (L1)
-      OL.wireTreeToggles(el, 'data-prod-peer');
-
-      // Product toggle (L2) -- expand loads manifests, click also opens detail
-      el.querySelectorAll('[data-prod-item]').forEach(node => {
-        node.addEventListener('click', () => {
-          const idx = node.dataset.prodItem;
-          const productId = node.dataset.productId;
-          const children = el.querySelector(`[data-prod-item-children="${idx}"]`);
-          const arrow = node.querySelector('.tree-arrow');
-
-          // Load detail panel
-          OL.loadProductDetail(productId);
-
-          if (children.style.display === 'none') {
-            children.style.display = '';
-            arrow.innerHTML = '&#x25BC;';
-            // Lazy-load manifests on first expand
-            const placeholder = children.querySelector('.prod-manifests-placeholder');
-            if (placeholder) {
-              loadProductManifests(productId, placeholder);
-            }
-          } else {
-            children.style.display = 'none';
-            arrow.innerHTML = '&#x25B6;';
+      OL.renderTree(el, peerGroups, {
+        prefix: 'prod',
+        emptyMessage: 'No products yet. Create one to group your manifests.',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.count; },
+            children: function(pg) { return pg.products; },
+          },
+          {
+            label: function(p) { return esc(p.title); },
+            extra: function(p) {
+              return '<span class="session-uuid">' + esc(p.marker) + '</span>' +
+                (p.total_manifests > 0 ? '<span class="count">' + p.total_manifests + '</span>' : '');
+            },
+            dotColor: function(p) {
+              return p.status === 'open' ? 'green' : p.status === 'closed' ? 'red' : p.status === 'archive' ? 'red' : 'yellow';
+            },
+            expanded: false,
+            nodeAttrs: function(p) { return 'data-product-id="' + esc(p.id) + '"'; },
+            renderContent: function(p) {
+              var metaParts = [];
+              if (p.total_tasks > 0) metaParts.push(p.total_tasks + ' tasks');
+              if (p.total_turns > 0) metaParts.push(p.total_turns + ' turns');
+              if (p.total_cost > 0) metaParts.push('$' + p.total_cost.toFixed(2));
+              return '<div class="prod-manifests-placeholder" data-prod-manifests-for="' + esc(p.id) + '" style="margin-left:24px">' +
+                '<div style="padding:8px 12px;color:var(--text-muted);font-size:12px">' +
+                  (metaParts.length ? metaParts.join(' &middot; ') : '') +
+                  (p.total_manifests > 0 ? '<div style="margin-top:4px;font-style:italic">Loading manifests...</div>' : '<div style="margin-top:4px;font-style:italic">No manifests linked</div>') +
+                '</div>' +
+              '</div>';
+            },
+            onClick: function(node, childrenEl, nowExpanded, p) {
+              OL.loadProductDetail(p.id);
+              if (nowExpanded) {
+                var placeholder = childrenEl.querySelector('.prod-manifests-placeholder');
+                if (placeholder) loadProductManifests(p.id, placeholder);
+              }
+            },
           }
-        });
+        ],
+        afterRender: function(container) {
+          container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
+          container.querySelector('#btn-new-product').addEventListener('click', function() { window._createProduct(); });
+        },
       });
 
-      // New product button
-      const newBtn = el.querySelector('#btn-new-product');
-      if (newBtn) newBtn.addEventListener('click', () => window._createProduct());
+      // Handle empty case — still need new product button
+      if (!peerGroups || !peerGroups.length) {
+        el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
+        el.querySelector('#btn-new-product').addEventListener('click', function() { window._createProduct(); });
+      }
     } catch (e) {
       console.error('Load products failed:', e);
     }
