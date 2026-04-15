@@ -71,12 +71,12 @@
           if (m.total_turns > 0) metaParts.push(m.total_turns + ' turns');
           if (m.total_cost > 0) metaParts.push('$' + m.total_cost.toFixed(2));
 
-          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(m.id) + '" style="margin-left:24px;cursor:pointer">' +
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf tree-indent" data-id="' + esc(m.id) + '">' +
             '<div class="amnesia-header">' +
               '<span class="amnesia-status-label">' + esc(m.status) + '</span>' +
               '<span class="session-uuid">' + esc(m.marker) + '</span>' +
               (metaParts.length ? '<span style="font-size:11px;color:var(--text-muted)">' + metaParts.join(' &middot; ') + '</span>' : '') +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(m.updated_at || '') + '</span>' +
+              '<span class="meta-time">' + formatTime(m.updated_at || '') + '</span>' +
             '</div>' +
             '<div class="amnesia-rule">' + esc(m.title) + '</div>' +
           '</div>';
@@ -156,20 +156,20 @@
       bodyEl.innerHTML = `
         <div style="max-width:600px">
           <div style="margin-bottom:16px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Title</label>
+            <label class="form-label">Title</label>
             <input type="text" id="pm-title" class="conv-search" style="font-size:14px" value="${esc(title)}" />
           </div>
           <div style="margin-bottom:16px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Description</label>
+            <label class="form-label">Description</label>
             <input type="text" id="pm-description" class="conv-search" style="font-size:13px" value="${esc(description)}" />
           </div>
           <div style="margin-bottom:16px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Content</label>
+            <label class="form-label">Content</label>
             <textarea id="pm-content" class="conv-search" style="font-size:13px;height:200px;resize:vertical;font-family:var(--font-mono)">${esc(content)}</textarea>
           </div>
           <div style="display:flex;gap:12px;margin-bottom:16px">
             <div style="flex:1">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Status</label>
+              <label class="form-label">Status</label>
               <select id="pm-status" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
                 <option value="draft" selected>Draft</option>
                 <option value="open">Open</option>
@@ -177,7 +177,7 @@
               </select>
             </div>
             <div style="flex:1">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Product</label>
+              <label class="form-label">Product</label>
               <select id="pm-product-id" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
                 <option value="">No Product</option>
                 ${productOptions}
@@ -185,10 +185,10 @@
             </div>
           </div>
           <div style="margin-bottom:16px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Jira Refs</label>
+            <label class="form-label">Jira Refs</label>
             <input type="text" id="pm-jira" class="conv-search" placeholder="ENG-1234, ENG-5678" style="font-size:13px" />
           </div>
-          <div style="display:flex;gap:8px">
+          <div class="flex-gap">
             <button id="pm-submit" class="btn-search" style="padding:8px 20px">Create Manifest</button>
             <span id="pm-status-msg" style="font-size:13px;color:var(--green);align-self:center"></span>
           </div>
@@ -293,13 +293,13 @@
             </div>`;
           }).join('');
           linkedTasksHtml = `<div style="margin-bottom:16px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:13px;color:var(--text-primary);margin-bottom:8px;font-weight:600">Executed Tasks <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${linkedTasks.length}) &mdash; ${summary}</span></div>
-            <div style="border:1px solid var(--border);border-radius:4px;overflow:hidden">${taskRows}</div>
+            <div class="section-title">Executed Tasks <span class="sub-count">(${linkedTasks.length}) &mdash; ${summary}</span></div>
+            <div class="bordered-container">${taskRows}</div>
           </div>`;
         } else {
           linkedTasksHtml = `<div style="margin-bottom:16px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:13px;color:var(--text-primary);margin-bottom:8px;font-weight:600">Executed Tasks</div>
-            <div style="font-size:12px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:4px;text-align:center">
+            <div class="section-title">Executed Tasks</div>
+            <div class="empty-placeholder">
               No tasks executed yet
               <button class="btn-search manifest-create-task-btn" style="margin-left:8px;padding:4px 12px;font-size:11px">+ Create Task</button>
             </div>
@@ -324,10 +324,10 @@
       bodyEl.innerHTML = `
         <div class="manifest-detail-view">
           <!-- BREADCRUMB -->
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">
-            <span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('${product ? 'products' : 'manifests'}')">${esc(m.source_node ? m.source_node.substring(0,12) : 'node')}</span>
-            ${product ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(product.id)}'),300)">${esc(product.marker)} ${esc(product.title)}</span>` : ''}
-            <span style="opacity:0.4"> → </span>
+          <div class="breadcrumb">
+            <span class="breadcrumb-link" onclick="OL.switchView('${product ? 'products' : 'manifests'}')">${esc(m.source_node ? m.source_node.substring(0,12) : 'node')}</span>
+            ${product ? `<span class="breadcrumb-sep"> → </span><span class="breadcrumb-link" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(product.id)}'),300)">${esc(product.marker)} ${esc(product.title)}</span>` : ''}
+            <span class="breadcrumb-sep"> → </span>
             <span style="color:var(--text-primary)">${esc(m.marker)} ${esc(m.title)}</span>
           </div>
           <div class="manifest-meta">
@@ -337,13 +337,13 @@
             <span style="font-size:12px;color:var(--text-muted)">by ${esc(m.author)}</span>
           </div>
           <!-- METADATA BAR -->
-          <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:12px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-mono)">
+          <div class="stats-bar">
             <span>Tasks: <strong style="color:var(--text-primary)">${m.total_tasks || 0}</strong></span>
             <span>Turns: <strong style="color:var(--text-primary)">${m.total_turns || 0}</strong></span>
             <span>Cost: <strong style="color:var(--green)">$${(m.total_cost || 0).toFixed(2)}</strong></span>
-            <span style="opacity:0.3">|</span>
+            <span class="separator">|</span>
             <span>Product: <strong id="manifest-product-display" style="color:${product ? 'var(--accent)' : 'var(--text-muted)'};cursor:pointer" title="Click to change product">${product ? esc(product.marker) + ' ' + esc(product.title) : 'None'}</strong></span>
-            <span style="opacity:0.3">|</span>
+            <span class="separator">|</span>
             <span>Created: ${new Date(m.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
           </div>

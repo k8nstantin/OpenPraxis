@@ -36,7 +36,7 @@
               '<span class="badge type">' + esc(d.tool_name) + '</span>' +
               (d.action_id ? '<span class="badge scope action-link" style="cursor:pointer;font-size:10px" data-aid="' + esc(d.action_id) + '">view action</span>' : '') +
               '<span class="amnesia-status-label">' + esc(d.status) + '</span>' +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(d.created_at) + '</span>' +
+              '<span class="meta-time">' + formatTime(d.created_at) + '</span>' +
             '</div>' +
             '<div class="amnesia-session">' +
               '<span style="color:var(--text-muted);font-size:12px">Session:</span>' +
@@ -123,7 +123,7 @@
               var shortSid = sg.sid.length > 12 ? sg.sid.substring(0, 12) : sg.sid;
               var shortTask = sg.taskId ? sg.taskId.substring(0, 8) : '';
               return '<span class="session-uuid">' + esc(shortSid) + '</span>' +
-                (shortTask ? '<span class="badge scope" style="font-size:10px">' + esc(shortTask) + '</span>' : '');
+                (shortTask ? '<span class="badge scope badge-sm">' + esc(shortTask) + '</span>' : '');
             },
             count: function(sg) { return sg.events.length; },
             children: function(sg) { return sg.events; },
@@ -140,7 +140,7 @@
               '<span class="badge type">' + esc(a.tool_name) + '</span>' +
               (a.action_id ? '<span class="badge scope action-link" style="cursor:pointer;font-size:10px" data-aid="' + esc(a.action_id) + '">view action</span>' : '') +
               '<span class="amnesia-status-label">' + esc(a.status) + '</span>' +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(a.created_at) + '</span>' +
+              '<span class="meta-time">' + formatTime(a.created_at) + '</span>' +
             '</div>' +
             '<div class="amnesia-rule">' +
               '<span style="color:var(--red);font-weight:500">Rule [' + esc(a.rule_marker) + ']:</span> ' + esc(a.rule_text) +

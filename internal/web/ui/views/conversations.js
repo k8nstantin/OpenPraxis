@@ -34,8 +34,8 @@
         for (var si = 0; si < pg.sessions.length; si++) {
           var sg = pg.sessions[si];
           html += '<div class="tree-node session-header clickable" data-conv-session="' + pi + '-' + si + '" role="button" tabindex="0" aria-expanded="true">' +
-            '<span class="tree-arrow" style="font-size:10px">&#x25BC;</span>' +
-            '<span class="status-dot green" style="width:6px;height:6px"></span>' +
+            '<span class="tree-arrow badge-sm">&#x25BC;</span>' +
+            '<span class="status-dot green dot-sm"></span>' +
             '<span>' + esc(sg.session) + '</span>' +
             '<span class="count">' + sg.count + '</span>' +
           '</div>';

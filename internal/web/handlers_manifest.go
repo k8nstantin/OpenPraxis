@@ -74,6 +74,7 @@ func apiManifestCreate(n *node.Node) http.HandlerFunc {
 			Content     string   `json:"content"`
 			Status      string   `json:"status"`
 			ProjectID   string   `json:"project_id"`
+			DependsOn   string   `json:"depends_on"`
 			JiraRefs    []string `json:"jira_refs"`
 			Tags        []string `json:"tags"`
 		}
@@ -86,7 +87,7 @@ func apiManifestCreate(n *node.Node) http.HandlerFunc {
 			writeError(w, err.Error(), 400)
 			return
 		}
-		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), projectID, req.JiraRefs, req.Tags)
+		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), projectID, req.DependsOn, req.JiraRefs, req.Tags)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -129,6 +130,7 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 			Content     *string  `json:"content"`
 			Status      *string  `json:"status"`
 			ProjectID   *string  `json:"project_id"`
+			DependsOn   *string  `json:"depends_on"`
 			JiraRefs    []string `json:"jira_refs"`
 			Tags        []string `json:"tags"`
 		}
@@ -164,6 +166,10 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 		if req.JiraRefs != nil {
 			jiraRefs = req.JiraRefs
 		}
+		dependsOn := existing.DependsOn
+		if req.DependsOn != nil {
+			dependsOn = *req.DependsOn
+		}
 		tags := existing.Tags
 		if req.Tags != nil {
 			tags = req.Tags
@@ -175,7 +181,7 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 				return
 			}
 		}
-		if err := n.Manifests.Update(existing.ID, title, description, content, status, projectID, jiraRefs, tags); err != nil {
+		if err := n.Manifests.Update(existing.ID, title, description, content, status, projectID, dependsOn, jiraRefs, tags); err != nil {
 			writeError(w, err.Error(), 500)
 			return
 		}

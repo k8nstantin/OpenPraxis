@@ -17,6 +17,7 @@ func (s *Server) registerManifestTools() {
 			mcplib.WithString("content", mcplib.Required(), mcplib.Description("Full spec in markdown — architecture, modules, features, requirements")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive. Default: draft")),
 			mcplib.WithString("project_id", mcplib.Description("Project ID or marker to assign manifest to (optional)")),
+			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs or markers this manifest depends on (optional)")),
 			mcplib.WithString("jira_refs", mcplib.Description("Comma-separated Jira tickets (e.g. 'ENG-4816,ENG-5266')")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -40,6 +41,7 @@ func (s *Server) registerManifestTools() {
 			mcplib.WithString("content", mcplib.Description("New content (replaces entire content)")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive")),
 			mcplib.WithString("project_id", mcplib.Description("Project ID or marker to assign manifest to")),
+			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs or markers this manifest depends on")),
 			mcplib.WithString("jira_refs", mcplib.Description("Comma-separated Jira tickets")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -148,7 +150,11 @@ func (s *Server) handleManifestCreate(ctx context.Context, req mcplib.CallToolRe
 	if err != nil {
 		return errResult("%v", err), nil
 	}
-	m, err := s.node.Manifests.Create(title, desc, content, status, s.sessionSource(ctx), s.node.PeerID(), projectID, jiraRefs, tags)
+	dependsOn, err := s.resolveManifestDependsOn(argStr(a, "depends_on"))
+	if err != nil {
+		return errResult("%v", err), nil
+	}
+	m, err := s.node.Manifests.Create(title, desc, content, status, s.sessionSource(ctx), s.node.PeerID(), projectID, dependsOn, jiraRefs, tags)
 	if err != nil {
 		return errResult("create manifest: %v", err), nil
 	}
@@ -222,13 +228,20 @@ func (s *Server) handleManifestUpdate(ctx context.Context, req mcplib.CallToolRe
 	if tagsStr != "" {
 		tags = splitCSV(tagsStr)
 	}
+	dependsOn := existing.DependsOn
+	if raw := argStr(a, "depends_on"); raw != "" {
+		dependsOn, err = s.resolveManifestDependsOn(raw)
+		if err != nil {
+			return errResult("%v", err), nil
+		}
+	}
 
 	if status == "archive" && existing.Status != "archive" {
 		if err := s.node.ValidateArchiveManifest(existing.ID); err != nil {
 			return errResult("%v", err), nil
 		}
 	}
-	if err := s.node.Manifests.Update(existing.ID, title, desc, content, status, projectID, jiraRefs, tags); err != nil {
+	if err := s.node.Manifests.Update(existing.ID, title, desc, content, status, projectID, dependsOn, jiraRefs, tags); err != nil {
 		return errResult("update manifest: %v", err), nil
 	}
 
@@ -289,6 +302,30 @@ func (s *Server) handleManifestSearch(ctx context.Context, req mcplib.CallToolRe
 	}
 
 	return textResult(output), nil
+}
+
+// resolveManifestDependsOn resolves a comma-separated list of manifest markers/IDs to full IDs.
+func (s *Server) resolveManifestDependsOn(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	parts := strings.Split(raw, ",")
+	resolved := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		m, err := s.node.Manifests.Get(p)
+		if err != nil {
+			return "", fmt.Errorf("resolve manifest dependency %q: %v", p, err)
+		}
+		if m == nil {
+			return "", fmt.Errorf("manifest dependency not found: %s", p)
+		}
+		resolved = append(resolved, m.ID)
+	}
+	return strings.Join(resolved, ","), nil
 }
 
 func (s *Server) handleManifestDelete(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

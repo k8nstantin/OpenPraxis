@@ -45,7 +45,7 @@
           var prioClass = i.priority === 'critical' || i.priority === 'high' ? 'high' : i.priority === 'low' ? 'low' : 'medium';
           html += '<div class="manifest-item clickable" data-id="' + esc(i.id) + '" role="button" tabindex="0">' +
             '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
-              '<span class="amnesia-score ' + prioClass + '" style="font-size:10px">' + esc(i.priority) + '</span>' +
+              '<span class="amnesia-score ' + prioClass + ' badge-sm">' + esc(i.priority) + '</span>' +
               '<span class="session-uuid">' + esc(i.marker) + '</span>' +
               '<span class="badge">' + esc(i.status) + '</span>' +
             '</div>' +
@@ -105,9 +105,9 @@
       bodyEl.innerHTML =
         '<div class="manifest-detail-view">' +
           '<!-- BREADCRUMB -->' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">' +
-            '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'ideas\')">' + esc(idea.source_node ? idea.source_node.substring(0,12) : 'node') + '</span>' +
-            '<span style="opacity:0.4"> &rarr; </span>' +
+          '<div class="breadcrumb">' +
+            '<span class="breadcrumb-link" onclick="OL.switchView(\'ideas\')">' + esc(idea.source_node ? idea.source_node.substring(0,12) : 'node') + '</span>' +
+            '<span class="breadcrumb-sep"> &rarr; </span>' +
             '<span style="color:var(--text-primary)">' + esc(idea.marker) + ' ' + esc(idea.title) + '</span>' +
           '</div>' +
           '<div class="manifest-meta">' +
@@ -123,7 +123,7 @@
             'Created: ' + new Date(idea.created_at).toLocaleString() + ' | ID: ' + esc(idea.id) +
           '</div>' +
           '<div style="margin-top:12px;display:flex;gap:8px">' +
-            '<button class="btn-search promote-idea-btn" style="font-size:12px;padding:6px 14px">Create Manifest from Idea</button>' +
+            '<button class="btn-search promote-idea-btn btn-md">Create Manifest from Idea</button>' +
             '<button class="btn-dismiss" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
           '</div>' +
         '</div>';

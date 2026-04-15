@@ -24,15 +24,15 @@
           const sg = pg.sessions[si];
           const sid = sg.session.length > 12 ? sg.session.substring(0, 12) : sg.session;
           html += `<div class="tree-node session-header clickable" data-action-session="${pi}-${si}" role="button" tabindex="0" aria-expanded="false">
-            <span class="tree-arrow" style="font-size:10px">&#x25BC;</span>
-            <span class="status-dot green" style="width:6px;height:6px"></span>
+            <span class="tree-arrow badge-sm">&#x25BC;</span>
+            <span class="status-dot green dot-sm"></span>
             <span>${esc(sid)}</span>
             <span class="count">${sg.count}</span>
           </div>`;
           html += `<div class="session-children" data-action-session-children="${pi}-${si}" style="display:none">`;
           for (const a of sg.actions) {
             html += `<div class="tree-node peer-leaf clickable" data-action-id="${esc(a.id)}" role="button" tabindex="0">
-              <span class="badge type" style="font-size:10px">${esc(a.tool_name)}</span>
+              <span class="badge type badge-sm">${esc(a.tool_name)}</span>
               <span style="font-size:11px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.tool_input.length > 40 ? a.tool_input.substring(0,40) + '...' : a.tool_input)}</span>
               <span style="color:var(--text-muted);font-size:10px">${formatTime(a.created_at)}</span>
             </div>`;
@@ -79,7 +79,7 @@
           <span class="badge type">${esc(a.tool_name)}</span>
           <span class="session-uuid">${esc(sid)}</span>
           ${a.source_node ? `<span class="badge" style="color:var(--accent)">${esc(a.source_node)}</span>` : ''}
-          <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
+          <span class="meta-time">${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
         </div>
         ${convId ? `<div style="margin-bottom:8px">
           <span style="font-size:12px;color:var(--text-muted)">Conversation:</span>
@@ -89,11 +89,11 @@
           <span style="font-size:12px;color:var(--text-muted)">Task:</span>
           <span class="badge tag task-nav" style="cursor:pointer" data-tid="${esc(a.task_id)}">${esc(a.task_id.substring(0,12))}</span>
         </div>` : ''}
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500">Input</div>
-        <div class="action-input" style="max-height:400px;overflow-y:auto">${esc(a.tool_input)}</div>
+        <div class="section-label">Input</div>
+        <div class="action-input scroll-detail">${esc(a.tool_input)}</div>
         ${a.tool_response ? `
           <div style="font-size:12px;color:var(--text-muted);margin:12px 0 6px;font-weight:500">Response</div>
-          <div class="action-response" style="max-height:400px;overflow-y:auto">${esc(a.tool_response)}</div>
+          <div class="action-response scroll-detail">${esc(a.tool_response)}</div>
         ` : ''}
         ${a.cwd ? `<div style="margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">CWD: ${esc(a.cwd)}</div>` : ''}
         <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">Session: ${esc(a.session_id)}</div>

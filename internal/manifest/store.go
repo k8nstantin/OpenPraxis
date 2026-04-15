@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ type Manifest struct {
 	Author      string    `json:"author"`      // session that created it
 	SourceNode  string    `json:"source_node"`
 	ProjectID   string    `json:"project_id"`  // optional project grouping
+	DependsOn   string    `json:"depends_on"`  // comma-separated manifest IDs
 	Version     int       `json:"version"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -84,11 +86,12 @@ func (s *Store) init() error {
 	s.db.Exec(`ALTER TABLE manifests ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE manifests ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_manifests_project ON manifests(project_id)`)
+	s.db.Exec(`ALTER TABLE manifests ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
 // Create stores a new manifest.
-func (s *Store) Create(title, description, content, status, author, sourceNode, projectID string, jiraRefs, tags []string) (*Manifest, error) {
+func (s *Store) Create(title, description, content, status, author, sourceNode, projectID, dependsOn string, jiraRefs, tags []string) (*Manifest, error) {
 	if status == "" {
 		status = "draft"
 	}
@@ -104,9 +107,9 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 	jiraJSON, _ := json.Marshal(jiraRefs)
 	tagsJSON, _ := json.Marshal(tags)
 
-	_, err := s.db.Exec(`INSERT INTO manifests (id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		id, title, description, content, status, string(jiraJSON), string(tagsJSON), author, sourceNode, projectID,
+	_, err := s.db.Exec(`INSERT INTO manifests (id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		id, title, description, content, status, string(jiraJSON), string(tagsJSON), author, sourceNode, projectID, dependsOn,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
@@ -115,26 +118,26 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 	return &Manifest{
 		ID: id, Marker: id[:12], Title: title, Description: description,
 		Content: content, Status: status, JiraRefs: jiraRefs, Tags: tags,
-		Author: author, SourceNode: sourceNode, ProjectID: projectID, Version: 1, CreatedAt: now, UpdatedAt: now,
+		Author: author, SourceNode: sourceNode, ProjectID: projectID, DependsOn: dependsOn, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
 // Update modifies an existing manifest and bumps version.
-func (s *Store) Update(id, title, description, content, status, projectID string, jiraRefs, tags []string) error {
+func (s *Store) Update(id, title, description, content, status, projectID, dependsOn string, jiraRefs, tags []string) error {
 	now := time.Now().UTC()
 	jiraJSON, _ := json.Marshal(jiraRefs)
 	tagsJSON, _ := json.Marshal(tags)
 
-	_, err := s.db.Exec(`UPDATE manifests SET title=?, description=?, content=?, status=?, project_id=?, jira_refs=?, tags=?,
+	_, err := s.db.Exec(`UPDATE manifests SET title=?, description=?, content=?, status=?, project_id=?, depends_on=?, jira_refs=?, tags=?,
 		version=version+1, updated_at=? WHERE id=?`,
-		title, description, content, status, projectID, string(jiraJSON), string(tagsJSON),
+		title, description, content, status, projectID, dependsOn, string(jiraJSON), string(tagsJSON),
 		now.Format(time.RFC3339), id)
 	return err
 }
 
 // Get retrieves a manifest by ID or prefix.
 func (s *Store) Get(id string) (*Manifest, error) {
-	row := s.db.QueryRow(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at
+	row := s.db.QueryRow(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
 	m, err := scanManifest(row)
 	if err == nil && m != nil {
@@ -148,7 +151,7 @@ func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) 
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at
+	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE project_id = ? AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, projectID, limit)
 	if err != nil {
 		return nil, err
@@ -171,7 +174,7 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		limit = 50
 	}
 
-	query := `SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at FROM manifests WHERE deleted_at = ''`
+	query := `SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at FROM manifests WHERE deleted_at = ''`
 	var args []any
 
 	if status != "" {
@@ -206,7 +209,7 @@ func (s *Store) Search(query string, limit int) ([]*Manifest, error) {
 		limit = 20
 	}
 	pattern := "%" + query + "%"
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at
+	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE deleted_at = '' AND (title LIKE ? OR description LIKE ? OR content LIKE ? OR jira_refs LIKE ? OR tags LIKE ?)
 		ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, pattern, pattern, pattern, pattern, pattern, limit)
 	if err != nil {
@@ -271,7 +274,7 @@ func (s *Store) ListDeleted(limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, version, created_at, updated_at
+	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -301,12 +304,38 @@ func (s *Store) Count() (int, error) {
 	return count, err
 }
 
+// ParseDependsOn splits the comma-separated depends_on string into a list of manifest IDs.
+func (m *Manifest) ParseDependsOn() []string {
+	if m.DependsOn == "" {
+		return nil
+	}
+	parts := strings.Split(m.DependsOn, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// HasDependency checks if a manifest depends on the given manifest ID.
+func (m *Manifest) HasDependency(manifestID string) bool {
+	for _, dep := range m.ParseDependsOn() {
+		if dep == manifestID {
+			return true
+		}
+	}
+	return false
+}
+
 func scanManifest(row *sql.Row) (*Manifest, error) {
 	var m Manifest
 	var jiraStr, tagsStr, createdStr, updatedStr string
 
 	err := row.Scan(&m.ID, &m.Title, &m.Description, &m.Content, &m.Status,
-		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.Version, &createdStr, &updatedStr)
+		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -334,7 +363,7 @@ func scanManifestRows(rows *sql.Rows) (*Manifest, error) {
 	var jiraStr, tagsStr, createdStr, updatedStr string
 
 	err := rows.Scan(&m.ID, &m.Title, &m.Description, &m.Content, &m.Status,
-		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.Version, &createdStr, &updatedStr)
+		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
 	if err != nil {
 		return nil, err
 	}
