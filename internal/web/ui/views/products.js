@@ -49,14 +49,14 @@
           }
         ],
         afterRender: function(container) {
-          container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
+          container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search btn-action" id="btn-new-product">+ New Product</button></div>');
           OL.onView(container.querySelector('#btn-new-product'), 'click', function() { OL.createProduct(); });
         },
       });
 
       // Handle empty case — still need new product button
       if (!peerGroups || !peerGroups.length) {
-        el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
+        el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search btn-action" id="btn-new-product">+ New Product</button></div>');
         OL.onView(el.querySelector('#btn-new-product'), 'click', function() { OL.createProduct(); });
       }
     } catch (e) {
@@ -78,7 +78,7 @@
           <div class="amnesia-header">
             <span class="amnesia-status-label">${esc(m.status)}</span>
             <span class="session-uuid">${esc(m.marker)}</span>
-            <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${formatTime(m.updated_at)}</span>
+            <span class="meta-time">${formatTime(m.updated_at)}</span>
           </div>
           <div class="amnesia-rule">${esc(m.title)}</div>
         </div>`;
@@ -97,18 +97,18 @@
     bodyEl.innerHTML = `
       <div style="max-width:500px">
         <div style="margin-bottom:12px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Title *</label>
+          <label class="form-label-compact">Title *</label>
           <input id="new-product-title" class="conv-search" style="width:100%;padding:8px 12px;font-size:14px" placeholder="Product name" autofocus>
         </div>
         <div style="margin-bottom:12px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Description</label>
+          <label class="form-label-compact">Description</label>
           <textarea id="new-product-desc" class="conv-search" style="width:100%;min-height:80px;padding:8px 12px;font-size:13px;resize:vertical" placeholder="What is this product/project about?"></textarea>
         </div>
         <div style="margin-bottom:16px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Tags (comma-separated)</label>
+          <label class="form-label-compact">Tags (comma-separated)</label>
           <input id="new-product-tags" class="conv-search" style="width:100%;padding:8px 12px;font-size:13px" placeholder="e.g. openloom, backend">
         </div>
-        <div style="display:flex;gap:8px">
+        <div class="flex-gap">
           <button class="btn-search" id="btn-save-product" style="padding:6px 20px;font-size:13px">Create Product</button>
           <button class="btn-dismiss" onclick="OL.loadProducts()" style="padding:6px 16px;font-size:13px">Cancel</button>
         </div>
@@ -157,9 +157,9 @@
             if (m.total_cost > 0) mCostParts.push(`<span style="color:var(--green)">$${m.total_cost.toFixed(2)}</span>`);
             return `<div class="manifest-item" style="border-bottom:1px solid var(--border);padding:10px 12px;display:flex;align-items:center">
               <div role="button" tabindex="0" style="flex:1;cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(m.id)}'),300)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
-                <div style="display:flex;align-items:center;gap:8px">
+                <div class="flex-row">
                   <span class="session-uuid" style="font-size:11px">${esc(m.marker)}</span>
-                  <span class="badge ${mStatusClass}" style="font-size:10px">${esc(m.status)}</span>
+                  <span class="badge ${mStatusClass} badge-sm">${esc(m.status)}</span>
                   ${mCostParts.length ? mCostParts.join('<span style="opacity:0.3;font-size:10px"> | </span>') : ''}
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:4px">${esc(m.title)}</div>
@@ -167,14 +167,14 @@
               <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkManifestFromProduct('${esc(m.id)}','${esc(p.id)}')" title="Remove from product" aria-label="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
-          manifestsHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:13px;color:var(--text-primary);margin-bottom:8px;font-weight:600">Linked Manifests <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${manifests.length})</span></div>
-            <div style="border:1px solid var(--border);border-radius:4px;overflow:hidden">${manifestRows}</div>
+          manifestsHtml = `<div class="section-divider">
+            <div class="section-title">Linked Manifests <span class="sub-count">(${manifests.length})</span></div>
+            <div class="bordered-container">${manifestRows}</div>
           </div>`;
         } else {
-          manifestsHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:13px;color:var(--text-primary);margin-bottom:8px;font-weight:600">Linked Manifests</div>
-            <div style="font-size:12px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:4px;text-align:center">No manifests linked yet</div>
+          manifestsHtml = `<div class="section-divider">
+            <div class="section-title">Linked Manifests</div>
+            <div class="empty-placeholder">No manifests linked yet</div>
           </div>`;
         }
       } catch(e) {}
@@ -188,9 +188,9 @@
             const prioColor = i.priority === 'critical' ? 'var(--red)' : i.priority === 'high' ? 'var(--yellow)' : 'var(--text-muted)';
             return `<div class="manifest-item" style="border-bottom:1px solid var(--border);padding:8px 12px;display:flex;align-items:center">
               <div style="flex:1">
-                <div style="display:flex;align-items:center;gap:8px">
+                <div class="flex-row">
                   <span class="session-uuid" style="font-size:11px">${esc(i.marker)}</span>
-                  <span class="badge" style="font-size:10px">${esc(i.status)}</span>
+                  <span class="badge badge-sm">${esc(i.status)}</span>
                   <span style="font-size:10px;color:${prioColor}">${esc(i.priority)}</span>
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:2px">${esc(i.title)}</div>
@@ -198,20 +198,20 @@
               <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkIdeaFromProduct('${esc(i.id)}','${esc(p.id)}')" title="Remove from product" aria-label="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
-          ideasHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          ideasHtml = `<div class="section-divider">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${ideas.length})</span></span>
-              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
+              <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas <span class="sub-count">(${ideas.length})</span></span>
+              <button class="btn-search btn-xs" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
             </div>
-            <div style="border:1px solid var(--border);border-radius:4px;overflow:hidden">${ideaRows}</div>
+            <div class="bordered-container">${ideaRows}</div>
           </div>`;
         } else {
-          ideasHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          ideasHtml = `<div class="section-divider">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas</span>
-              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
+              <button class="btn-search btn-xs" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
             </div>
-            <div style="font-size:12px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:4px;text-align:center">No ideas linked yet</div>
+            <div class="empty-placeholder">No ideas linked yet</div>
           </div>`;
         }
       } catch(e) {}
@@ -219,9 +219,9 @@
       bodyEl.innerHTML = `
         <div>
           <!-- BREADCRUMB -->
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">
-            <span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products')">${esc(p.source_node ? p.source_node.substring(0,12) : 'node')}</span>
-            <span style="opacity:0.4"> &rarr; </span>
+          <div class="breadcrumb">
+            <span class="breadcrumb-link" onclick="OL.switchView('products')">${esc(p.source_node ? p.source_node.substring(0,12) : 'node')}</span>
+            <span class="breadcrumb-sep"> &rarr; </span>
             <span style="color:var(--text-primary)">${esc(p.marker)} ${esc(p.title)}</span>
           </div>
           <!-- METADATA BAR -->
@@ -232,12 +232,12 @@
             <button class="btn-copy" onclick="OL.copy('get product ${esc(p.marker)}')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>
           </div>
           <!-- METRICS BAR -->
-          <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:12px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-mono)">
+          <div class="stats-bar">
             <span>Manifests: <strong style="color:var(--text-primary)">${p.total_manifests || 0}</strong></span>
             <span>Tasks: <strong style="color:var(--text-primary)">${p.total_tasks || 0}</strong></span>
             <span>Turns: <strong style="color:var(--text-primary)">${p.total_turns || 0}</strong></span>
             <span>Cost: <strong style="color:var(--green)">$${(p.total_cost || 0).toFixed(2)}</strong></span>
-            <span style="opacity:0.3">|</span>
+            <span class="separator">|</span>
             <span>Created: ${new Date(p.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(p.updated_at).toLocaleString()}</span>
           </div>
@@ -254,7 +254,7 @@
           ${p.description ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${esc(p.description)}</div>` : ''}
           <!-- DIAGRAM BUTTON -->
           <div style="margin-bottom:12px">
-            <button class="btn-search" style="font-size:12px;padding:6px 16px" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
+            <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
           </div>
           ${manifestsHtml}
           ${ideasHtml}
@@ -351,10 +351,8 @@
             nodeSize: nodeSize(t.type), meta: JSON.stringify(t.meta || {}),
             depends_on: t.depends_on || ''
           }});
-          // Only connect task to manifest if it has no dependency -- chained tasks connect to their predecessor instead
-          if (!t.depends_on) {
-            elements.push({ data: { source: m.id, target: t.id } });
-          }
+          // Always connect task to its manifest (ownership edge)
+          elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
         }
       }
 
@@ -513,18 +511,18 @@
       bodyEl.innerHTML = `
         <div style="max-width:500px">
           <div style="margin-bottom:12px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Title</label>
+            <label class="form-label-compact">Title</label>
             <input id="edit-product-title" class="conv-search" style="width:100%;padding:8px 12px;font-size:14px" value="${esc(p.title)}">
           </div>
           <div style="margin-bottom:12px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Description</label>
+            <label class="form-label-compact">Description</label>
             <textarea id="edit-product-desc" class="conv-search" style="width:100%;min-height:80px;padding:8px 12px;font-size:13px;resize:vertical">${esc(p.description)}</textarea>
           </div>
           <div style="margin-bottom:16px">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Tags (comma-separated)</label>
+            <label class="form-label-compact">Tags (comma-separated)</label>
             <input id="edit-product-tags" class="conv-search" style="width:100%;padding:8px 12px;font-size:13px" value="${esc((p.tags||[]).join(', '))}">
           </div>
-          <div style="display:flex;gap:8px">
+          <div class="flex-gap">
             <button class="btn-search" id="btn-update-product" style="padding:6px 20px;font-size:13px">Save</button>
             <button class="btn-dismiss" onclick="OL.loadProductDetail('${esc(p.id)}')" style="padding:6px 16px;font-size:13px">Cancel</button>
           </div>
@@ -560,7 +558,7 @@
     let listHtml = unlinked.map(m =>
       `<div class="manifest-item clickable" data-link-mid="${esc(m.id)}" role="button" tabindex="0" style="padding:8px 12px;border-bottom:1px solid var(--border)">
         <span class="session-uuid" style="font-size:11px">${esc(m.marker)}</span>
-        <span class="badge" style="font-size:10px">${esc(m.status)}</span>
+        <span class="badge badge-sm">${esc(m.status)}</span>
         <span style="font-size:12px">${esc(m.title)}</span>
       </div>`
     ).join('');
@@ -598,7 +596,7 @@
     let listHtml = unlinked.map(i =>
       `<div class="manifest-item clickable" data-link-iid="${esc(i.id)}" role="button" tabindex="0" style="padding:8px 12px;border-bottom:1px solid var(--border)">
         <span class="session-uuid" style="font-size:11px">${esc(i.marker)}</span>
-        <span class="badge" style="font-size:10px">${esc(i.status)}</span>
+        <span class="badge badge-sm">${esc(i.status)}</span>
         <span style="font-size:10px;color:var(--text-muted)">${esc(i.priority)}</span>
         <span style="font-size:12px">${esc(i.title)}</span>
       </div>`
