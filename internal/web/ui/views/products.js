@@ -351,8 +351,11 @@
             nodeSize: nodeSize(t.type), meta: JSON.stringify(t.meta || {}),
             depends_on: t.depends_on || ''
           }});
-          // Always connect task to its manifest (ownership edge)
-          elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
+          // Connect task to manifest only if it's the first in the chain (no depends_on)
+          // Tasks with depends_on within the same manifest are reached via dependency edges
+          if (!t.depends_on) {
+            elements.push({ data: { source: m.id, target: t.id } });
+          }
         }
       }
 
