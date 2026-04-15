@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"openloom/internal/manifest"
 	"openloom/internal/node"
 	"openloom/internal/task"
 
@@ -19,14 +20,16 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 			return
 		}
 		type mItem struct {
-			ID         string  `json:"id"`
-			Marker     string  `json:"marker"`
-			Title      string  `json:"title"`
-			Status     string  `json:"status"`
-			ProjectID  string  `json:"project_id"`
-			TotalTasks int     `json:"total_tasks"`
-			TotalTurns int     `json:"total_turns"`
-			TotalCost  float64 `json:"total_cost"`
+			ID              string   `json:"id"`
+			Marker          string   `json:"marker"`
+			Title           string   `json:"title"`
+			Status          string   `json:"status"`
+			ProjectID       string   `json:"project_id"`
+			DependsOn       string   `json:"depends_on"`
+			DependsOnTitles []string `json:"depends_on_titles"`
+			TotalTasks      int      `json:"total_tasks"`
+			TotalTurns      int      `json:"total_turns"`
+			TotalCost       float64  `json:"total_cost"`
 		}
 		type peerGroup struct {
 			PeerID    string  `json:"peer_id"`
@@ -43,7 +46,7 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 			if _, ok := peers[pid]; !ok {
 				peerOrder = append(peerOrder, pid)
 			}
-			peers[pid] = append(peers[pid], mItem{ID: m.ID, Marker: m.Marker, Title: m.Title, Status: m.Status, ProjectID: m.ProjectID, TotalTasks: m.TotalTasks, TotalTurns: m.TotalTurns, TotalCost: m.TotalCost})
+			peers[pid] = append(peers[pid], mItem{ID: m.ID, Marker: m.Marker, Title: m.Title, Status: m.Status, ProjectID: m.ProjectID, DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn), TotalTasks: m.TotalTasks, TotalTurns: m.TotalTurns, TotalCost: m.TotalCost})
 		}
 		var result []peerGroup
 		for _, pid := range peerOrder {
@@ -62,7 +65,7 @@ func apiManifestList(n *node.Node) http.HandlerFunc {
 			writeError(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, manifests)
+		writeJSON(w, enrichManifests(n, manifests))
 	}
 }
 
@@ -87,12 +90,17 @@ func apiManifestCreate(n *node.Node) http.HandlerFunc {
 			writeError(w, err.Error(), 400)
 			return
 		}
-		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), projectID, req.DependsOn, req.JiraRefs, req.Tags)
+		dependsOn, err := n.ResolveManifestDependsOn(req.DependsOn, "")
+		if err != nil {
+			writeError(w, err.Error(), 400)
+			return
+		}
+		m, err := n.Manifests.Create(req.Title, req.Description, req.Content, req.Status, "dashboard", n.PeerID(), projectID, dependsOn, req.JiraRefs, req.Tags)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, m)
+		writeJSON(w, enrichManifest(n, m))
 	}
 }
 
@@ -108,7 +116,7 @@ func apiManifestGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
-		writeJSON(w, m)
+		writeJSON(w, enrichManifest(n, m))
 	}
 }
 
@@ -168,7 +176,11 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 		}
 		dependsOn := existing.DependsOn
 		if req.DependsOn != nil {
-			dependsOn = *req.DependsOn
+			dependsOn, err = n.ResolveManifestDependsOn(*req.DependsOn, existing.ID)
+			if err != nil {
+				writeError(w, err.Error(), 400)
+				return
+			}
 		}
 		tags := existing.Tags
 		if req.Tags != nil {
@@ -186,7 +198,7 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 			return
 		}
 		updated, _ := n.Manifests.Get(existing.ID)
-		writeJSON(w, updated)
+		writeJSON(w, enrichManifest(n, updated))
 	}
 }
 
@@ -238,7 +250,7 @@ func apiManifestSearch(n *node.Node) http.HandlerFunc {
 			writeError(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, results)
+		writeJSON(w, enrichManifests(n, results))
 	}
 }
 
@@ -309,4 +321,25 @@ func apiUnlink(n *node.Node) http.HandlerFunc {
 		}
 		writeJSON(w, map[string]string{"status": "unlinked"})
 	}
+}
+
+// enrichedManifest wraps a Manifest with resolved DependsOnTitles for API responses.
+type enrichedManifest struct {
+	*manifest.Manifest
+	DependsOnTitles []string `json:"depends_on_titles"`
+}
+
+func enrichManifest(n *node.Node, m *manifest.Manifest) enrichedManifest {
+	return enrichedManifest{
+		Manifest:        m,
+		DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn),
+	}
+}
+
+func enrichManifests(n *node.Node, manifests []*manifest.Manifest) []enrichedManifest {
+	result := make([]enrichedManifest, len(manifests))
+	for i, m := range manifests {
+		result[i] = enrichManifest(n, m)
+	}
+	return result
 }

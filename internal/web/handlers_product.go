@@ -207,13 +207,15 @@ func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 			Meta      map[string]any `json:"meta"`
 		}
 		type manifestNode struct {
-			ID       string     `json:"id"`
-			Marker   string     `json:"marker"`
-			Title    string     `json:"title"`
-			Type     string     `json:"type"`
-			Status   string     `json:"status"`
-			Meta     map[string]any `json:"meta"`
-			Children []taskNode `json:"children"`
+			ID              string         `json:"id"`
+			Marker          string         `json:"marker"`
+			Title           string         `json:"title"`
+			Type            string         `json:"type"`
+			Status          string         `json:"status"`
+			DependsOn       string         `json:"depends_on"`
+			DependsOnTitles []string       `json:"depends_on_titles"`
+			Meta            map[string]any `json:"meta"`
+			Children        []taskNode     `json:"children"`
 		}
 		type productNode struct {
 			ID       string         `json:"id"`
@@ -250,6 +252,7 @@ func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 			mNodes = append(mNodes, manifestNode{
 				ID: m.ID, Marker: m.Marker, Title: m.Title,
 				Type: "manifest", Status: m.Status,
+				DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn),
 				Meta: map[string]any{
 					"total_cost":  m.TotalCost,
 					"total_tasks": len(tasks),
