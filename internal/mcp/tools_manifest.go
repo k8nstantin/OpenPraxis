@@ -144,7 +144,10 @@ func (s *Server) handleManifestCreate(ctx context.Context, req mcplib.CallToolRe
 	jiraRefs := splitCSV(argStr(a, "jira_refs"))
 	tags := splitCSV(argStr(a, "tags"))
 
-	projectID := argStr(a, "project_id")
+	projectID, err := s.node.ResolveProductID(argStr(a, "project_id"))
+	if err != nil {
+		return errResult("%v", err), nil
+	}
 	m, err := s.node.Manifests.Create(title, desc, content, status, s.sessionSource(ctx), s.node.PeerID(), projectID, jiraRefs, tags)
 	if err != nil {
 		return errResult("create manifest: %v", err), nil
@@ -207,9 +210,12 @@ func (s *Server) handleManifestUpdate(ctx context.Context, req mcplib.CallToolRe
 	if jiraStr != "" {
 		jiraRefs = splitCSV(jiraStr)
 	}
-	projectID := argStr(a, "project_id")
-	if projectID == "" {
-		projectID = existing.ProjectID
+	projectID := existing.ProjectID
+	if raw := argStr(a, "project_id"); raw != "" {
+		projectID, err = s.node.ResolveProductID(raw)
+		if err != nil {
+			return errResult("%v", err), nil
+		}
 	}
 	tagsStr := argStr(a, "tags")
 	tags := existing.Tags

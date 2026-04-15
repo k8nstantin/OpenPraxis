@@ -338,6 +338,32 @@ func (n *Node) ReindexMemories(ids []string) {
 	}
 }
 
+// ResolveProductID resolves a product marker or full ID to the full UUID.
+// Returns empty string if productID is empty, error if not found.
+func (n *Node) ResolveProductID(productID string) (string, error) {
+	if productID == "" {
+		return "", nil
+	}
+	p, err := n.Products.Get(productID)
+	if err != nil || p == nil {
+		return "", fmt.Errorf("product not found: %s", productID)
+	}
+	return p.ID, nil
+}
+
+// ResolveManifestID resolves a manifest marker or full ID to the full UUID.
+// Returns empty string if manifestID is empty, error if not found.
+func (n *Node) ResolveManifestID(manifestID string) (string, error) {
+	if manifestID == "" {
+		return "", nil
+	}
+	m, err := n.Manifests.Get(manifestID)
+	if err != nil || m == nil {
+		return "", fmt.Errorf("manifest not found: %s", manifestID)
+	}
+	return m.ID, nil
+}
+
 // ValidateArchiveProduct checks that all linked manifests are "archive" before allowing a product to be archived.
 func (n *Node) ValidateArchiveProduct(productID string) error {
 	manifests, err := n.Manifests.ListByProject(productID, 1000)

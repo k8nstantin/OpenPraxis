@@ -50,7 +50,10 @@ func (s *Server) handleIdeaAdd(ctx context.Context, req mcplib.CallToolRequest) 
 	priority := argStr(a, "priority")
 	tags := splitCSV(argStr(a, "tags"))
 
-	projectID := argStr(a, "project_id")
+	projectID, err := s.node.ResolveProductID(argStr(a, "project_id"))
+	if err != nil {
+		return errResult("%v", err), nil
+	}
 	idea, err := s.node.Ideas.Create(title, desc, "draft", priority, s.sessionSource(ctx), s.node.PeerID(), projectID, tags)
 	if err != nil {
 		return errResult("save idea: %v", err), nil
