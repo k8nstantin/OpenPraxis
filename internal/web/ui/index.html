@@ -695,6 +695,25 @@
     </main>
   </div>
 
+  <!-- Module loading order: api → tree → views → app (entry point) -->
+  <script src="/api.js"></script>
+  <script src="/tree.js"></script>
+  <script src="/views/overview.js"></script>
+  <script src="/views/memories.js"></script>
+  <script src="/views/conversations.js"></script>
+  <script src="/views/actions.js"></script>
+  <script src="/views/activity.js"></script>
+  <script src="/views/markers.js"></script>
+  <script src="/views/products.js"></script>
+  <script src="/views/manifests.js"></script>
+  <script src="/views/ideas.js"></script>
+  <script src="/views/tasks.js"></script>
+  <script src="/views/cost.js"></script>
+  <script src="/views/compliance.js"></script>
+  <script src="/views/watcher.js"></script>
+  <script src="/views/recall.js"></script>
+  <script src="/views/chat.js"></script>
+  <script src="/views/settings.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
