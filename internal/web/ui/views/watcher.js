@@ -40,10 +40,6 @@
 
       // Audit list — Peer -> Task -> Audits
       var listEl = document.getElementById('watcher-list');
-      if (!audits || !audits.length) {
-        listEl.innerHTML = '<div class="empty-state">No audits yet &mdash; audits are created automatically when tasks complete</div>';
-        return;
-      }
 
       function gateIcon(passed) {
         return passed ? '<span style="color:var(--green)">&#x2713;</span>' : '<span style="color:var(--red)">&#x2717;</span>';
@@ -52,7 +48,7 @@
       // Group: peer -> task -> audits
       var peerMap = {};
       var peerOrder = [];
-      for (var ai = 0; ai < audits.length; ai++) {
+      for (var ai = 0; ai < (audits || []).length; ai++) {
         var a = audits[ai];
         var pid = a.source_node || 'unknown';
         var tid = a.task_id || 'unknown';
@@ -69,75 +65,61 @@
         peer.count++;
       }
 
-      var html = '';
-      for (var pi = 0; pi < peerOrder.length; pi++) {
-        var pId = peerOrder[pi];
-        var pg = peerMap[pId];
+      // Transform into array for renderTree
+      var treeData = peerOrder.map(function(pid) {
+        var pg = peerMap[pid];
+        return {
+          peer_id: pid,
+          count: pg.count,
+          taskGroups: pg.taskOrder.map(function(tid) { return pg.tasks[tid]; }),
+        };
+      });
 
-        // Peer header (L1)
-        html += '<div class="tree-node peer-header clickable" data-wt-peer="' + pi + '">' +
-          '<span class="tree-arrow">&#x25BC;</span>' +
-          '<span class="status-dot green"></span>' +
-          '<span>' + esc(pId) + '</span>' +
-          '<span class="count">' + pg.count + '</span>' +
-        '</div>';
-        html += '<div class="peer-children" data-wt-peer-children="' + pi + '">';
-
-        // Task headers (L2)
-        for (var ti = 0; ti < pg.taskOrder.length; ti++) {
-          var tId = pg.taskOrder[ti];
-          var tg = pg.tasks[tId];
-          var latestStatus = tg.audits[0].status;
-          var dotColor = latestStatus === 'passed' ? 'green' : latestStatus === 'failed' ? 'red' : 'yellow';
-
-          html += '<div class="tree-node clickable" style="padding-left:24px" data-wt-task="' + pi + '-' + ti + '">' +
-            '<span class="tree-arrow">&#x25B6;</span>' +
-            '<span class="status-dot ' + dotColor + '"></span>' +
-            '<span>' + esc(tg.title) + '</span>' +
-            '<span class="session-uuid">' + esc(tg.marker) + '</span>' +
-            '<span class="count">' + tg.audits.length + '</span>' +
-          '</div>';
-          html += '<div style="display:none" data-wt-task-children="' + pi + '-' + ti + '">';
-
-          // Audit items (L3)
-          for (var aui = 0; aui < tg.audits.length; aui++) {
-            var au = tg.audits[aui];
-            var statusClass = au.status === 'passed' ? 'confirmed' : au.status === 'failed' ? 'flagged' : 'dismissed';
-            var downgraded = au.original_status !== au.final_status;
-
-            html += '<div class="amnesia-item ' + statusClass + ' clickable" data-id="' + esc(au.id) + '" style="margin-left:24px;cursor:pointer">' +
-              '<div class="amnesia-header">' +
-                '<span class="amnesia-status-label">' + esc(au.status) + '</span>' +
-                '<span class="badge type">Git ' + gateIcon(au.git_passed) + '</span>' +
-                '<span class="badge type">Build ' + gateIcon(au.build_passed) + '</span>' +
-                '<span class="badge type">Manifest ' + gateIcon(au.manifest_passed) + ' ' + (au.manifest_score > 0 ? Math.round(au.manifest_score * 100) + '%' : '') + '</span>' +
-                (downgraded ? '<span class="badge type" style="color:var(--red);font-weight:600">DOWNGRADED</span>' : '') +
-                '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(au.audited_at) + '</span>' +
-              '</div>' +
-              '<div class="amnesia-rule">' +
-                '<span style="color:var(--text-muted)">Manifest:</span> ' + esc(au.manifest_title || 'none') +
-              '</div>' +
-              '<div class="amnesia-action">' +
-                '<span style="color:var(--text-muted)">Actions:</span> ' + au.action_count +
-                (au.cost_usd > 0 ? '<span style="margin-left:12px;color:var(--text-muted)">Cost:</span> $' + au.cost_usd.toFixed(2) : '') +
-              '</div>' +
-            '</div>';
+      OL.renderTree(listEl, treeData, {
+        prefix: 'wt',
+        emptyMessage: 'No audits yet &mdash; audits are created automatically when tasks complete',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.count; },
+            children: function(pg) { return pg.taskGroups; },
+          },
+          {
+            label: function(tg) { return esc(tg.title); },
+            extra: function(tg) { return '<span class="session-uuid">' + esc(tg.marker) + '</span>'; },
+            count: function(tg) { return tg.audits.length; },
+            children: function(tg) { return tg.audits; },
+            dotColor: function(tg) {
+              var s = tg.audits[0].status;
+              return s === 'passed' ? 'green' : s === 'failed' ? 'red' : 'yellow';
+            },
+            expanded: false,
           }
-          html += '</div>';
-        }
-        html += '</div>';
-      }
-      listEl.innerHTML = html;
+        ],
+        renderLeaf: function(au) {
+          var statusClass = au.status === 'passed' ? 'confirmed' : au.status === 'failed' ? 'flagged' : 'dismissed';
+          var downgraded = au.original_status !== au.final_status;
 
-      // Peer toggle (L1)
-      OL.wireTreeToggles(listEl, 'data-wt-peer', 'data-wt-peer-children');
-
-      // Task toggle (L2)
-      OL.wireTreeToggles(listEl, 'data-wt-task', 'data-wt-task-children');
-
-      // Click handlers for detail view (L3)
-      listEl.querySelectorAll('.amnesia-item.clickable').forEach(function(item) {
-        item.addEventListener('click', function() { OL.loadWatcherDetail(item.dataset.id); });
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(au.id) + '" style="margin-left:24px;cursor:pointer">' +
+            '<div class="amnesia-header">' +
+              '<span class="amnesia-status-label">' + esc(au.status) + '</span>' +
+              '<span class="badge type">Git ' + gateIcon(au.git_passed) + '</span>' +
+              '<span class="badge type">Build ' + gateIcon(au.build_passed) + '</span>' +
+              '<span class="badge type">Manifest ' + gateIcon(au.manifest_passed) + ' ' + (au.manifest_score > 0 ? Math.round(au.manifest_score * 100) + '%' : '') + '</span>' +
+              (downgraded ? '<span class="badge type" style="color:var(--red);font-weight:600">DOWNGRADED</span>' : '') +
+              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(au.audited_at) + '</span>' +
+            '</div>' +
+            '<div class="amnesia-rule">' +
+              '<span style="color:var(--text-muted)">Manifest:</span> ' + esc(au.manifest_title || 'none') +
+            '</div>' +
+            '<div class="amnesia-action">' +
+              '<span style="color:var(--text-muted)">Actions:</span> ' + au.action_count +
+              (au.cost_usd > 0 ? '<span style="margin-left:12px;color:var(--text-muted)">Cost:</span> $' + au.cost_usd.toFixed(2) : '') +
+            '</div>' +
+          '</div>';
+        },
+        leafSelector: '.tree-leaf',
+        onLeafClick: function(el) { OL.loadWatcherDetail(el.dataset.id); },
       });
 
     } catch(e) {

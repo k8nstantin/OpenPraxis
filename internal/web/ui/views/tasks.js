@@ -75,121 +75,71 @@
 
     newBtn.onclick = () => OL.showTaskCreateForm();
 
-    const statusColors = {running:'green',paused:'yellow',scheduled:'yellow',waiting:'yellow',pending:'',completed:'green',max_turns:'yellow',failed:'red',cancelled:''};
+    var statusColors = {running:'green',paused:'yellow',scheduled:'yellow',waiting:'yellow',pending:'',completed:'green',max_turns:'yellow',failed:'red',cancelled:''};
 
     try {
-      const peerGroups = await fetchJSON('/api/tasks/by-peer');
-      if (!peerGroups || !peerGroups.length) {
-        el.innerHTML = '<div class="empty-state" style="padding:16px">No tasks yet</div>';
-        return;
-      }
+      var peerGroups = await fetchJSON('/api/tasks/by-peer');
 
-      // Peer → Manifest → Tasks (mirrors amnesia: Peer → Session → Violations)
-      let html = '';
-      for (let pi = 0; pi < peerGroups.length; pi++) {
-        const pg = peerGroups[pi];
-        const totalTasks = pg.manifests.reduce((sum, mg) => sum + mg.tasks.length, 0);
-
-        // Peer header (L1)
-        html += `<div class="tree-node peer-header clickable" data-task-peer="${pi}">
-          <span class="tree-arrow">&#x25BC;</span>
-          <span class="status-dot green"></span>
-          <span>${esc(pg.peer_id)}</span>
-          <span class="count">${totalTasks}</span>
-        </div>`;
-        html += `<div class="peer-children" data-task-peer-children="${pi}">`;
-
-        // Manifest headers (L2) — same as amnesia sessions
-        for (let mi = 0; mi < pg.manifests.length; mi++) {
-          const mg = pg.manifests[mi];
-          if (!mg.tasks.length) continue;
-
-          // Pick dot color from most active task status
-          const hasRunning = mg.tasks.some(t => t.status === 'running');
-          const hasFailed = mg.tasks.some(t => t.status === 'failed');
-          const hasScheduled = mg.tasks.some(t => t.status === 'scheduled' || t.status === 'waiting');
-          const dotColor = hasRunning ? 'green' : hasFailed ? 'red' : hasScheduled ? 'yellow' : 'green';
-
-          html += `<div class="tree-node clickable" style="padding-left:24px" data-task-manifest="${pi}-${mi}">
-            <span class="tree-arrow">&#x25B6;</span>
-            <span class="status-dot ${dotColor}"></span>
-            <span>${esc(mg.manifest_title || 'Standalone')}</span>
-            <span class="session-uuid">${esc(mg.manifest_marker || '')}</span>
-            <span class="count">${mg.tasks.length}</span>
-          </div>`;
-          html += `<div style="display:none" data-task-manifest-children="${pi}-${mi}">`;
-
-          // Task items (L3) — same as amnesia violations
-          for (const t of mg.tasks) {
-            const sColor = statusColors[t.status] || '';
-            const statusClass = t.status === 'completed' ? 'confirmed' : t.status === 'failed' ? 'flagged' : t.status === 'running' ? 'confirmed' : 'dismissed';
-            const metaParts = [];
-            if (t.run_count > 0) metaParts.push(`${t.run_count} runs`);
-            if (t.total_turns > 0) metaParts.push(`${t.total_turns} turns`);
-            if (t.total_cost > 0) metaParts.push(`$${t.total_cost.toFixed(2)}`);
-            metaParts.push(t.schedule);
-
-            html += `<div class="amnesia-item ${statusClass} clickable" data-id="${esc(t.id)}" style="margin-left:24px;cursor:pointer">
-              <div class="amnesia-header">
-                ${t.status === 'running' ? '<span class="status-dot green status-pulse"></span>' : `<span class="status-dot ${sColor}"></span>`}
-                <span class="amnesia-status-label">${esc(t.status)}</span>
-                <span class="session-uuid">${esc(t.marker)}</span>
-                <span class="badge type">${esc(t.schedule)}</span>
-                ${t.depends_on ? '<span class="badge scope">dep</span>' : ''}
-                <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${formatTime(t.updated_at || t.created_at)}</span>
-              </div>
-              <div class="amnesia-rule">${esc(t.title)}</div>
-              <div class="amnesia-action">
-                ${metaParts.join(' &middot; ')}
-              </div>
-            </div>`;
-          }
-          html += `</div>`;
-        }
-        html += `</div>`;
-      }
-      el.innerHTML = html;
-
-      // Peer toggle (L1)
-      el.querySelectorAll('[data-task-peer]').forEach(node => {
-        node.addEventListener('click', () => {
-          const idx = node.dataset.taskPeer;
-          const children = el.querySelector(`[data-task-peer-children="${idx}"]`);
-          const arrow = node.querySelector('.tree-arrow');
-          if (children.style.display === 'none') {
-            children.style.display = '';
-            arrow.innerHTML = '&#x25BC;';
-          } else {
-            children.style.display = 'none';
-            arrow.innerHTML = '&#x25B6;';
-          }
-        });
+      // Filter out empty manifests before passing to renderTree
+      var treeData = (peerGroups || []).map(function(pg) {
+        return {
+          peer_id: pg.peer_id,
+          manifests: pg.manifests.filter(function(mg) { return mg.tasks.length > 0; }),
+          totalTasks: pg.manifests.reduce(function(sum, mg) { return sum + mg.tasks.length; }, 0),
+        };
       });
 
-      // Manifest toggle (L2)
-      el.querySelectorAll('[data-task-manifest]').forEach(node => {
-        node.addEventListener('click', () => {
-          const idx = node.dataset.taskManifest;
-          const children = el.querySelector(`[data-task-manifest-children="${idx}"]`);
-          const arrow = node.querySelector('.tree-arrow');
-          if (children.style.display === 'none') {
-            children.style.display = '';
-            arrow.innerHTML = '&#x25BC;';
-          } else {
-            children.style.display = 'none';
-            arrow.innerHTML = '&#x25B6;';
+      OL.renderTree(el, treeData, {
+        prefix: 'task',
+        emptyMessage: 'No tasks yet',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.totalTasks; },
+            children: function(pg) { return pg.manifests; },
+          },
+          {
+            label: function(mg) { return esc(mg.manifest_title || 'Standalone'); },
+            extra: function(mg) { return '<span class="session-uuid">' + esc(mg.manifest_marker || '') + '</span>'; },
+            count: function(mg) { return mg.tasks.length; },
+            children: function(mg) { return mg.tasks; },
+            dotColor: function(mg) {
+              var hasRunning = mg.tasks.some(function(t) { return t.status === 'running'; });
+              var hasFailed = mg.tasks.some(function(t) { return t.status === 'failed'; });
+              var hasScheduled = mg.tasks.some(function(t) { return t.status === 'scheduled' || t.status === 'waiting'; });
+              return hasRunning ? 'green' : hasFailed ? 'red' : hasScheduled ? 'yellow' : 'green';
+            },
+            expanded: false,
           }
-        });
-      });
+        ],
+        renderLeaf: function(t) {
+          var sColor = statusColors[t.status] || '';
+          var statusClass = t.status === 'completed' ? 'confirmed' : t.status === 'failed' ? 'flagged' : t.status === 'running' ? 'confirmed' : 'dismissed';
+          var metaParts = [];
+          if (t.run_count > 0) metaParts.push(t.run_count + ' runs');
+          if (t.total_turns > 0) metaParts.push(t.total_turns + ' turns');
+          if (t.total_cost > 0) metaParts.push('$' + t.total_cost.toFixed(2));
+          metaParts.push(t.schedule);
 
-      // Task clicks (L3)
-      el.querySelectorAll('.amnesia-item.clickable').forEach(item => {
-        item.addEventListener('click', (e) => {
-          e.stopPropagation();
-          el.querySelectorAll('.amnesia-item').forEach(i => i.classList.remove('active'));
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(t.id) + '" style="margin-left:24px;cursor:pointer">' +
+            '<div class="amnesia-header">' +
+              (t.status === 'running' ? '<span class="status-dot green status-pulse"></span>' : '<span class="status-dot ' + sColor + '"></span>') +
+              '<span class="amnesia-status-label">' + esc(t.status) + '</span>' +
+              '<span class="session-uuid">' + esc(t.marker) + '</span>' +
+              '<span class="badge type">' + esc(t.schedule) + '</span>' +
+              (t.depends_on ? '<span class="badge scope">dep</span>' : '') +
+              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(t.updated_at || t.created_at) + '</span>' +
+            '</div>' +
+            '<div class="amnesia-rule">' + esc(t.title) + '</div>' +
+            '<div class="amnesia-action">' + metaParts.join(' &middot; ') + '</div>' +
+          '</div>';
+        },
+        leafSelector: '.tree-leaf',
+        onLeafClick: function(item) {
+          el.querySelectorAll('.amnesia-item').forEach(function(i) { i.classList.remove('active'); });
           item.classList.add('active');
           OL.loadTaskDetail(item.dataset.id);
-        });
+        },
       });
     } catch (e) {
       console.error('Load tasks failed:', e);
