@@ -14,6 +14,21 @@
   // Expose currentView for other modules (e.g. watcher badge, chat shortcuts)
   OL.currentView = function() { return currentView; };
 
+  // --- Refresh interval (paused when tab hidden) ---
+  var refreshInterval = null;
+
+  function startRefreshInterval() {
+    if (refreshInterval) return;
+    refreshInterval = setInterval(refreshAll, 10000);
+  }
+
+  function stopRefreshInterval() {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+  }
+
   // --- Init ---
   document.addEventListener('DOMContentLoaded', function() {
     setupNav();
@@ -21,7 +36,16 @@
     setupTheme();
     connectWebSocket();
     refreshAll();
-    setInterval(refreshAll, 10000);
+    startRefreshInterval();
+
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden) {
+        stopRefreshInterval();
+      } else {
+        refreshAll();
+        startRefreshInterval();
+      }
+    });
 
     // Handle hash links like #view-ideas
     document.addEventListener('click', function(e) {
