@@ -83,12 +83,12 @@
     var totalCost = topTasks.reduce(function(s, t) { return s + t.cost; }, 0);
     var html = '<div style="max-height:300px;overflow-y:auto"><table class="top-tasks-table" style="width:100%">' +
       '<thead style="position:sticky;top:0;background:var(--bg-primary);z-index:1"><tr>' +
-        '<th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">marker</th>' +
-        '<th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">title</th>' +
-        '<th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">branch</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">turns</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">cost</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">status</th>' +
+        '<th class="th-left">marker</th>' +
+        '<th class="th-left">title</th>' +
+        '<th class="th-left">branch</th>' +
+        '<th class="th-right">turns</th>' +
+        '<th class="th-right">cost</th>' +
+        '<th class="th-right">status</th>' +
       '</tr></thead><tbody>';
 
     for (var i = 0; i < topTasks.length; i++) {
@@ -100,7 +100,7 @@
         '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:11px;color:var(--accent)">' + esc(t.marker) + '</td>' +
         '<td style="padding:6px 12px;font-size:12px">' + esc(titleTrunc) + '</td>' +
         '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">openloom/' + esc(t.marker) + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + t.turns + '</td>' +
+        '<td class="td-mono-right">' + t.turns + '</td>' +
         '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;color:' + costColor + '">$' + t.cost.toFixed(2) + '</td>' +
         '<td style="padding:6px 12px;text-align:right;font-size:11px;color:' + sColor + '">' + esc(t.status) + '</td>' +
       '</tr>';
@@ -221,7 +221,7 @@
         '<span class="session-uuid">' + esc(marker) + '</span>' +
         '<span class="badge type">' + esc(m.type) + '</span>' +
         '<span style="color:var(--text-primary);font-size:13px">' + esc(m.l0) + '</span>' +
-        '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + esc(session) + '</span>' +
+        '<span class="meta-time">' + esc(session) + '</span>' +
       '</div>';
     }).join('');
     el.querySelectorAll('.memory-row').forEach(function(row) {
@@ -280,7 +280,7 @@
             '<span class="status-dot ' + (rt.paused ? 'yellow' : 'green') + '" style="' + (rt.paused ? '' : 'animation:pulse 1s infinite') + '"></span>' +
             '<span class="session-uuid">' + esc(rt.marker) + '</span>' +
             '<span style="font-weight:500;font-size:13px;flex:1">' + esc(rt.title) + '</span>' +
-            '<span class="badge type" style="font-size:10px">' + esc(rt.agent) + '</span>' +
+            '<span class="badge type badge-sm">' + esc(rt.agent) + '</span>' +
             '<span style="font-size:12px;color:var(--text-muted)">' + rt.actions + ' actions</span>' +
             '<span style="font-size:12px;color:' + (rt.paused ? 'var(--yellow)' : 'var(--green)') + ';font-weight:500">' + (rt.paused ? 'PAUSED' : mins + 'm ' + secs + 's') + '</span>' +
             (rt.paused

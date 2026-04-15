@@ -31,7 +31,7 @@
           html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">';
           html += '<span class="session-uuid">' + esc(it.marker) + '</span>';
           html += '<span style="font-size:13px;color:var(--text-primary);flex:1">' + esc(it.title) + '</span>';
-          html += '<button class="btn-search recall-restore" data-type="' + esc(it.type) + '" data-id="' + esc(it.id) + '" style="font-size:11px;padding:4px 10px">Restore</button>';
+          html += '<button class="btn-search recall-restore btn-sm" data-type="' + esc(it.type) + '" data-id="' + esc(it.id) + '">Restore</button>';
           html += '</div>';
         }
         html += '</div>';

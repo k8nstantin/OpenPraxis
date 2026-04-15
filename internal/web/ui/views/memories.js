@@ -91,8 +91,8 @@
         </div>
         <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">ID: ${esc(mem.id)}</div>
         <div style="margin-top:12px;display:flex;gap:8px">
-          <button class="btn-search" id="mem-promote-btn" style="font-size:12px;padding:6px 14px">Create Manifest from Memory</button>
-          <button class="btn-dismiss" onclick="OL.archiveMemory('${esc(mem.id)}')" style="font-size:12px;padding:6px 14px">Archive</button>
+          <button class="btn-search btn-md" id="mem-promote-btn">Create Manifest from Memory</button>
+          <button class="btn-dismiss btn-md" onclick="OL.archiveMemory('${esc(mem.id)}')">Archive</button>
         </div>
       </div>
     `;

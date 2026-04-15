@@ -120,12 +120,12 @@
 
       var html = '<table class="top-tasks-table" style="width:100%">' +
         '<thead><tr>' +
-        '<th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">' + periodLabel + '</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">tasks</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">runs</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">turns</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">cost</th>' +
-        '<th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-muted);font-weight:500">status</th>' +
+        '<th class="th-left">' + periodLabel + '</th>' +
+        '<th class="th-right">tasks</th>' +
+        '<th class="th-right">runs</th>' +
+        '<th class="th-right">turns</th>' +
+        '<th class="th-right">cost</th>' +
+        '<th class="th-right">status</th>' +
         '</tr></thead><tbody>';
 
       var totalCost = 0, totalTurns = 0, totalTasks = 0, totalRuns = 0;
@@ -145,9 +145,9 @@
         totalRuns += (d.runs || 0);
         html += '<tr class="top-task-row"' + (clickable ? ' role="button" tabindex="0"' : '') + ' style="' + rowBg + ';' + (clickable ? 'cursor:pointer' : '') + '" ' + (clickable ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}"' : '') + '>' +
           '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:12px;color:var(--accent)">' + d.period + (isToday ? ' <span style="font-size:10px;color:var(--green)">(today)</span>' : '') + '</td>' +
-          '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + d.tasks + '</td>' +
-          '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + (d.runs || d.tasks) + '</td>' +
-          '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + d.turns + '</td>' +
+          '<td class="td-mono-right">' + d.tasks + '</td>' +
+          '<td class="td-mono-right">' + (d.runs || d.tasks) + '</td>' +
+          '<td class="td-mono-right">' + d.turns + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;color:' + costColor + '">$' + d.cost.toFixed(2) + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:' + statusColor + '">' + statusText + '</td>' +
           '</tr>';
@@ -157,9 +157,9 @@
       var avgLabel = _costPeriod === 'week' ? '/week' : _costPeriod === 'month' ? '/month' : '/day';
       html += '<tr style="border-top:2px solid var(--border)">' +
         '<td style="padding:8px 12px;font-size:12px;font-weight:600;color:var(--text-secondary)">Total / Avg</td>' +
-        '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600">' + totalTasks + '</td>' +
-        '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600">' + (totalRuns || totalTasks) + '</td>' +
-        '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600">' + totalTurns + '</td>' +
+        '<td class="td-mono-right-bold">' + totalTasks + '</td>' +
+        '<td class="td-mono-right-bold">' + (totalRuns || totalTasks) + '</td>' +
+        '<td class="td-mono-right-bold">' + totalTurns + '</td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--green)">$' + totalCost.toFixed(2) + '</td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">avg $' + avgCost.toFixed(2) + avgLabel + '</td>' +
         '</tr>';
@@ -232,13 +232,13 @@
 
         html += '<table class="top-tasks-table" style="width:100%">' +
           '<thead><tr>' +
-          '<th style="text-align:left;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">task</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">run</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">turns</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">actions</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">cost</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">duration</th>' +
-          '<th style="text-align:right;padding:6px 12px;font-size:10px;color:var(--text-muted);font-weight:500">status</th>' +
+          '<th class="th-left-sm">task</th>' +
+          '<th class="th-right-sm">run</th>' +
+          '<th class="th-right-sm">turns</th>' +
+          '<th class="th-right-sm">actions</th>' +
+          '<th class="th-right-sm">cost</th>' +
+          '<th class="th-right-sm">duration</th>' +
+          '<th class="th-right-sm">status</th>' +
           '</tr></thead><tbody>';
 
         for (var j = 0; j < entries.length; j++) {
@@ -252,9 +252,9 @@
               '<span style="color:var(--text-secondary);margin-left:4px">' + esc(e.task_title || 'Unknown') + '</span>' +
               (e.manifest_id ? '<span class="badge type" style="font-size:9px;margin-left:4px">' + esc(e.manifest_id.substring(0,12)) + '</span>' : '') +
             '</td>' +
-            '<td style="padding:5px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">#' + e.run_number + '</td>' +
-            '<td style="padding:5px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + e.turns + '</td>' +
-            '<td style="padding:5px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + e.actions + '</td>' +
+            '<td class="td-mono-right-sm">#' + e.run_number + '</td>' +
+            '<td class="td-mono-right-sm">' + e.turns + '</td>' +
+            '<td class="td-mono-right-sm">' + e.actions + '</td>' +
             '<td style="padding:5px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--green)">$' + e.cost_usd.toFixed(2) + '</td>' +
             '<td style="padding:5px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">' + dur + '</td>' +
             '<td style="padding:5px 12px;text-align:right;font-size:11px;font-weight:600;color:' + statusColor + ';text-transform:uppercase">' + esc(e.status) + '</td>' +

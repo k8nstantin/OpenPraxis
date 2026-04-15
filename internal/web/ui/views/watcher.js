@@ -100,14 +100,14 @@
           var statusClass = au.status === 'passed' ? 'confirmed' : au.status === 'failed' ? 'flagged' : 'dismissed';
           var downgraded = au.original_status !== au.final_status;
 
-          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(au.id) + '" style="margin-left:24px;cursor:pointer">' +
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf tree-indent" data-id="' + esc(au.id) + '">' +
             '<div class="amnesia-header">' +
               '<span class="amnesia-status-label">' + esc(au.status) + '</span>' +
               '<span class="badge type">Git ' + gateIcon(au.git_passed) + '</span>' +
               '<span class="badge type">Build ' + gateIcon(au.build_passed) + '</span>' +
               '<span class="badge type">Manifest ' + gateIcon(au.manifest_passed) + ' ' + (au.manifest_score > 0 ? Math.round(au.manifest_score * 100) + '%' : '') + '</span>' +
               (downgraded ? '<span class="badge type" style="color:var(--red);font-weight:600">DOWNGRADED</span>' : '') +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(au.audited_at) + '</span>' +
+              '<span class="meta-time">' + formatTime(au.audited_at) + '</span>' +
             '</div>' +
             '<div class="amnesia-rule">' +
               '<span style="color:var(--text-muted)">Manifest:</span> ' + esc(au.manifest_title || 'none') +
@@ -145,7 +145,7 @@
         '<div style="border-left:3px solid ' + gitColor + ';padding:8px 12px;margin-bottom:12px;background:var(--bg-secondary);border-radius:0 6px 6px 0">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
             '<span style="font-size:16px;color:' + gitColor + '">' + (a.git_passed ? '&#x2713;' : '&#x2717;') + '</span>' +
-            '<span style="font-size:13px;font-weight:600">Gate 1: Git Verification</span>' +
+            '<span class="gate-title">Gate 1: Git Verification</span>' +
           '</div>' +
           '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">' + esc(git.reason || '') + '</div>' +
           '<div style="display:flex;gap:16px;font-size:11px;color:var(--text-muted)">' +
@@ -171,7 +171,7 @@
         '<div style="border-left:3px solid ' + buildColor + ';padding:8px 12px;margin-bottom:12px;background:var(--bg-secondary);border-radius:0 6px 6px 0">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
             '<span style="font-size:16px;color:' + buildColor + '">' + (a.build_passed ? '&#x2713;' : '&#x2717;') + '</span>' +
-            '<span style="font-size:13px;font-weight:600">Gate 2: Build Verification</span>' +
+            '<span class="gate-title">Gate 2: Build Verification</span>' +
           '</div>' +
           '<div style="font-size:12px;color:var(--text-secondary)">' + esc(build.reason || '') + '</div>' +
           (build.output && !a.build_passed ?
@@ -203,7 +203,7 @@
         '<div style="border-left:3px solid ' + manifestColor + ';padding:8px 12px;margin-bottom:12px;background:var(--bg-secondary);border-radius:0 6px 6px 0">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
             '<span style="font-size:16px;color:' + manifestColor + '">' + (a.manifest_passed ? '&#x2713;' : '&#x2717;') + '</span>' +
-            '<span style="font-size:13px;font-weight:600">Gate 3: Manifest Compliance</span>' +
+            '<span class="gate-title">Gate 3: Manifest Compliance</span>' +
             '<span style="font-size:12px;font-weight:700;color:' + manifestColor + '">' + scorePercent + '%</span>' +
             '<span style="font-size:11px;color:var(--text-muted)">(' + (manifest.done_items || 0) + '/' + (manifest.total_items || 0) + ' deliverables)</span>' +
           '</div>' +
@@ -232,15 +232,15 @@
       bodyEl.innerHTML =
         '<div>' +
           '<!-- BREADCRUMB -->' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">' +
-            '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'watcher\')">' + sourceLabel + '</span>' +
-            '<span style="opacity:0.4"> &rarr; </span>' +
-            '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail(\'' + esc(a.task_id) + '\')},300)">' + esc(a.task_marker) + ' ' + esc(a.task_title) + '</span>' +
+          '<div class="breadcrumb">' +
+            '<span class="breadcrumb-link" onclick="OL.switchView(\'watcher\')">' + sourceLabel + '</span>' +
+            '<span class="breadcrumb-sep"> &rarr; </span>' +
+            '<span class="breadcrumb-link" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail(\'' + esc(a.task_id) + '\')},300)">' + esc(a.task_marker) + ' ' + esc(a.task_title) + '</span>' +
             (a.manifest_id ?
-              '<span style="opacity:0.4"> &rarr; </span>' +
-              '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'manifests\');setTimeout(function(){OL.loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
+              '<span class="breadcrumb-sep"> &rarr; </span>' +
+              '<span class="breadcrumb-link" onclick="OL.switchView(\'manifests\');setTimeout(function(){OL.loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
             : '') +
-            '<span style="opacity:0.4"> &rarr; </span>' +
+            '<span class="breadcrumb-sep"> &rarr; </span>' +
             '<span style="color:var(--text-primary)">Audit</span>' +
           '</div>' +
           '<!-- Header -->' +

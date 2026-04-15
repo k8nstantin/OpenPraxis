@@ -41,7 +41,7 @@
               }
               if (inputPreview.length > 80) inputPreview = inputPreview.substring(0, 80) + '...';
               html += `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
-                <span class="badge type" style="font-size:10px">${esc(name)}</span>
+                <span class="badge type badge-sm">${esc(name)}</span>
                 <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${esc(inputPreview)}</span>
               </div>`;
             }
@@ -121,14 +121,14 @@
           if (t.total_cost > 0) metaParts.push('$' + t.total_cost.toFixed(2));
           metaParts.push(t.schedule);
 
-          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf" data-id="' + esc(t.id) + '" style="margin-left:24px;cursor:pointer">' +
+          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf tree-indent" data-id="' + esc(t.id) + '">' +
             '<div class="amnesia-header">' +
               (t.status === 'running' ? '<span class="status-dot green status-pulse"></span>' : '<span class="status-dot ' + sColor + '"></span>') +
               '<span class="amnesia-status-label">' + esc(t.status) + '</span>' +
               '<span class="session-uuid">' + esc(t.marker) + '</span>' +
               '<span class="badge type">' + esc(t.schedule) + '</span>' +
               (t.depends_on ? '<span class="badge scope">dep</span>' : '') +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:auto">' + formatTime(t.updated_at || t.created_at) + '</span>' +
+              '<span class="meta-time">' + formatTime(t.updated_at || t.created_at) + '</span>' +
             '</div>' +
             '<div class="amnesia-rule">' + esc(t.title) + '</div>' +
             '<div class="amnesia-action">' + metaParts.join(' &middot; ') + '</div>' +
@@ -177,7 +177,7 @@
         ]);
         if (actions && actions.length) {
           actionsHtml = `<div style="margin-bottom:12px">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500">Actions (${actions.length})</div>
+            <div class="section-label">Actions (${actions.length})</div>
             <div style="display:flex;flex-direction:column;gap:2px">
               ${actions.slice(0, 50).map((a, i) => {
                 const inputPreview = a.tool_input ? (a.tool_input.length > 80 ? a.tool_input.substring(0, 80) + '...' : a.tool_input) : '';
@@ -185,7 +185,7 @@
                 return `<div class="task-action-item" style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px">
                   <div role="button" tabindex="0" aria-expanded="false" style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="var d=this.parentElement.querySelector('.task-action-detail');var v=d.style.display==='none';d.style.display=v?'':'none';this.setAttribute('aria-expanded',v)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
                     <span style="color:var(--text-muted);font-size:10px;min-width:16px">#${actions.length - i}</span>
-                    <span class="badge type" style="font-size:10px">${esc(a.tool_name)}</span>
+                    <span class="badge type badge-sm">${esc(a.tool_name)}</span>
                     ${hasResponse ? '<span style="color:var(--green);font-size:9px">&#x2713;</span>' : '<span style="color:var(--yellow);font-size:9px">&#x25CB;</span>'}
                     <span style="color:var(--text-muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(inputPreview)}</span>
                     <span style="font-size:9px;color:var(--text-muted)">&#x25BC;</span>
@@ -203,7 +203,7 @@
           amnesiaHtml = `<div style="margin-bottom:12px;border-left:3px solid var(--red);padding-left:10px">
             <div style="font-size:12px;color:var(--red);margin-bottom:6px;font-weight:500">Visceral Violations (${amnesia.length})</div>
             ${amnesia.map(a => `<div style="font-size:12px;margin-bottom:4px">
-              <span class="amnesia-score high" style="font-size:10px">${Math.round(a.score*100)}%</span>
+              <span class="amnesia-score high badge-sm">${Math.round(a.score*100)}%</span>
               <span style="color:var(--text-secondary)">Rule [${esc(a.rule_marker)}]:</span> ${esc(a.rule_text.length > 60 ? a.rule_text.substring(0,60) + '...' : a.rule_text)}
             </div>`).join('')}
           </div>`;
@@ -212,7 +212,7 @@
           delusionsHtml = `<div style="margin-bottom:12px;border-left:3px solid var(--yellow);padding-left:10px">
             <div style="font-size:12px;color:var(--yellow);margin-bottom:6px;font-weight:500">Manifest Deviations (${delusions.length})</div>
             ${delusions.map(d => `<div style="font-size:12px;margin-bottom:4px">
-              <span class="amnesia-score medium" style="font-size:10px">${Math.round(d.score*100)}%</span>
+              <span class="amnesia-score medium badge-sm">${Math.round(d.score*100)}%</span>
               <span style="color:var(--text-secondary)">${esc(d.reason.length > 80 ? d.reason.substring(0,80) + '...' : d.reason)}</span>
             </div>`).join('')}
           </div>`;
@@ -233,7 +233,7 @@
                 const runCost = r.cost_usd ? `$${r.cost_usd.toFixed(2)}` : '';
                 const runTurns = r.turns ? `${r.turns}t` : '';
                 return `<div class="task-run-item" role="button" tabindex="0" style="border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;cursor:pointer" data-run-id="${r.id}" data-task-id="${esc(t.id)}">
-                  <div style="display:flex;align-items:center;gap:8px">
+                  <div class="flex-row">
                     <span style="font-weight:600;min-width:24px">#${r.run_number}</span>
                     <span style="color:${statusColor};font-weight:600;text-transform:uppercase;font-size:10px">${esc(r.status)}</span>
                     <span style="color:var(--text-muted);font-size:10px">${r.actions} actions</span>
@@ -267,11 +267,11 @@
       bodyEl.innerHTML = `
         <div>
           <!-- BREADCRUMB -->
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">
-            <span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('${taskProduct ? 'products' : 'tasks'}')">${esc(t.source_node ? t.source_node.substring(0,12) : 'node')}</span>
-            ${taskProduct ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(taskProduct.id)}'),300)">${esc(taskProduct.marker)} ${esc(taskProduct.title)}</span>` : ''}
-            ${t.manifest_id ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(t.manifest_id)}'),300)">${esc(taskManifest ? taskManifest.marker + ' ' + taskManifest.title : t.manifest_id.substring(0,12))}</span>` : ''}
-            <span style="opacity:0.4"> → </span>
+          <div class="breadcrumb">
+            <span class="breadcrumb-link" onclick="OL.switchView('${taskProduct ? 'products' : 'tasks'}')">${esc(t.source_node ? t.source_node.substring(0,12) : 'node')}</span>
+            ${taskProduct ? `<span class="breadcrumb-sep"> → </span><span class="breadcrumb-link" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(taskProduct.id)}'),300)">${esc(taskProduct.marker)} ${esc(taskProduct.title)}</span>` : ''}
+            ${t.manifest_id ? `<span class="breadcrumb-sep"> → </span><span class="breadcrumb-link" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(t.manifest_id)}'),300)">${esc(taskManifest ? taskManifest.marker + ' ' + taskManifest.title : t.manifest_id.substring(0,12))}</span>` : ''}
+            <span class="breadcrumb-sep"> → </span>
             <span style="color:var(--text-primary)">${esc(t.marker)} ${esc(t.title)}</span>
           </div>
           <!-- 1. HEADER BAR -->
@@ -286,13 +286,13 @@
             <span>Runs: <strong style="color:var(--text-primary)">${t.run_count}</strong></span>
             <span>Turns: <strong style="color:var(--text-primary)">${t.total_turns || 0}</strong></span>
             <span>Cost: <strong style="color:var(--green)">$${(t.total_cost || 0).toFixed(2)}</strong></span>
-            <span style="opacity:0.3">|</span>
+            <span class="separator">|</span>
             <span>Agent: <strong style="color:var(--text-primary)">${esc(t.agent)}</strong></span>
             <span>Branch: <strong style="color:var(--text-primary)">openloom/${esc(t.marker)}</strong></span>
             ${t.manifest_id ? `<span>Manifest: <span class="manifest-nav" style="cursor:pointer;color:var(--accent);text-decoration:underline;font-weight:600" data-mid="${esc(t.manifest_id)}">${esc(t.manifest_id.substring(0,12))} &#x2192;</span></span>` : '<span>standalone</span>'}
-            <span style="opacity:0.3">|</span>
+            <span class="separator">|</span>
             <span style="display:flex;align-items:center;gap:6px">Max turns: <input type="range" id="task-max-turns" value="${t.max_turns || 100}" min="10" max="500" step="10" style="width:100px;accent-color:var(--accent);cursor:pointer" oninput="document.getElementById('task-max-turns-val').textContent=this.value" onchange="OL.updateMaxTurns('${esc(t.id)}',this.value)" /><strong id="task-max-turns-val" style="color:var(--text-primary);min-width:28px">${t.max_turns || 100}</strong></span>
-            ${t.last_run_at ? `<span style="opacity:0.3">|</span><span>Last: ${new Date(t.last_run_at).toLocaleString()}</span>` : ''}
+            ${t.last_run_at ? `<span class="separator">|</span><span>Last: ${new Date(t.last_run_at).toLocaleString()}</span>` : ''}
             <span>Created: ${new Date(t.created_at).toLocaleString()}</span>
           </div>
 
@@ -330,7 +330,7 @@
             <!-- 3. SCHEDULE SECTION — ALWAYS VISIBLE for non-running tasks -->
             <div style="border-top:1px solid var(--border);padding-top:12px">
               <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-                <span style="font-size:12px;font-weight:600;color:var(--text-primary)">Schedule</span>
+                <span class="heading-sm">Schedule</span>
                 <span style="font-size:20px">${isOneShot ? '&#9889;' : '&#128260;'}</span>
                 <span style="font-size:12px;font-weight:700;color:${isOneShot ? 'var(--accent)' : 'var(--green)'}">${isOneShot ? 'ONE-SHOT' : 'RECURRING (every ' + esc(t.schedule) + ')'}</span>
               </div>
@@ -353,7 +353,7 @@
                 <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:1h'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','in:1h')">In 1h</button>
                 <span style="font-size:11px;color:var(--text-muted)">At:</span>
                 <input type="datetime-local" id="task-sched-at-picker" class="conv-search" style="font-size:11px;padding:4px" value="${t.next_run_at ? new Date(t.next_run_at).toISOString().slice(0,16) : ''}" />
-                <button class="btn-search" style="font-size:11px;padding:4px 10px" onclick="OL.scheduleAt('${esc(t.id)}')">Set</button>
+                <button class="btn-search btn-sm" onclick="OL.scheduleAt('${esc(t.id)}')">Set</button>
               </div>
 
               <!-- Recurring options -->
@@ -375,8 +375,8 @@
           <!-- 3b. DEPENDS ON -->
           <div id="task-dependency-section" style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">Depends On</span>
-              ${t.depends_on ? `<span class="badge scope" style="font-size:10px">CHAINED</span>` : `<span style="font-size:11px;color:var(--text-muted)">No dependency</span>`}
+              <span class="heading-sm">Depends On</span>
+              ${t.depends_on ? `<span class="badge scope badge-sm">CHAINED</span>` : `<span style="font-size:11px;color:var(--text-muted)">No dependency</span>`}
             </div>
             <div id="task-dep-current">
               ${t.depends_on ? `<div id="task-dep-info" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);margin-bottom:8px">
@@ -395,8 +395,8 @@
           <!-- 4. INSTRUCTIONS (editable) -->
           <div id="task-instructions-section" style="margin-bottom:12px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <span style="font-size:12px;font-weight:600;color:var(--text-primary)">Instructions</span>
-              <button id="task-instructions-edit-btn" class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.editInstructions('${esc(t.id)}')">${t.description ? 'Edit' : 'Add Instructions'}</button>
+              <span class="heading-sm">Instructions</span>
+              <button id="task-instructions-edit-btn" class="btn-search btn-xs" onclick="OL.editInstructions('${esc(t.id)}')">${t.description ? 'Edit' : 'Add Instructions'}</button>
             </div>
             <div id="task-instructions-display">
               ${t.description
@@ -437,8 +437,8 @@
 
           <!-- LAST OUTPUT -->
           ${t.last_output && t.status !== 'running' ? `
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500">Output</div>
-            <div id="task-parsed-output" style="max-height:400px;overflow-y:auto"></div>
+            <div class="section-label">Output</div>
+            <div id="task-parsed-output" class="scroll-detail"></div>
             <div style="margin-top:6px">
               <span role="button" tabindex="0" style="font-size:11px;color:var(--text-muted);cursor:pointer;text-decoration:underline" onclick="var el=document.getElementById('task-raw-output');var v=el.style.display==='none';el.style.display=v?'':'none'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" aria-expanded="false">Toggle raw JSON</span>
             </div>
@@ -610,7 +610,7 @@
     bodyEl.innerHTML = `
       <div>
         <div style="margin-bottom:16px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Manifest <span style="opacity:0.5">(optional — leave blank for standalone task)</span></label>
+          <label class="form-label">Manifest <span style="opacity:0.5">(optional — leave blank for standalone task)</span></label>
           <input type="text" id="tc-manifest-search" class="conv-search" placeholder="Search manifests..." style="font-size:13px;margin-bottom:6px" />
           <select id="tc-manifest-id" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
             <option value="">No manifest (standalone)</option>
@@ -618,17 +618,17 @@
           </select>
         </div>
         <div style="margin-bottom:16px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Task Title</label>
+          <label class="form-label">Task Title</label>
           <input type="text" id="tc-title" class="conv-search" placeholder="What should the agent do?" style="font-size:13px" />
         </div>
         <div style="margin-bottom:16px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Instructions</label>
+          <label class="form-label">Instructions</label>
           <textarea id="tc-description" class="conv-search" placeholder="What should the agent do? These instructions will be executed exactly as written..." style="font-size:14px;min-height:300px;width:100%;resize:both;font-family:monospace;padding:12px;line-height:1.5;box-sizing:border-box"></textarea>
           <div id="tc-instructions-error" style="font-size:12px;color:var(--red);margin-top:4px;display:none">Instructions are required — the agent needs to know what to do</div>
         </div>
         <div style="display:flex;gap:12px;margin-bottom:16px">
           <div style="flex:1">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Schedule</label>
+            <label class="form-label">Schedule</label>
             <select id="tc-schedule-type" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
               <option value="at">Run at specific time</option>
               <option value="once">Run once now</option>
@@ -641,7 +641,7 @@
             </select>
           </div>
           <div style="flex:1">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Agent</label>
+            <label class="form-label">Agent</label>
             <select id="tc-agent" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
               <option value="claude-code">Claude Code</option>
               <option value="cursor">Cursor</option>
@@ -650,7 +650,7 @@
             </select>
           </div>
           <div style="flex:1">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Max Turns</label>
+            <label class="form-label">Max Turns</label>
             <select id="tc-max-turns" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
               <option value="10">10</option>
               <option value="25">25</option>
@@ -661,10 +661,10 @@
           </div>
         </div>
         <div id="tc-datetime-row" style="margin-bottom:16px">
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;font-weight:500">Run At</label>
+          <label class="form-label">Run At</label>
           <input type="datetime-local" id="tc-run-at" class="conv-search" style="font-size:13px" />
         </div>
-        <div style="display:flex;gap:8px">
+        <div class="flex-gap">
           <button id="tc-submit" class="btn-search" style="padding:8px 20px">Create Task</button>
           <button id="tc-cancel" class="btn-dismiss" style="padding:8px 16px">Cancel</button>
           <span id="tc-status" style="font-size:13px;color:var(--green);align-self:center"></span>
