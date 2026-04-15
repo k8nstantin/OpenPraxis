@@ -18,7 +18,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-//go:embed ui/*
+//go:embed ui
 var uiFS embed.FS
 
 // Handler creates the main HTTP handler with all routes.
@@ -41,8 +41,11 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 		w.Header().Set("Expires", "0")
 		w.Write(data)
 	})
-	r.Path("/app.js").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		data, err := uiFS.ReadFile("ui/app.js")
+	// Serve any .js file from ui/ (or ui/views/) with cache-bust headers
+	serveJS := func(w http.ResponseWriter, req *http.Request) {
+		// Map URL path to embedded file: /app.js → ui/app.js, /views/tasks.js → ui/views/tasks.js
+		path := "ui" + req.URL.Path
+		data, err := uiFS.ReadFile(path)
 		if err != nil {
 			http.Error(w, "not found", 404)
 			return
@@ -52,7 +55,11 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 		w.Write(data)
-	})
+	}
+	r.PathPrefix("/views/").HandlerFunc(serveJS)
+	r.Path("/app.js").HandlerFunc(serveJS)
+	r.Path("/api.js").HandlerFunc(serveJS)
+	r.Path("/tree.js").HandlerFunc(serveJS)
 
 	// WebSocket
 	r.HandleFunc("/ws", hub.HandleWS)
