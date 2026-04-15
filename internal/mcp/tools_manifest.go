@@ -150,7 +150,7 @@ func (s *Server) handleManifestCreate(ctx context.Context, req mcplib.CallToolRe
 	if err != nil {
 		return errResult("%v", err), nil
 	}
-	dependsOn, err := s.resolveManifestDependsOn(argStr(a, "depends_on"))
+	dependsOn, err := s.node.ResolveManifestDependsOn(argStr(a, "depends_on"), "")
 	if err != nil {
 		return errResult("%v", err), nil
 	}
@@ -180,8 +180,23 @@ func (s *Server) handleManifestGet(ctx context.Context, req mcplib.CallToolReque
 		jira = strings.Join(m.JiraRefs, ", ")
 	}
 
-	return textResult(fmt.Sprintf("[%s] %s\nStatus: %s | Version: %d | Author: %s\nJira: %s\nDescription: %s\nCreated: %s | Updated: %s\n\n%s",
-		m.Marker, m.Title, m.Status, m.Version, m.Author, jira, m.Description,
+	deps := "none"
+	if m.DependsOn != "" {
+		titles := s.node.ResolveDependsOnTitles(m.DependsOn)
+		depParts := make([]string, len(titles))
+		ids := m.ParseDependsOn()
+		for i, t := range titles {
+			marker := ids[i]
+			if len(marker) >= 12 {
+				marker = marker[:12]
+			}
+			depParts[i] = fmt.Sprintf("[%s] %s", marker, t)
+		}
+		deps = strings.Join(depParts, ", ")
+	}
+
+	return textResult(fmt.Sprintf("[%s] %s\nStatus: %s | Version: %d | Author: %s\nJira: %s\nDepends on: %s\nDescription: %s\nCreated: %s | Updated: %s\n\n%s",
+		m.Marker, m.Title, m.Status, m.Version, m.Author, jira, deps, m.Description,
 		m.CreatedAt.Format("2006-01-02 15:04"), m.UpdatedAt.Format("2006-01-02 15:04"),
 		m.Content)), nil
 }
@@ -230,7 +245,7 @@ func (s *Server) handleManifestUpdate(ctx context.Context, req mcplib.CallToolRe
 	}
 	dependsOn := existing.DependsOn
 	if raw := argStr(a, "depends_on"); raw != "" {
-		dependsOn, err = s.resolveManifestDependsOn(raw)
+		dependsOn, err = s.node.ResolveManifestDependsOn(raw, existing.ID)
 		if err != nil {
 			return errResult("%v", err), nil
 		}
@@ -268,8 +283,13 @@ func (s *Server) handleManifestList(ctx context.Context, req mcplib.CallToolRequ
 		if len(m.JiraRefs) > 0 {
 			jira = " | Jira: " + strings.Join(m.JiraRefs, ", ")
 		}
-		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s)\n",
-			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira)
+		deps := ""
+		if m.DependsOn != "" {
+			titles := s.node.ResolveDependsOnTitles(m.DependsOn)
+			deps = " | Deps: " + strings.Join(titles, ", ")
+		}
+		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s%s)\n",
+			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira, deps)
 	}
 
 	return textResult(output), nil
@@ -297,35 +317,16 @@ func (s *Server) handleManifestSearch(ctx context.Context, req mcplib.CallToolRe
 		if len(m.JiraRefs) > 0 {
 			jira = " | Jira: " + strings.Join(m.JiraRefs, ", ")
 		}
-		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s)\n",
-			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira)
+		deps := ""
+		if m.DependsOn != "" {
+			titles := s.node.ResolveDependsOnTitles(m.DependsOn)
+			deps = " | Deps: " + strings.Join(titles, ", ")
+		}
+		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s%s)\n",
+			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira, deps)
 	}
 
 	return textResult(output), nil
-}
-
-// resolveManifestDependsOn resolves a comma-separated list of manifest markers/IDs to full IDs.
-func (s *Server) resolveManifestDependsOn(raw string) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
-	parts := strings.Split(raw, ",")
-	resolved := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		m, err := s.node.Manifests.Get(p)
-		if err != nil {
-			return "", fmt.Errorf("resolve manifest dependency %q: %v", p, err)
-		}
-		if m == nil {
-			return "", fmt.Errorf("manifest dependency not found: %s", p)
-		}
-		resolved = append(resolved, m.ID)
-	}
-	return strings.Join(resolved, ","), nil
 }
 
 func (s *Server) handleManifestDelete(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

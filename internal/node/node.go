@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"openloom/internal/action"
@@ -362,6 +363,84 @@ func (n *Node) ResolveManifestID(manifestID string) (string, error) {
 		return "", fmt.Errorf("manifest not found: %s", manifestID)
 	}
 	return m.ID, nil
+}
+
+// ResolveManifestDependsOn resolves a comma-separated list of manifest markers/IDs to full IDs.
+// selfID is the manifest being created/updated (empty for create). Validates existence,
+// rejects self-dependency, and detects circular dependencies.
+func (n *Node) ResolveManifestDependsOn(raw, selfID string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	parts := strings.Split(raw, ",")
+	resolved := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		m, err := n.Manifests.Get(p)
+		if err != nil {
+			return "", fmt.Errorf("resolve manifest dependency %q: %v", p, err)
+		}
+		if m == nil {
+			return "", fmt.Errorf("manifest dependency not found: %s", p)
+		}
+		if selfID != "" && m.ID == selfID {
+			return "", fmt.Errorf("manifest cannot depend on itself")
+		}
+		// Check for circular dependency: if the dependency transitively depends on selfID
+		if selfID != "" {
+			if n.hasTransitiveDependency(m.ID, selfID, make(map[string]bool)) {
+				return "", fmt.Errorf("circular dependency: %s transitively depends on this manifest", m.Marker)
+			}
+		}
+		resolved = append(resolved, m.ID)
+	}
+	return strings.Join(resolved, ","), nil
+}
+
+// hasTransitiveDependency checks if fromID transitively depends on targetID.
+func (n *Node) hasTransitiveDependency(fromID, targetID string, visited map[string]bool) bool {
+	if visited[fromID] {
+		return false
+	}
+	visited[fromID] = true
+	m, _ := n.Manifests.Get(fromID)
+	if m == nil {
+		return false
+	}
+	for _, dep := range m.ParseDependsOn() {
+		if dep == targetID {
+			return true
+		}
+		if n.hasTransitiveDependency(dep, targetID, visited) {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveDependsOnTitles resolves a comma-separated depends_on string to a list of manifest titles.
+func (n *Node) ResolveDependsOnTitles(dependsOn string) []string {
+	if dependsOn == "" {
+		return nil
+	}
+	parts := strings.Split(dependsOn, ",")
+	titles := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		m, _ := n.Manifests.Get(p)
+		if m != nil {
+			titles = append(titles, m.Title)
+		} else {
+			titles = append(titles, p) // fallback to ID if not found
+		}
+	}
+	return titles
 }
 
 // ValidateArchiveProduct checks that all linked manifests are "archive" before allowing a product to be archived.
