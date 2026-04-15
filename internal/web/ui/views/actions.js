@@ -99,7 +99,7 @@
       bodyEl.querySelectorAll('.conv-nav').forEach(el => {
         OL.onView(el, 'click', () => {
           OL.switchView('conversations');
-          setTimeout(() => window._loadConv(el.dataset.convId), 300);
+          setTimeout(() => OL.loadConv(el.dataset.convId), 300);
         });
       });
 

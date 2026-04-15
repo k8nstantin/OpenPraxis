@@ -20,19 +20,19 @@
         '<div class="marker-message">' + esc(m.message) + '</div>' +
         '<div class="marker-target">' + esc(m.target_path || m.target_id) + '</div>' +
         '<div class="marker-actions">' +
-          '<button onclick="window._markerDone(\'' + esc(m.id) + '\')">Done</button>' +
-          '<button onclick="window._markerSeen(\'' + esc(m.id) + '\')">Seen</button>' +
+          '<button onclick="OL.markerDone(\'' + esc(m.id) + '\')">Done</button>' +
+          '<button onclick="OL.markerSeen(\'' + esc(m.id) + '\')">Seen</button>' +
         '</div>' +
       '</div>';
     }).join('');
   };
 
-  window._markerDone = async function(id) {
+  OL.markerDone = async function(id) {
     await fetch('/api/markers/' + id + '/done', {method: 'POST'});
     OL.refreshAll();
   };
 
-  window._markerSeen = async function(id) {
+  OL.markerSeen = async function(id) {
     await fetch('/api/markers/' + id + '/seen', {method: 'POST'});
     OL.refreshAll();
   };

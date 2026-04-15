@@ -67,7 +67,7 @@
         OL.onView(item, 'click', function() {
           el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
           item.classList.add('active');
-          window._loadConv(item.dataset.id);
+          OL.loadConv(item.dataset.id);
         });
       });
     } catch (e) {
@@ -94,13 +94,13 @@
       OL.onView(item, 'click', function() {
         el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
         item.classList.add('active');
-        window._loadConv(item.dataset.id);
+        OL.loadConv(item.dataset.id);
       });
     });
   }
 
   // Expose to onclick
-  window._loadConv = async function(id) {
+  OL.loadConv = async function(id) {
     // Highlight active
     document.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
     var active = document.querySelector('.conv-item[data-id="' + id + '"]');
@@ -119,7 +119,7 @@
     var bodyEl = document.getElementById('conv-detail');
 
     var convRef = conv.id ? conv.id.substring(0, 12) : '';
-    titleEl.innerHTML = esc(conv.title || 'Conversation') + ' <button class="btn-copy" onclick="window._copy(\'recall conversation ' + convRef + '\')" title="Copy reference">&#x2398;</button>';
+    titleEl.innerHTML = esc(conv.title || 'Conversation') + ' <button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + '\')" title="Copy reference">&#x2398;</button>';
 
     // Fetch linked actions
     var actionsHtml = '';
@@ -156,7 +156,7 @@
         '<div class="conv-turn-header">' +
           '<span class="conv-turn-role">' + esc(label) + '</span>' +
           '<span class="conv-turn-index">#' + (i + 1) + '</span>' +
-          '<button class="btn-copy" onclick="window._copy(\'recall conversation ' + convRef + ' turn ' + (i + 1) + ': ' + esc(t.content.substring(0, 80)).replace(/'/g, '') + '\')" title="Copy this turn">&#x2398;</button>' +
+          '<button class="btn-copy" onclick="OL.copy(\'recall conversation ' + convRef + ' turn ' + (i + 1) + ': ' + esc(t.content.substring(0, 80)).replace(/'/g, '') + '\')" title="Copy this turn">&#x2398;</button>' +
         '</div>' +
         '<div class="conv-turn-content">' + esc(t.content) + '</div>' +
       '</div>';

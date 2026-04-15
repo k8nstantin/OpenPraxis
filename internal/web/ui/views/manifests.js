@@ -82,7 +82,7 @@
           '</div>';
         },
         leafSelector: '.tree-leaf',
-        onLeafClick: function(item) { window._loadManifest(item.dataset.id); },
+        onLeafClick: function(item) { OL.loadManifest(item.dataset.id); },
       });
     } catch (e) {
       console.error('Load manifests failed:', e);
@@ -113,12 +113,12 @@
     el.innerHTML = manifests.map(m => {
       const statusClass = m.status === 'open' ? 'scope' : m.status === 'closed' ? 'type' : m.status === 'archive' ? 'type' : '';
       const jira = (m.jira_refs || []).join(', ');
-      return `<div class="manifest-item clickable" data-id="${esc(m.id)}" onclick="window._loadManifest('${esc(m.id)}')">
+      return `<div class="manifest-item clickable" data-id="${esc(m.id)}" onclick="OL.loadManifest('${esc(m.id)}')">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span class="session-uuid">${esc(m.marker)}</span>
           <span class="badge ${statusClass}">${esc(m.status)}</span>
           <span style="font-size:11px;color:var(--text-muted)">v${m.version}</span>
-          <button class="btn-copy-sm" onclick="event.stopPropagation();window._copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>
+          <button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>
         </div>
         <div class="manifest-item-title">${esc(m.title)}</div>
         <div style="font-size:12px;color:var(--text-secondary)">${esc(m.description)}</div>
@@ -128,7 +128,7 @@
   }
 
   // Promote idea or memory to manifest -- opens manifest detail panel with creation form pre-filled
-  window._promoteToManifest = async function(title, description, content) {
+  OL.promoteToManifest = async function(title, description, content) {
     OL.switchView('manifests');
 
     // Fetch products for the dropdown
@@ -212,12 +212,12 @@
         const m = await resp.json();
         bodyEl.querySelector('#pm-status-msg').textContent = 'Created!';
         OL.loadManifests();
-        setTimeout(() => window._loadManifest(m.id), 500);
+        setTimeout(() => OL.loadManifest(m.id), 500);
       };
     }, 300);
   };
 
-  window._loadManifest = async function(id) {
+  OL.loadManifest = async function(id) {
     document.querySelectorAll('.manifest-item').forEach(i => i.classList.remove('active'));
     const active = document.querySelector(`.manifest-item[data-id="${id}"]`);
     if (active) active.classList.add('active');
@@ -232,7 +232,7 @@
       const jira = (m.jira_refs || []).map(r => `<a href="https://gryphonnetworks.atlassian.net/browse/${r}" target="_blank" style="color:var(--accent)">${esc(r)}</a>`).join(', ');
       const tags = (m.tags || []).map(t => `<span class="badge tag">${esc(t)}</span>`).join(' ');
 
-      titleEl.innerHTML = `<span id="manifest-edit-title" class="manifest-editable" style="cursor:pointer;border-radius:4px;padding:2px 4px" title="Click to edit title">${esc(m.title)}</span> <button class="btn-copy" onclick="window._copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>`;
+      titleEl.innerHTML = `<span id="manifest-edit-title" class="manifest-editable" style="cursor:pointer;border-radius:4px;padding:2px 4px" title="Click to edit title">${esc(m.title)}</span> <button class="btn-copy" onclick="OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref">&#x2398;</button>`;
 
       // Fetch linked product for breadcrumb
       let product = null;
@@ -326,7 +326,7 @@
           <!-- BREADCRUMB -->
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">
             <span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('${product ? 'products' : 'manifests'}')">${esc(m.source_node ? m.source_node.substring(0,12) : 'node')}</span>
-            ${product ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>window._loadProduct('${esc(product.id)}'),300)">${esc(product.marker)} ${esc(product.title)}</span>` : ''}
+            ${product ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(product.id)}'),300)">${esc(product.marker)} ${esc(product.title)}</span>` : ''}
             <span style="opacity:0.4"> → </span>
             <span style="color:var(--text-primary)">${esc(m.marker)} ${esc(m.title)}</span>
           </div>
@@ -373,7 +373,7 @@
 
       // Bind idea navigation links
       bodyEl.querySelectorAll('.idea-nav').forEach(el => {
-        OL.onView(el, 'click', () => window._goToIdea(el.dataset.iid));
+        OL.onView(el, 'click', () => OL.goToIdea(el.dataset.iid));
       });
 
       // Bind task navigation links
@@ -395,7 +395,7 @@
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({status: newStatus})
             });
-            window._loadManifest(m.id);
+            OL.loadManifest(m.id);
             OL.loadManifests();
           } catch(e) {
             console.error('Update manifest status failed:', e);
@@ -425,10 +425,10 @@
               });
               OL.loadManifests();
             }
-            window._loadManifest(m.id);
+            OL.loadManifest(m.id);
           };
           OL.onView(input, 'blur', save);
-          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
+          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') OL.loadManifest(m.id); });
         });
       }
 
@@ -454,10 +454,10 @@
               });
               OL.loadManifests();
             }
-            window._loadManifest(m.id);
+            OL.loadManifest(m.id);
           };
           OL.onView(input, 'blur', save);
-          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') window._loadManifest(m.id); });
+          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') OL.loadManifest(m.id); });
         });
       }
 
@@ -485,10 +485,10 @@
               });
               OL.loadManifests();
             }
-            window._loadManifest(m.id);
+            OL.loadManifest(m.id);
           };
           OL.onView(sel, 'change', save);
-          OL.onView(sel, 'blur', () => window._loadManifest(m.id));
+          OL.onView(sel, 'blur', () => OL.loadManifest(m.id));
         });
       }
 
@@ -515,7 +515,7 @@
             body: JSON.stringify({content: val})
           });
           OL.loadManifests();
-          window._loadManifest(m.id);
+          OL.loadManifest(m.id);
         });
       }
 
@@ -539,10 +539,10 @@
     }
   };
 
-  window._archiveManifest = async function(id) {
+  OL.archiveManifest = async function(id) {
     await fetchJSON('/api/manifests/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status: 'archive'}) });
     OL.loadManifests();
-    window._loadManifest(id);
+    OL.loadManifest(id);
   };
 
 })(window.OL);

@@ -108,7 +108,7 @@
           var h = maxCost > 0 ? Math.max(2, Math.round((d.cost / maxCost) * 100)) : 2;
           var overBudget = budget > 0 && d.cost >= budget;
           var color = overBudget ? 'var(--red)' : (budget > 0 && d.cost >= budget * 0.8) ? 'var(--yellow)' : 'var(--green)';
-          chartHtml += '<div title="' + d.period + ': $' + d.cost.toFixed(2) + '" style="width:' + barWidth + 'px;height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;flex-shrink:0;opacity:' + (d.cost === 0 ? '0.2' : '0.8') + ';cursor:' + (_costPeriod === 'day' ? 'pointer' : 'default') + '" ' + (_costPeriod === 'day' ? 'onclick="loadCostDrillDown(\'' + d.period + '\')"' : '') + '></div>';
+          chartHtml += '<div title="' + d.period + ': $' + d.cost.toFixed(2) + '" style="width:' + barWidth + 'px;height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;flex-shrink:0;opacity:' + (d.cost === 0 ? '0.2' : '0.8') + ';cursor:' + (_costPeriod === 'day' ? 'pointer' : 'default') + '" ' + (_costPeriod === 'day' ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')"' : '') + '></div>';
         }
         chartHtml += '</div>';
         chartEl.innerHTML = chartHtml;
@@ -143,7 +143,7 @@
         totalTurns += d.turns;
         totalTasks += d.tasks;
         totalRuns += (d.runs || 0);
-        html += '<tr class="top-task-row" style="' + rowBg + ';' + (clickable ? 'cursor:pointer' : '') + '" ' + (clickable ? 'onclick="loadCostDrillDown(\'' + d.period + '\')"' : '') + '>' +
+        html += '<tr class="top-task-row" style="' + rowBg + ';' + (clickable ? 'cursor:pointer' : '') + '" ' + (clickable ? 'onclick="OL.loadCostDrillDown(\'' + d.period + '\')"' : '') + '>' +
           '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:12px;color:var(--accent)">' + d.period + (isToday ? ' <span style="font-size:10px;color:var(--green)">(today)</span>' : '') + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + d.tasks + '</td>' +
           '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px">' + (d.runs || d.tasks) + '</td>' +
@@ -172,7 +172,7 @@
   };
 
   // Drill-down: show individual tasks for a specific date, grouped by agent
-  window.loadCostDrillDown = async function(date) {
+  OL.loadCostDrillDown = async function(date) {
     var tableEl = document.getElementById('cost-history-table');
     var chartEl = document.getElementById('cost-chart');
     var banner = document.getElementById('cost-drilldown-banner');

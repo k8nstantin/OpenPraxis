@@ -72,7 +72,6 @@
     if (view === 'chat') OL.loadChat();
     if (view === 'settings') OL.loadSettings();
   }
-  window.switchView = switchView;
   OL.switchView = switchView;
 
   // --- Theme ---
@@ -204,11 +203,5 @@
     }
   }
   OL.refreshAll = refreshAll;
-
-  // Expose switchView to global for inline onclick handlers
-  window.switchView = switchView;
-
-  // Expose loadTaskDetail globally for inline onclick in HTML strings
-  window.loadTaskDetail = function(id) { OL.loadTaskDetail(id); };
 
 })(window.OL);

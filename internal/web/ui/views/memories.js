@@ -29,7 +29,7 @@
           return '<div class="tree-node peer-leaf clickable tree-leaf" data-memory-id="' + esc(m.id) + '">' +
             '<span class="session-uuid">' + esc(m.marker) + '</span>' +
             '<span style="font-size:12px;color:var(--text-primary);flex:1">' + esc(m.l0.length > 50 ? m.l0.substring(0, 50) + '...' : m.l0) + '</span>' +
-            '<button class="btn-copy-sm" onclick="event.stopPropagation();window._copy(\'recall memory ' + esc(m.marker) + '\')" title="Copy ref">&#x2398;</button>' +
+            '<button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy(\'recall memory ' + esc(m.marker) + '\')" title="Copy ref">&#x2398;</button>' +
           '</div>';
         },
         leafSelector: '.tree-leaf',
@@ -66,7 +66,7 @@
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
           <span class="session-uuid" style="font-size:14px">${esc(marker)}</span>
           <span style="font-family:var(--font-mono);font-size:12px;color:var(--accent);flex:1">${esc(mem.path)}</span>
-          <button class="btn-copy" onclick="window._copy('recall memory ${marker}')" title="Copy reference">&#x2398;</button>
+          <button class="btn-copy" onclick="OL.copy('recall memory ${marker}')" title="Copy reference">&#x2398;</button>
         </div>
         <div class="memory-meta">
           <span class="badge type">${esc(mem.type || 'insight')}</span>
@@ -92,13 +92,13 @@
         <div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">ID: ${esc(mem.id)}</div>
         <div style="margin-top:12px;display:flex;gap:8px">
           <button class="btn-search" id="mem-promote-btn" style="font-size:12px;padding:6px 14px">Create Manifest from Memory</button>
-          <button class="btn-dismiss" onclick="window._archiveMemory('${esc(mem.id)}')" style="font-size:12px;padding:6px 14px">Archive</button>
+          <button class="btn-dismiss" onclick="OL.archiveMemory('${esc(mem.id)}')" style="font-size:12px;padding:6px 14px">Archive</button>
         </div>
       </div>
     `;
 
     OL.onView(detail.querySelector('#mem-promote-btn'), 'click', () => {
-      window._promoteToManifest(
+      OL.promoteToManifest(
         tierContent.l0,
         tierContent.l1,
         tierContent.l2
@@ -114,7 +114,7 @@
     });
   }
 
-  window._archiveMemory = async function(id) {
+  OL.archiveMemory = async function(id) {
     // Memories don't have a status field — soft delete via API
     await fetch('/api/memories/' + id, {method: 'DELETE'});
     document.getElementById('memory-peer-detail').innerHTML = '<div class="empty-state">Archived</div>';

@@ -50,14 +50,14 @@
         ],
         afterRender: function(container) {
           container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
-          OL.onView(container.querySelector('#btn-new-product'), 'click', function() { window._createProduct(); });
+          OL.onView(container.querySelector('#btn-new-product'), 'click', function() { OL.createProduct(); });
         },
       });
 
       // Handle empty case — still need new product button
       if (!peerGroups || !peerGroups.length) {
         el.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search" id="btn-new-product" style="font-size:12px;padding:6px 16px">+ New Product</button></div>');
-        OL.onView(el.querySelector('#btn-new-product'), 'click', function() { window._createProduct(); });
+        OL.onView(el.querySelector('#btn-new-product'), 'click', function() { OL.createProduct(); });
       }
     } catch (e) {
       console.error('Load products failed:', e);
@@ -74,7 +74,7 @@
       let html = '';
       for (const m of manifests) {
         const statusClass = m.status === 'open' ? 'confirmed' : m.status === 'closed' ? 'flagged' : 'dismissed';
-        html += `<div class="amnesia-item ${statusClass}" style="cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>window._loadManifest&&window._loadManifest('${esc(m.id)}'),300)">
+        html += `<div class="amnesia-item ${statusClass}" style="cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest&&OL.loadManifest('${esc(m.id)}'),300)">
           <div class="amnesia-header">
             <span class="amnesia-status-label">${esc(m.status)}</span>
             <span class="session-uuid">${esc(m.marker)}</span>
@@ -90,7 +90,7 @@
   }
 
   // Create product dialog
-  window._createProduct = function() {
+  OL.createProduct = function() {
     const titleEl = document.getElementById('product-detail-title');
     const bodyEl = document.getElementById('product-detail');
     titleEl.textContent = 'New Product';
@@ -156,7 +156,7 @@
             if (m.total_turns > 0) mCostParts.push(`${m.total_turns} turns`);
             if (m.total_cost > 0) mCostParts.push(`<span style="color:var(--green)">$${m.total_cost.toFixed(2)}</span>`);
             return `<div class="manifest-item" style="border-bottom:1px solid var(--border);padding:10px 12px;display:flex;align-items:center">
-              <div style="flex:1;cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>window._loadManifest('${esc(m.id)}'),300)">
+              <div style="flex:1;cursor:pointer" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(m.id)}'),300)">
                 <div style="display:flex;align-items:center;gap:8px">
                   <span class="session-uuid" style="font-size:11px">${esc(m.marker)}</span>
                   <span class="badge ${mStatusClass}" style="font-size:10px">${esc(m.status)}</span>
@@ -164,7 +164,7 @@
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:4px">${esc(m.title)}</div>
               </div>
-              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();window._unlinkManifestFromProduct('${esc(m.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
+              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkManifestFromProduct('${esc(m.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
           manifestsHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
@@ -195,13 +195,13 @@
                 </div>
                 <div style="font-size:13px;color:var(--text-primary);margin-top:2px">${esc(i.title)}</div>
               </div>
-              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();window._unlinkIdeaFromProduct('${esc(i.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
+              <button class="btn-dismiss" style="font-size:10px;padding:2px 8px;flex-shrink:0" onclick="event.stopPropagation();OL.unlinkIdeaFromProduct('${esc(i.id)}','${esc(p.id)}')" title="Remove from product">&#x2715;</button>
             </div>`;
           }).join('');
           ideasHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas <span style="font-weight:400;font-size:12px;color:var(--text-muted)">(${ideas.length})</span></span>
-              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="window._linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
+              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
             </div>
             <div style="border:1px solid var(--border);border-radius:4px;overflow:hidden">${ideaRows}</div>
           </div>`;
@@ -209,7 +209,7 @@
           ideasHtml = `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
               <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas</span>
-              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="window._linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
+              <button class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
             </div>
             <div style="font-size:12px;color:var(--text-muted);padding:12px;border:1px dashed var(--border);border-radius:4px;text-align:center">No ideas linked yet</div>
           </div>`;
@@ -229,7 +229,7 @@
             <span class="session-uuid" style="font-size:14px">${esc(p.marker)}</span>
             <span class="badge ${statusClass}">${esc(p.status)}</span>
             ${tags}
-            <button class="btn-copy" onclick="window._copy('get product ${esc(p.marker)}')" title="Copy ref">&#x2398;</button>
+            <button class="btn-copy" onclick="OL.copy('get product ${esc(p.marker)}')" title="Copy ref">&#x2398;</button>
           </div>
           <!-- METRICS BAR -->
           <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:12px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-mono)">
@@ -243,18 +243,18 @@
           </div>
           <!-- CONTROLS -->
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-            <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="window._editProduct('${esc(p.id)}')">&#9998; Edit</button>
-            <button class="btn-search" style="font-size:11px;padding:4px 12px;background:var(--bg-input)" onclick="window._linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
+            <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="OL.editProduct('${esc(p.id)}')">&#9998; Edit</button>
+            <button class="btn-search" style="font-size:11px;padding:4px 12px;background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
             ${['draft','open','closed','archive'].map(s => {
               const active = p.status === s;
               const color = s === 'open' ? 'var(--green)' : s === 'closed' ? 'var(--text-muted)' : s === 'archive' ? 'var(--red)' : 'var(--yellow)';
-              return '<button class="product-status-btn" data-status="' + s + '" style="padding:4px 12px;font-size:11px;font-weight:600;text-transform:uppercase;border-radius:4px;cursor:pointer;border:1px solid ' + color + ';background:' + (active ? color : 'transparent') + ';color:' + (active ? 'var(--bg-primary)' : color) + ';opacity:' + (active ? '1' : '0.7') + '" onclick="window._updateProductStatus(\'' + esc(p.id) + '\',\'' + s + '\')">' + s + '</button>';
+              return '<button class="product-status-btn" data-status="' + s + '" style="padding:4px 12px;font-size:11px;font-weight:600;text-transform:uppercase;border-radius:4px;cursor:pointer;border:1px solid ' + color + ';background:' + (active ? color : 'transparent') + ';color:' + (active ? 'var(--bg-primary)' : color) + ';opacity:' + (active ? '1' : '0.7') + '" onclick="OL.updateProductStatus(\'' + esc(p.id) + '\',\'' + s + '\')">' + s + '</button>';
             }).join('')}
           </div>
           ${p.description ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${esc(p.description)}</div>` : ''}
           <!-- DIAGRAM BUTTON -->
           <div style="margin-bottom:12px">
-            <button class="btn-search" style="font-size:12px;padding:6px 16px" onclick="window._showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
+            <button class="btn-search" style="font-size:12px;padding:6px 16px" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
           </div>
           ${manifestsHtml}
           ${ideasHtml}
@@ -265,10 +265,10 @@
     }
   };
 
-  window._loadProduct = OL.loadProductDetail;
+  OL.loadProduct = OL.loadProductDetail;
 
   // --- Cytoscape Directed Acyclic Graph Diagram (Full Page) ---
-  window._showProductDiagram = function(productId, productTitle) {
+  OL.showProductDiagram = function(productId, productTitle) {
     // Create full-page overlay
     let overlay = document.getElementById('product-diagram-overlay');
     if (overlay) overlay.remove();
@@ -490,7 +490,7 @@
           setTimeout(() => OL.loadProductDetail(d.id), 300);
         } else if (d.type === 'manifest') {
           OL.switchView('manifests');
-          setTimeout(() => window._loadManifest(d.id), 300);
+          setTimeout(() => OL.loadManifest(d.id), 300);
         } else if (d.type === 'task') {
           OL.switchView('tasks');
           setTimeout(() => OL.loadTaskDetail(d.id), 300);
@@ -504,7 +504,7 @@
   }
 
   // Product CRUD actions
-  window._editProduct = function(id) {
+  OL.editProduct = function(id) {
     const titleEl = document.getElementById('product-detail-title');
     const bodyEl = document.getElementById('product-detail');
     fetchJSON('/api/products/' + id).then(p => {
@@ -541,7 +541,7 @@
     });
   };
 
-  window._updateProductStatus = async function(id, status) {
+  OL.updateProductStatus = async function(id, status) {
     await fetchJSON('/api/products/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status}) });
     OL.loadProducts();
     OL.loadProductDetail(id);
@@ -549,7 +549,7 @@
 
   // _deleteProduct removed -- use status toggle to archive instead
 
-  window._linkManifestToProduct = async function(productId) {
+  OL.linkManifestToProduct = async function(productId) {
     // Fetch all manifests not yet linked to this product
     const allManifests = await fetchJSON('/api/manifests');
     const unlinked = (allManifests || []).filter(m => m.project_id !== productId);
@@ -583,13 +583,13 @@
     });
   };
 
-  window._unlinkManifestFromProduct = async function(manifestId, productId) {
+  OL.unlinkManifestFromProduct = async function(manifestId, productId) {
     await fetchJSON('/api/manifests/' + manifestId, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({project_id: ''}) });
     OL.loadProducts();
     OL.loadProductDetail(productId);
   };
 
-  window._linkIdeaToProduct = async function(productId) {
+  OL.linkIdeaToProduct = async function(productId) {
     const allIdeas = await fetchJSON('/api/ideas');
     const unlinked = (allIdeas || []).filter(i => i.project_id !== productId);
     if (!unlinked.length) { alert('No ideas available to link'); return; }
@@ -625,7 +625,7 @@
     });
   };
 
-  window._unlinkIdeaFromProduct = async function(ideaId, productId) {
+  OL.unlinkIdeaFromProduct = async function(ideaId, productId) {
     const idea = await fetchJSON('/api/ideas/' + ideaId);
     if (idea) {
       await fetchJSON('/api/ideas/' + ideaId, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({project_id: '', title: idea.title, description: idea.description, status: idea.status, priority: idea.priority}) });

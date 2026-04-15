@@ -59,21 +59,21 @@
       OL.wireTreeToggles(el, 'data-idea-peer');
 
       el.querySelectorAll('.manifest-item').forEach(function(item) {
-        OL.onView(item, 'click', function() { window._loadIdea(item.dataset.id); });
+        OL.onView(item, 'click', function() { OL.loadIdea(item.dataset.id); });
       });
 
       if (_pendingIdeaId) {
         var id = _pendingIdeaId;
         _pendingIdeaId = null;
         var match = allIdeas.find(function(i) { return i.id.startsWith(id) || i.marker === id; });
-        if (match) window._loadIdea(match.id);
+        if (match) OL.loadIdea(match.id);
       }
     } catch (e) {
       console.error('Load ideas failed:', e);
     }
   };
 
-  window._loadIdea = async function(id) {
+  OL.loadIdea = async function(id) {
     document.querySelectorAll('#ideas-list .manifest-item').forEach(function(i) { i.classList.remove('active'); });
     var active = document.querySelector('#ideas-list .manifest-item[data-id="' + id + '"]');
     if (active) active.classList.add('active');
@@ -112,7 +112,7 @@
             '<span class="amnesia-score ' + prioClass + '">' + esc(idea.priority) + '</span>' +
             '<span class="badge">' + esc(idea.status) + '</span>' +
             '<span style="font-size:12px;color:var(--text-muted)">by ' + esc(idea.author) + '</span>' +
-            '<button class="btn-copy" onclick="window._copy(\'get idea ' + idea.marker + '\')" title="Copy ref">&#x2398;</button>' +
+            '<button class="btn-copy" onclick="OL.copy(\'get idea ' + idea.marker + '\')" title="Copy ref">&#x2398;</button>' +
           '</div>' +
           (idea.description ? '<div style="font-size:14px;color:var(--text-primary);margin:12px 0;line-height:1.5">' + esc(idea.description) + '</div>' : '') +
           linkedHtml +
@@ -121,7 +121,7 @@
           '</div>' +
           '<div style="margin-top:12px;display:flex;gap:8px">' +
             '<button class="btn-search promote-idea-btn" style="font-size:12px;padding:6px 14px">Create Manifest from Idea</button>' +
-            '<button class="btn-dismiss" onclick="window._archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
+            '<button class="btn-dismiss" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
           '</div>' +
         '</div>';
 
@@ -129,13 +129,13 @@
       bodyEl.querySelectorAll('.manifest-link').forEach(function(el) {
         OL.onView(el, 'click', function() {
           OL.switchView('manifests');
-          setTimeout(function() { window._loadManifest(el.dataset.mid); }, 300);
+          setTimeout(function() { OL.loadManifest(el.dataset.mid); }, 300);
         });
       });
 
       // Promote idea to manifest
       OL.onView(bodyEl.querySelector('.promote-idea-btn'), 'click', function() {
-        window._promoteToManifest(
+        OL.promoteToManifest(
           idea.title,
           idea.description || '',
           '# ' + idea.title + '\n\n' + (idea.description || '') + '\n\nPromoted from idea [' + idea.marker + ']\nPriority: ' + idea.priority + '\nStatus: ' + idea.status
@@ -147,12 +147,12 @@
   };
 
   // Navigate from manifest → specific idea
-  window._goToIdea = function(marker) {
+  OL.goToIdea = function(marker) {
     _pendingIdeaId = marker;
     OL.switchView('ideas');
   };
 
-  window._archiveIdea = async function(id) {
+  OL.archiveIdea = async function(id) {
     var idea = await fetchJSON('/api/ideas/' + id);
     if (idea) {
       await fetchJSON('/api/ideas/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({status: 'archive'}) });

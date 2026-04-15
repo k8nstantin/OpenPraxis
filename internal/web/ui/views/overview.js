@@ -280,9 +280,9 @@
             '<span style="font-size:12px;color:var(--text-muted)">' + rt.actions + ' actions</span>' +
             '<span style="font-size:12px;color:' + (rt.paused ? 'var(--yellow)' : 'var(--green)') + ';font-weight:500">' + (rt.paused ? 'PAUSED' : mins + 'm ' + secs + 's') + '</span>' +
             (rt.paused
-              ? '<button class="btn-search" onclick="event.stopPropagation();window._resumeTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px">Resume</button>'
-              : '<button class="btn-search" onclick="event.stopPropagation();window._pauseTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px;background:var(--yellow);color:var(--bg-primary)">Pause</button>') +
-            '<button class="btn-confirm" onclick="event.stopPropagation();window._killTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px">Stop</button>' +
+              ? '<button class="btn-search" onclick="event.stopPropagation();OL.resumeTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px">Resume</button>'
+              : '<button class="btn-search" onclick="event.stopPropagation();OL.pauseTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px;background:var(--yellow);color:var(--bg-primary)">Pause</button>') +
+            '<button class="btn-confirm" onclick="event.stopPropagation();OL.killTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px">Stop</button>' +
           '</div>';
         }).join('');
 
@@ -297,7 +297,7 @@
     } catch (e) {}
   };
 
-  window._killTask = async function(id) {
+  OL.killTask = async function(id) {
     if (!confirm('Stop this running task?')) return;
     await fetch('/api/tasks/' + id + '/kill', {method: 'POST'});
     OL.loadRunningTasks();
@@ -305,21 +305,21 @@
     OL.loadTasks();
   };
 
-  window._pauseTask = async function(id) {
+  OL.pauseTask = async function(id) {
     await fetch('/api/tasks/' + id + '/pause', {method: 'POST'});
     OL.loadRunningTasks();
     OL.loadTaskDetail(id);
     OL.loadTasks();
   };
 
-  window._resumeTask = async function(id) {
+  OL.resumeTask = async function(id) {
     await fetch('/api/tasks/' + id + '/resume', {method: 'POST'});
     OL.loadRunningTasks();
     OL.loadTaskDetail(id);
     OL.loadTasks();
   };
 
-  window._emergencyStopAll = async function() {
+  OL.emergencyStopAll = async function() {
     if (!confirm('EMERGENCY STOP — Kill ALL running tasks?')) return;
     try {
       var tasks = await fetchJSON('/api/tasks/running');
@@ -336,7 +336,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     var btn1 = document.getElementById('emergency-stop-btn');
     var btn2 = document.getElementById('activity-emergency-stop');
-    if (btn1) btn1.onclick = window._emergencyStopAll;
-    if (btn2) btn2.onclick = window._emergencyStopAll;
+    if (btn1) btn1.onclick = OL.emergencyStopAll;
+    if (btn2) btn2.onclick = OL.emergencyStopAll;
   });
 })(window.OL);

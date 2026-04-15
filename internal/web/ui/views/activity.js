@@ -58,7 +58,7 @@
           var id = item.dataset.activityId;
           if (type === 'conversation') {
             OL.switchView('conversations');
-            setTimeout(function() { window._loadConv(id); }, 300);
+            setTimeout(function() { OL.loadConv(id); }, 300);
           } else if (type === 'memory') {
             OL.switchView('memories');
             setTimeout(function() { OL.loadMemoryPeerDetail(id); }, 300);

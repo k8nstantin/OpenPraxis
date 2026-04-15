@@ -50,8 +50,8 @@
               '<span style="color:var(--text-muted)">Action:</span> ' + esc(d.tool_input) +
             '</div>' +
             (d.status === 'flagged' ? '<div class="amnesia-actions">' +
-              '<button class="btn-confirm" onclick="window._delusionAction(' + d.id + ',\'confirm\')">Confirm Off-Spec</button>' +
-              '<button class="btn-dismiss" onclick="window._delusionAction(' + d.id + ',\'dismiss\')">Dismiss</button>' +
+              '<button class="btn-confirm" onclick="OL.delusionAction(' + d.id + ',\'confirm\')">Confirm Off-Spec</button>' +
+              '<button class="btn-dismiss" onclick="OL.delusionAction(' + d.id + ',\'dismiss\')">Dismiss</button>' +
             '</div>' : '') +
           '</div>';
         },
@@ -62,7 +62,7 @@
     }
   };
 
-  window._delusionAction = async function(id, action) {
+  OL.delusionAction = async function(id, action) {
     await fetch('/api/delusions/' + id + '/' + action, {method: 'POST'});
     OL.loadDelusions();
   };
@@ -149,8 +149,8 @@
               '<span style="color:var(--text-muted)">Action:</span> ' + esc(a.tool_input) +
             '</div>' +
             (a.status === 'flagged' ? '<div class="amnesia-actions">' +
-              '<button class="btn-confirm" onclick="window._amnesiaAction(' + a.id + ',\'confirm\')">Confirm Violation</button>' +
-              '<button class="btn-dismiss" onclick="window._amnesiaAction(' + a.id + ',\'dismiss\')">Dismiss</button>' +
+              '<button class="btn-confirm" onclick="OL.amnesiaAction(' + a.id + ',\'confirm\')">Confirm Violation</button>' +
+              '<button class="btn-dismiss" onclick="OL.amnesiaAction(' + a.id + ',\'dismiss\')">Dismiss</button>' +
             '</div>' : '') +
           '</div>';
         },
@@ -161,7 +161,7 @@
     }
   };
 
-  window._amnesiaAction = async function(id, action) {
+  OL.amnesiaAction = async function(id, action) {
     await fetch('/api/amnesia/' + id + '/' + action, {method: 'POST'});
     OL.loadAmnesia();
   };
@@ -217,8 +217,8 @@
             '<span class="session-uuid">' + esc(r.marker) + '</span>' +
             '<span class="visceral-text">' + esc(r.text) + '</span>' +
             '<span style="color:var(--text-muted);font-size:11px">' + esc(r.source || '') + '</span>' +
-            '<button class="btn-copy" onclick="window._copy(\'recall memory ' + esc(r.marker) + '\')" title="Copy reference">&#x2398;</button>' +
-            '<button class="visceral-delete" onclick="window._deleteVisceral(\'' + esc(r.id) + '\')" title="Remove rule">&times;</button>' +
+            '<button class="btn-copy" onclick="OL.copy(\'recall memory ' + esc(r.marker) + '\')" title="Copy reference">&#x2398;</button>' +
+            '<button class="visceral-delete" onclick="OL.deleteVisceral(\'' + esc(r.id) + '\')" title="Remove rule">&times;</button>' +
           '</div>';
         },
       });
@@ -227,7 +227,7 @@
     }
   };
 
-  window._deleteVisceral = async function(id) {
+  OL.deleteVisceral = async function(id) {
     if (!confirm('Remove this visceral rule?')) return;
     await fetch('/api/visceral/' + id, {method: 'DELETE'});
     OL.loadVisceral();

@@ -238,7 +238,7 @@
             '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail(\'' + esc(a.task_id) + '\')},300)">' + esc(a.task_marker) + ' ' + esc(a.task_title) + '</span>' +
             (a.manifest_id ?
               '<span style="opacity:0.4"> &rarr; </span>' +
-              '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'manifests\');setTimeout(function(){window._loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
+              '<span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView(\'manifests\');setTimeout(function(){OL.loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
             : '') +
             '<span style="opacity:0.4"> &rarr; </span>' +
             '<span style="color:var(--text-primary)">Audit</span>' +
@@ -252,7 +252,7 @@
             '<div>' +
               '<span style="color:var(--text-muted)">Manifest:</span> ' +
               (a.manifest_id ?
-                '<span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="OL.switchView(\'manifests\');setTimeout(function(){window._loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
+                '<span style="cursor:pointer;color:var(--accent);text-decoration:underline" onclick="OL.switchView(\'manifests\');setTimeout(function(){OL.loadManifest(\'' + esc(a.manifest_id) + '\')},300)">' + esc(a.manifest_title || a.manifest_id.substring(0,12)) + '</span>'
               : '<span style="opacity:0.5">standalone</span>') +
             '</div>' +
             '<div>' +
@@ -308,8 +308,8 @@
   OL.updateWatcherBadge();
 
   // Listen for watcher events via WebSocket
-  if (window._wsListeners) {
-    window._wsListeners.push(function(event) {
+  if (OL._wsListeners) {
+    OL._wsListeners.push(function(event) {
       if (event.type === 'watcher_audit') {
         OL.updateWatcherBadge();
         if (OL.currentView && OL.currentView() === 'watcher') OL.loadWatcher();

@@ -269,8 +269,8 @@
           <!-- BREADCRUMB -->
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-family:var(--font-mono)">
             <span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('${taskProduct ? 'products' : 'tasks'}')">${esc(t.source_node ? t.source_node.substring(0,12) : 'node')}</span>
-            ${taskProduct ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>window._loadProduct('${esc(taskProduct.id)}'),300)">${esc(taskProduct.marker)} ${esc(taskProduct.title)}</span>` : ''}
-            ${t.manifest_id ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('manifests');setTimeout(()=>window._loadManifest('${esc(t.manifest_id)}'),300)">${esc(taskManifest ? taskManifest.marker + ' ' + taskManifest.title : t.manifest_id.substring(0,12))}</span>` : ''}
+            ${taskProduct ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('products');setTimeout(()=>OL.loadProduct('${esc(taskProduct.id)}'),300)">${esc(taskProduct.marker)} ${esc(taskProduct.title)}</span>` : ''}
+            ${t.manifest_id ? `<span style="opacity:0.4"> → </span><span style="cursor:pointer;color:var(--accent)" onclick="OL.switchView('manifests');setTimeout(()=>OL.loadManifest('${esc(t.manifest_id)}'),300)">${esc(taskManifest ? taskManifest.marker + ' ' + taskManifest.title : t.manifest_id.substring(0,12))}</span>` : ''}
             <span style="opacity:0.4"> → </span>
             <span style="color:var(--text-primary)">${esc(t.marker)} ${esc(t.title)}</span>
           </div>
@@ -291,7 +291,7 @@
             <span>Branch: <strong style="color:var(--text-primary)">openloom/${esc(t.marker)}</strong></span>
             ${t.manifest_id ? `<span>Manifest: <span class="manifest-nav" style="cursor:pointer;color:var(--accent);text-decoration:underline;font-weight:600" data-mid="${esc(t.manifest_id)}">${esc(t.manifest_id.substring(0,12))} &#x2192;</span></span>` : '<span>standalone</span>'}
             <span style="opacity:0.3">|</span>
-            <span style="display:flex;align-items:center;gap:6px">Max turns: <input type="range" id="task-max-turns" value="${t.max_turns || 100}" min="10" max="500" step="10" style="width:100px;accent-color:var(--accent);cursor:pointer" oninput="document.getElementById('task-max-turns-val').textContent=this.value" onchange="window._updateMaxTurns('${esc(t.id)}',this.value)" /><strong id="task-max-turns-val" style="color:var(--text-primary);min-width:28px">${t.max_turns || 100}</strong></span>
+            <span style="display:flex;align-items:center;gap:6px">Max turns: <input type="range" id="task-max-turns" value="${t.max_turns || 100}" min="10" max="500" step="10" style="width:100px;accent-color:var(--accent);cursor:pointer" oninput="document.getElementById('task-max-turns-val').textContent=this.value" onchange="OL.updateMaxTurns('${esc(t.id)}',this.value)" /><strong id="task-max-turns-val" style="color:var(--text-primary);min-width:28px">${t.max_turns || 100}</strong></span>
             ${t.last_run_at ? `<span style="opacity:0.3">|</span><span>Last: ${new Date(t.last_run_at).toLocaleString()}</span>` : ''}
             <span>Created: ${new Date(t.created_at).toLocaleString()}</span>
           </div>
@@ -300,29 +300,29 @@
           <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:${isRunningOrPaused ? '0' : '12'}px">
               ${t.status === 'pending' || t.status === 'waiting' ? `
-                <button class="btn-search" onclick="window._taskStart('${esc(t.id)}')">&#9654; Start Now</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="window._rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="window._taskArchive('${esc(t.id)}')">Archive</button>
+                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#9654; Start Now</button>
+                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
+                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
               ` : ''}
               ${t.status === 'scheduled' ? `
-                <button class="btn-search" onclick="window._taskStart('${esc(t.id)}')">&#9654; Start Now</button>
-                <button class="btn-dismiss" onclick="window._taskAction('${esc(t.id)}','cancel')">&#10005; Cancel</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="window._rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="window._taskArchive('${esc(t.id)}')">Archive</button>
+                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#9654; Start Now</button>
+                <button class="btn-dismiss" onclick="OL.taskAction('${esc(t.id)}','cancel')">&#10005; Cancel</button>
+                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
+                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
               ` : ''}
               ${t.status === 'running' ? `
-                <button class="btn-search" style="background:var(--yellow);color:var(--bg-primary)" onclick="window._pauseTask('${esc(t.id)}')">&#9208; Pause</button>
-                <button class="btn-confirm" onclick="window._killTask('${esc(t.id)}')">&#9209; Stop</button>
+                <button class="btn-search" style="background:var(--yellow);color:var(--bg-primary)" onclick="OL.pauseTask('${esc(t.id)}')">&#9208; Pause</button>
+                <button class="btn-confirm" onclick="OL.killTask('${esc(t.id)}')">&#9209; Stop</button>
               ` : ''}
               ${t.status === 'paused' ? `
-                <button class="btn-search" onclick="window._resumeTask('${esc(t.id)}')">&#9654; Resume</button>
-                <button class="btn-search" style="background:var(--accent)" onclick="window._editInstructions('${esc(t.id)}')">&#9998; Edit Instructions</button>
-                <button class="btn-confirm" onclick="window._killTask('${esc(t.id)}')">&#9209; Stop</button>
+                <button class="btn-search" onclick="OL.resumeTask('${esc(t.id)}')">&#9654; Resume</button>
+                <button class="btn-search" style="background:var(--accent)" onclick="OL.editInstructions('${esc(t.id)}')">&#9998; Edit Instructions</button>
+                <button class="btn-confirm" onclick="OL.killTask('${esc(t.id)}')">&#9209; Stop</button>
               ` : ''}
               ${t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' ? `
-                <button class="btn-search" onclick="window._taskStart('${esc(t.id)}')">&#128260; Restart</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="window._rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="window._taskArchive('${esc(t.id)}')">Archive</button>
+                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#128260; Restart</button>
+                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
+                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
               ` : ''}
             </div>
 
@@ -346,25 +346,25 @@
 
               <!-- One-shot options -->
               <div id="task-sched-oneshot" style="display:${isOneShot ? 'flex' : 'none'};gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${scheduleSelectVal==='once'?'border:2px solid var(--accent)':''}" onclick="window._quickSchedule('${esc(t.id)}','once')">Now</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:5m'?'border:2px solid var(--accent)':''}" onclick="window._quickSchedule('${esc(t.id)}','in:5m')">In 5m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:15m'?'border:2px solid var(--accent)':''}" onclick="window._quickSchedule('${esc(t.id)}','in:15m')">In 15m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:30m'?'border:2px solid var(--accent)':''}" onclick="window._quickSchedule('${esc(t.id)}','in:30m')">In 30m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:1h'?'border:2px solid var(--accent)':''}" onclick="window._quickSchedule('${esc(t.id)}','in:1h')">In 1h</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${scheduleSelectVal==='once'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','once')">Now</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:5m'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','in:5m')">In 5m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:15m'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','in:15m')">In 15m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:30m'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','in:30m')">In 30m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;background:var(--bg-input);${scheduleSelectVal==='in:1h'?'border:2px solid var(--accent)':''}" onclick="OL.quickSchedule('${esc(t.id)}','in:1h')">In 1h</button>
                 <span style="font-size:11px;color:var(--text-muted)">At:</span>
                 <input type="datetime-local" id="task-sched-at-picker" class="conv-search" style="font-size:11px;padding:4px" value="${t.next_run_at ? new Date(t.next_run_at).toISOString().slice(0,16) : ''}" />
-                <button class="btn-search" style="font-size:11px;padding:4px 10px" onclick="window._scheduleAt('${esc(t.id)}')">Set</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px" onclick="OL.scheduleAt('${esc(t.id)}')">Set</button>
               </div>
 
               <!-- Recurring options -->
               <div id="task-sched-recurring" style="display:${!isOneShot ? 'flex' : 'none'};gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
                 <span style="font-size:11px;color:var(--text-muted)">Every:</span>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='5m'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','5m')">5m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='15m'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','15m')">15m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='30m'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','30m')">30m</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='1h'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','1h')">1h</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='6h'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','6h')">6h</button>
-                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='24h'?'border:2px solid var(--green)':''}" onclick="window._quickSchedule('${esc(t.id)}','24h')">24h</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='5m'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','5m')">5m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='15m'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','15m')">15m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='30m'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','30m')">30m</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='1h'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','1h')">1h</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='6h'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','6h')">6h</button>
+                <button class="btn-search" style="font-size:11px;padding:4px 10px;${t.schedule==='24h'?'border:2px solid var(--green)':''}" onclick="OL.quickSchedule('${esc(t.id)}','24h')">24h</button>
               </div>
 
               ${t.next_run_at ? `<div style="font-size:12px;color:var(--text-muted)">Next run: <strong style="color:var(--text-primary)">${new Date(t.next_run_at).toLocaleString()}</strong></div>` : ''}
@@ -387,8 +387,8 @@
               <input type="text" id="task-dep-search" class="conv-search" placeholder="Search tasks to set dependency..." style="font-size:12px;flex:1;min-width:180px;padding:6px 10px" />
               <select id="task-dep-select" class="conv-filter" style="font-size:12px;padding:6px 8px;max-width:320px;display:none">
               </select>
-              <button id="task-dep-set-btn" class="btn-search" style="font-size:11px;padding:4px 12px;display:none" onclick="window._setDependency('${esc(t.id)}')">Set</button>
-              ${t.depends_on ? `<button class="btn-dismiss" style="font-size:11px;padding:4px 12px" onclick="window._removeDependency('${esc(t.id)}')">Remove</button>` : ''}
+              <button id="task-dep-set-btn" class="btn-search" style="font-size:11px;padding:4px 12px;display:none" onclick="OL.setDependency('${esc(t.id)}')">Set</button>
+              ${t.depends_on ? `<button class="btn-dismiss" style="font-size:11px;padding:4px 12px" onclick="OL.removeDependency('${esc(t.id)}')">Remove</button>` : ''}
             </div>
           </div>
 
@@ -396,7 +396,7 @@
           <div id="task-instructions-section" style="margin-bottom:12px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
               <span style="font-size:12px;font-weight:600;color:var(--text-primary)">Instructions</span>
-              <button id="task-instructions-edit-btn" class="btn-search" style="font-size:11px;padding:2px 10px" onclick="window._editInstructions('${esc(t.id)}')">${t.description ? 'Edit' : 'Add Instructions'}</button>
+              <button id="task-instructions-edit-btn" class="btn-search" style="font-size:11px;padding:2px 10px" onclick="OL.editInstructions('${esc(t.id)}')">${t.description ? 'Edit' : 'Add Instructions'}</button>
             </div>
             <div id="task-instructions-display">
               ${t.description
@@ -406,8 +406,8 @@
             <div id="task-instructions-editor" style="display:none">
               <textarea id="task-instructions-textarea" style="width:100%;min-height:300px;padding:12px;font-size:13px;line-height:1.5;font-family:var(--font-mono);resize:both;border:1px solid var(--accent);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);box-sizing:border-box">${esc(t.description || '')}</textarea>
               <div style="display:flex;gap:8px;margin-top:8px">
-                <button class="btn-search" style="padding:4px 14px;font-size:12px" onclick="window._saveInstructions('${esc(t.id)}')">Save</button>
-                <button class="btn-dismiss" style="padding:4px 14px;font-size:12px" onclick="window._cancelEditInstructions()">Cancel</button>
+                <button class="btn-search" style="padding:4px 14px;font-size:12px" onclick="OL.saveInstructions('${esc(t.id)}')">Save</button>
+                <button class="btn-dismiss" style="padding:4px 14px;font-size:12px" onclick="OL.cancelEditInstructions()">Cancel</button>
               </div>
             </div>
           </div>
@@ -464,7 +464,7 @@
         }).catch(() => {});
         OL.onView(el, 'click', () => {
           OL.switchView('manifests');
-          setTimeout(() => window._loadManifest(mid), 300);
+          setTimeout(() => OL.loadManifest(mid), 300);
         });
       });
 
@@ -763,7 +763,7 @@
 
   // Window globals for onclick handlers
 
-  window._setDependency = async function(taskId) {
+  OL.setDependency = async function(taskId) {
     const sel = document.getElementById('task-dep-select');
     if (!sel || !sel.value) return;
     await fetch('/api/tasks/' + taskId + '/dependency', {
@@ -775,7 +775,7 @@
     OL.loadTasks();
   };
 
-  window._removeDependency = async function(taskId) {
+  OL.removeDependency = async function(taskId) {
     await fetch('/api/tasks/' + taskId + '/dependency', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
@@ -785,14 +785,14 @@
     OL.loadTasks();
   };
 
-  window._taskAction = async function(id, action) {
+  OL.taskAction = async function(id, action) {
     await fetch('/api/tasks/' + id + '/' + action, {method: 'POST'});
     OL.loadTaskDetail(id);
     OL.loadTasks();
   };
 
   // Re-run now (uses existing schedule)
-  window._updateMaxTurns = async function(id, val) {
+  OL.updateMaxTurns = async function(id, val) {
     const maxTurns = parseInt(val);
     if (!maxTurns || maxTurns < 1) return;
     await fetch('/api/tasks/' + id, {
@@ -802,7 +802,7 @@
     });
   };
 
-  window._taskStart = async function(id) {
+  OL.taskStart = async function(id) {
     await fetch('/api/tasks/' + id + '/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -813,7 +813,7 @@
   };
 
   // Quick schedule — one click reschedule to a preset
-  window._quickSchedule = async function(id, schedule) {
+  OL.quickSchedule = async function(id, schedule) {
     await fetch('/api/tasks/' + id + '/reschedule', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -824,7 +824,7 @@
   };
 
   // Schedule at a specific datetime from the picker
-  window._scheduleAt = async function(id) {
+  OL.scheduleAt = async function(id) {
     const dt = document.getElementById('task-sched-at-picker');
     if (!dt || !dt.value) { alert('Pick a date/time first'); return; }
     const schedule = 'at:' + new Date(dt.value).toISOString();
@@ -838,7 +838,7 @@
   };
 
   // Reschedule — called from the Reschedule button in control bar
-  window._rescheduleTask = async function(id) {
+  OL.rescheduleTask = async function(id) {
     // Just scroll to the schedule section — it's always visible
     const schedSection = document.querySelector('#task-sched-oneshot, #task-sched-recurring');
     if (schedSection) {
@@ -849,7 +849,7 @@
   };
 
   // Edit instructions — toggle editor view
-  window._editInstructions = function(id) {
+  OL.editInstructions = function(id) {
     const display = document.getElementById('task-instructions-display');
     const editor = document.getElementById('task-instructions-editor');
     const btn = document.getElementById('task-instructions-edit-btn');
@@ -866,7 +866,7 @@
   };
 
   // Save instructions via PATCH
-  window._saveInstructions = async function(id) {
+  OL.saveInstructions = async function(id) {
     const ta = document.getElementById('task-instructions-textarea');
     if (!ta) return;
     await fetch('/api/tasks/' + id, {
@@ -878,7 +878,7 @@
   };
 
   // Cancel edit — revert to display view
-  window._cancelEditInstructions = function() {
+  OL.cancelEditInstructions = function() {
     const display = document.getElementById('task-instructions-display');
     const editor = document.getElementById('task-instructions-editor');
     const btn = document.getElementById('task-instructions-edit-btn');
@@ -887,7 +887,7 @@
     if (btn) btn.style.display = '';
   };
 
-  window._taskArchive = async function(id) {
+  OL.taskArchive = async function(id) {
     await fetch('/api/tasks/' + id + '/cancel', {method: 'POST'});
     OL.loadTasks();
     OL.loadTaskDetail(id);

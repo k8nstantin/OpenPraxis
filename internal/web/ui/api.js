@@ -82,7 +82,7 @@ window.OL = {};
     return model;
   };
 
-  window._copy = OL.copy = function(text) {
+  OL.copy = function(text) {
     navigator.clipboard.writeText(text).then(function() {
       var toast = document.createElement('div');
       toast.className = 'copy-toast';

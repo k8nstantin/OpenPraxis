@@ -234,11 +234,11 @@
       if (a.installed && a.connected) {
         statusClass = 'connected';
         statusText = 'Connected';
-        button = `<button class="btn-disconnect" onclick="window._disconnectAgent('${esc(a.id)}')">Disconnect</button>`;
+        button = `<button class="btn-disconnect" onclick="OL.disconnectAgent('${esc(a.id)}')">Disconnect</button>`;
       } else if (a.installed && !a.connected) {
         statusClass = 'disconnected';
         statusText = 'Not connected';
-        button = `<button class="btn-connect" onclick="window._connectAgent('${esc(a.id)}')">Connect</button>`;
+        button = `<button class="btn-connect" onclick="OL.connectAgent('${esc(a.id)}')">Connect</button>`;
       } else {
         statusText = 'Not installed';
       }
@@ -257,12 +257,12 @@
     }).join('');
   }
 
-  window._connectAgent = async function(id) {
+  OL.connectAgent = async function(id) {
     await fetch('/api/settings/agents/' + id + '/connect', {method: 'POST'});
     OL.loadSettings();
   };
 
-  window._disconnectAgent = async function(id) {
+  OL.disconnectAgent = async function(id) {
     await fetch('/api/settings/agents/' + id + '/disconnect', {method: 'POST'});
     OL.loadSettings();
   };
