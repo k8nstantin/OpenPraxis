@@ -143,6 +143,106 @@
     }
   };
 
+  // Productivity score
+  OL.updateProductivity = async function() {
+    try {
+      var p = await fetchJSON('/api/tasks/productivity?period=all');
+      if (!p) return;
+      var el = document.getElementById('metric-productivity');
+      var card = document.getElementById('metric-productivity-card');
+      if (el) {
+        el.textContent = p.score + ' ' + p.grade;
+        el.style.color = p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)';
+      }
+      if (card) {
+        card.style.borderColor = p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)';
+      }
+      OL._productivityData = p;
+    } catch(e) { /* ignore */ }
+  };
+
+  OL.showProductivityDetail = function() {
+    var p = OL._productivityData;
+    if (!p) return;
+
+    var panel = document.getElementById('top-tasks-panel');
+    var list = document.getElementById('top-tasks-list');
+    var titleEl = panel ? panel.querySelector('h3, .panel-title') : null;
+    if (!panel || !list) return;
+    panel.style.display = '';
+
+    var html = '<div style="margin-bottom:16px">' +
+      '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">' +
+        '<span style="font-size:36px;font-weight:700;color:' + (p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)') + '">' + p.score + '</span>' +
+        '<span style="font-size:24px;font-weight:600;color:var(--text-muted)">' + p.grade + '</span>' +
+      '</div>' +
+    '</div>';
+
+    // Stats grid
+    html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">';
+
+    // Positive
+    html += '<div style="background:rgba(0,217,126,0.08);border:1px solid rgba(0,217,126,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Completed</div>' +
+      '<div style="font-size:20px;font-weight:600;color:var(--green)">' + p.tasks_completed + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">' + p.first_attempt_pass + ' first attempt</div>' +
+    '</div>';
+
+    html += '<div style="background:rgba(0,217,126,0.08);border:1px solid rgba(0,217,126,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Lines Committed</div>' +
+      '<div style="font-size:20px;font-weight:600;color:var(--green)">' + (p.lines_committed || 0).toLocaleString() + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">' + (p.files_changed || 0) + ' files changed</div>' +
+    '</div>';
+
+    html += '<div style="background:rgba(0,217,126,0.08);border:1px solid rgba(0,217,126,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Watcher Pass Rate</div>' +
+      '<div style="font-size:20px;font-weight:600;color:' + (p.watcher_pass_rate >= 80 ? 'var(--green)' : 'var(--yellow)') + '">' + p.watcher_pass_rate + '%</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">' + p.total_actions + ' actions</div>' +
+    '</div>';
+
+    // Negative / Efficiency
+    html += '<div style="background:rgba(230,55,87,0.08);border:1px solid rgba(230,55,87,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Failed</div>' +
+      '<div style="font-size:20px;font-weight:600;color:' + (p.tasks_failed > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' + p.tasks_failed + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">' + p.rework_runs + ' rework runs</div>' +
+    '</div>';
+
+    html += '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Avg Turns/Task</div>' +
+      '<div style="font-size:20px;font-weight:600;color:var(--yellow)">' + (p.avg_turns_per_task || 0).toFixed(1) + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">$' + (p.cost_per_completion || 0).toFixed(2) + '/task</div>' +
+    '</div>';
+
+    html += '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:6px;padding:10px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Amnesia</div>' +
+      '<div style="font-size:20px;font-weight:600;color:' + (p.amnesia_count > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' + p.amnesia_count + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">rule violations</div>' +
+    '</div>';
+
+    html += '</div>';
+
+    // 7-day trend
+    if (p.trend && p.trend.length > 0) {
+      html += '<div style="margin-top:12px"><div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">7-Day Trend</div>';
+      html += '<div style="display:flex;gap:4px;align-items:flex-end;height:60px">';
+      var maxCompleted = Math.max.apply(null, p.trend.map(function(d) { return d.tasks_completed + d.tasks_failed; })) || 1;
+      for (var ti = 0; ti < p.trend.length; ti++) {
+        var d = p.trend[ti];
+        var total = d.tasks_completed + d.tasks_failed;
+        var barH = Math.max(4, (total / maxCompleted) * 56);
+        var barColor = d.tasks_completed > d.tasks_failed ? 'var(--green)' : 'var(--red)';
+        var dayLabel = d.date.substring(5); // MM-DD
+        html += '<div style="flex:1;text-align:center" title="' + esc(d.date) + ': ' + d.tasks_completed + ' completed, ' + d.tasks_failed + ' failed">' +
+          '<div style="height:' + barH + 'px;background:' + barColor + ';border-radius:2px;margin:0 auto;width:80%"></div>' +
+          '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">' + dayLabel + '</div>' +
+        '</div>';
+      }
+      html += '</div></div>';
+    }
+
+    list.innerHTML = html;
+  };
+
   OL.renderPeers = function(nodes) {
     var el = document.getElementById('overview-peers');
     if (!nodes.length) {

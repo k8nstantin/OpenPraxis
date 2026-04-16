@@ -314,3 +314,204 @@ func (s *Store) enrichWithCosts(tasks []*Task) {
 	}
 }
 
+// ProductivityMetrics holds the calculated productivity score and its components.
+type ProductivityMetrics struct {
+	// Overall score (0-100)
+	Score int `json:"score"`
+	Grade string `json:"grade"` // A, B, C, D, F
+
+	// Positive signals
+	TasksCompleted    int `json:"tasks_completed"`
+	FirstAttemptPass  int `json:"first_attempt_pass"`  // completed on run 1
+	LinesCommitted   int `json:"lines_committed"`      // insertions from watcher git_details
+	FilesChanged     int `json:"files_changed"`
+	WatcherPassRate  int `json:"watcher_pass_rate"`     // percentage
+	TotalActions     int `json:"total_actions"`
+
+	// Negative signals
+	TasksFailed      int `json:"tasks_failed"`
+	ReworkRuns       int `json:"rework_runs"`           // tasks with run_count > 1
+	AmnesiaCount     int `json:"amnesia_count"`
+	WatcherFailures  int `json:"watcher_failures"`
+
+	// Efficiency
+	AvgTurnsPerTask  float64 `json:"avg_turns_per_task"`
+	CostPerCompletion float64 `json:"cost_per_completion"`
+	TotalCost        float64 `json:"total_cost"`
+	TotalTurns       int     `json:"total_turns"`
+
+	// Trend (last 7 days, one score per day)
+	Trend []DailyProductivity `json:"trend"`
+
+	// Period
+	Period string `json:"period"` // today, week, month
+}
+
+// DailyProductivity holds productivity data for a single day.
+type DailyProductivity struct {
+	Date             string  `json:"date"`
+	Score            int     `json:"score"`
+	TasksCompleted   int     `json:"tasks_completed"`
+	TasksFailed      int     `json:"tasks_failed"`
+	LinesCommitted   int     `json:"lines_committed"`
+	Cost             float64 `json:"cost"`
+}
+
+// Productivity calculates the productivity score for a given period.
+// period: "today", "week", "month", "all"
+func (s *Store) Productivity(db *sql.DB, period string) (*ProductivityMetrics, error) {
+	m := &ProductivityMetrics{Period: period}
+
+	// Date filter
+	var dateFilter string
+	switch period {
+	case "today":
+		dateFilter = "strftime('%Y-%m-%d', started_at) = strftime('%Y-%m-%d', 'now')"
+	case "week":
+		dateFilter = "started_at >= datetime('now', '-7 days')"
+	case "month":
+		dateFilter = "started_at >= datetime('now', '-30 days')"
+	default:
+		dateFilter = "1=1"
+	}
+
+	// Task runs: completions, failures, turns, cost, actions
+	err := s.db.QueryRow(fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status!='completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(turns), 0),
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(actions), 0)
+		FROM task_runs WHERE %s
+	`, dateFilter)).Scan(&m.TasksCompleted, &m.TasksFailed, &m.TotalTurns, &m.TotalCost, &m.TotalActions)
+	if err != nil {
+		return nil, fmt.Errorf("query task_runs: %w", err)
+	}
+
+	// First-attempt pass: tasks where run_count = 1 and status = completed
+	s.db.QueryRow(fmt.Sprintf(`
+		SELECT COUNT(DISTINCT t.id) FROM tasks t
+		JOIN task_runs r ON r.task_id = t.id
+		WHERE t.status = 'completed' AND t.run_count = 1
+		AND r.status = 'completed' AND %s
+	`, dateFilter)).Scan(&m.FirstAttemptPass)
+
+	// Rework: tasks with run_count > 1
+	s.db.QueryRow(fmt.Sprintf(`
+		SELECT COUNT(DISTINCT task_id) FROM task_runs
+		WHERE %s
+		AND task_id IN (SELECT id FROM tasks WHERE run_count > 1)
+	`, dateFilter)).Scan(&m.ReworkRuns)
+
+	// Watcher pass/fail from watcher_audits
+	var watcherTotal, watcherPassed, watcherFailed int
+	s.db.QueryRow(`
+		SELECT COUNT(*),
+			COALESCE(SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0)
+		FROM watcher_audits
+	`).Scan(&watcherTotal, &watcherPassed, &watcherFailed)
+	m.WatcherFailures = watcherFailed
+	if watcherTotal > 0 {
+		m.WatcherPassRate = int(float64(watcherPassed) / float64(watcherTotal) * 100)
+	}
+
+	// Lines committed + files changed from watcher git_details JSON
+	rows, err := db.Query(`SELECT git_details FROM watcher_audits WHERE git_details != ''`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var gitJSON string
+			if rows.Scan(&gitJSON) == nil && gitJSON != "" {
+				var gd struct {
+					CommitCount int `json:"commit_count"`
+					FilesChanged int `json:"files_changed"`
+					Insertions  int `json:"insertions"`
+					Deletions   int `json:"deletions"`
+				}
+				if json.Unmarshal([]byte(gitJSON), &gd) == nil {
+					m.LinesCommitted += gd.Insertions
+					m.FilesChanged += gd.FilesChanged
+				}
+			}
+		}
+	}
+
+	// Amnesia count
+	db.QueryRow(`SELECT COUNT(*) FROM amnesia WHERE status != 'dismissed'`).Scan(&m.AmnesiaCount)
+
+	// Efficiency
+	if m.TasksCompleted > 0 {
+		m.AvgTurnsPerTask = float64(m.TotalTurns) / float64(m.TasksCompleted)
+		m.CostPerCompletion = m.TotalCost / float64(m.TasksCompleted)
+	}
+
+	// Calculate score (0-100)
+	// Weighted average of positive rates, penalized by failure rates
+	score := 50.0 // baseline — no data = neutral
+
+	totalRuns := m.TasksCompleted + m.TasksFailed
+	if totalRuns > 0 {
+		// Completion rate (0-35 points) — most important
+		completionRate := float64(m.TasksCompleted) / float64(totalRuns)
+		score += completionRate * 35
+
+		// First-attempt success rate (0-25 points) — efficiency matters
+		firstAttemptRate := float64(m.FirstAttemptPass) / float64(totalRuns)
+		score += firstAttemptRate * 25
+
+		// Watcher pass rate (0-15 points) — quality gate
+		score += float64(m.WatcherPassRate) / 100 * 15
+
+		// Failure penalty (-20 max)
+		failRate := float64(m.TasksFailed) / float64(totalRuns)
+		score -= failRate * 20
+
+		// Rework penalty — capped at -10
+		reworkRate := float64(m.ReworkRuns) / float64(totalRuns)
+		score -= reworkRate * 10
+	}
+
+	// Clamp
+	if score < 0 { score = 0 }
+	if score > 100 { score = 100 }
+	m.Score = int(score)
+
+	// Grade
+	switch {
+	case m.Score >= 90: m.Grade = "A"
+	case m.Score >= 80: m.Grade = "B"
+	case m.Score >= 70: m.Grade = "C"
+	case m.Score >= 60: m.Grade = "D"
+	default: m.Grade = "F"
+	}
+
+	// 7-day trend
+	trendRows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d', started_at) as day,
+			COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status!='completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(cost_usd), 0)
+		FROM task_runs
+		WHERE started_at >= datetime('now', '-7 days')
+		GROUP BY day ORDER BY day
+	`)
+	if err == nil {
+		defer trendRows.Close()
+		for trendRows.Next() {
+			var dp DailyProductivity
+			if trendRows.Scan(&dp.Date, &dp.TasksCompleted, &dp.TasksFailed, &dp.Cost) == nil {
+				// Daily score: simple ratio
+				total := dp.TasksCompleted + dp.TasksFailed
+				if total > 0 {
+					dp.Score = int(float64(dp.TasksCompleted) / float64(total) * 100)
+				}
+				m.Trend = append(m.Trend, dp)
+			}
+		}
+	}
+
+	return m, nil
+}
+

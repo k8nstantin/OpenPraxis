@@ -222,6 +222,7 @@
       OL.updateDelusionCount();
       OL.loadRunningTasks();
       OL.loadTaskStats();
+      OL.updateProductivity();
     } catch (e) {
       console.error('Refresh failed:', e);
     }

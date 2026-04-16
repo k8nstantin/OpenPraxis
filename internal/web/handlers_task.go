@@ -571,6 +571,23 @@ func parseTaskResultMetrics(output string) (turns int, cost float64, reason stri
 	return 0, 0, ""
 }
 
+// apiProductivity returns productivity score and breakdown.
+// GET /api/tasks/productivity?period=today|week|month|all
+func apiProductivity(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		period := r.URL.Query().Get("period")
+		if period == "" {
+			period = "all"
+		}
+		metrics, err := n.Tasks.Productivity(n.Tasks.DB(), period)
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, metrics)
+	}
+}
+
 // apiCostHistory returns cost aggregations by day/week/month, or drill-down for a specific date.
 // GET /api/tasks/cost-history?days=30&period=day|week|month&agent=claude-code
 // GET /api/tasks/cost-history?date=2026-04-13&agent=claude-code  (drill-down)

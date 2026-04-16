@@ -62,6 +62,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 	return s, nil
 }
 
+// DB returns the underlying database connection for cross-store queries.
+func (s *Store) DB() *sql.DB { return s.db }
+
 func (s *Store) init() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,

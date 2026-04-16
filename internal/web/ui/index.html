@@ -121,7 +121,7 @@
           <div class="panel-body" id="running-tasks-list"></div>
         </div>
 
-        <div class="metrics-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metrics-grid" style="grid-template-columns:repeat(5,1fr)">
           <div class="metric-card metric-card-primary" id="metric-running-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-running" style="color:var(--green)">0</div>
             <div class="metric-label">running</div>
@@ -137,6 +137,10 @@
           <div class="metric-card metric-card-primary" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-tasks-total">-</div>
             <div class="metric-label">tasks</div>
+          </div>
+          <div class="metric-card metric-card-primary" id="metric-productivity-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.showProductivityDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+            <div class="metric-value" id="metric-productivity" style="color:var(--green)">-</div>
+            <div class="metric-label">productivity</div>
           </div>
         </div>
 

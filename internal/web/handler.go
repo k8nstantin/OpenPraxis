@@ -141,6 +141,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/tasks/cost-history", apiCostHistory(n)).Methods("GET")
 	api.HandleFunc("/tasks/cost-agents", apiCostAgents(n)).Methods("GET")
 	api.HandleFunc("/tasks/cost-trend", apiCostTrend(n)).Methods("GET")
+	api.HandleFunc("/tasks/productivity", apiProductivity(n)).Methods("GET")
 	api.HandleFunc("/tasks", apiTaskList(n)).Methods("GET")
 	api.HandleFunc("/tasks", apiTaskCreate(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}", apiTaskGet(n)).Methods("GET")
