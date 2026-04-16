@@ -321,4 +321,4 @@ npx expo start
 
 ## License
 
-Private. Not yet open source.
+Apache License 2.0. See [LICENSE](LICENSE).
