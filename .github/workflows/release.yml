@@ -51,13 +51,13 @@ jobs:
             binary: openpraxis
             cc: aarch64-linux-gnu-gcc
             apt_deps: gcc-aarch64-linux-gnu
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            os_label: windows
-            arch_label: x86_64
-            archive: zip
-            binary: openpraxis.exe
+          # Windows is intentionally omitted from v0.1.0. Two blockers:
+          #   1. internal/task pause/resume uses syscall.SIGSTOP / SIGCONT,
+          #      which don't exist on Windows — needs build tags.
+          #   2. sqlite-vec CGo binding #include's sqlite3.h, and the Windows
+          #      runner image does not ship SQLite dev headers — needs MSYS2
+          #      or vcpkg setup to produce sqlite3.h + libsqlite3.
+          # Track: re-add windows/amd64 once both are addressed.
 
     steps:
       - uses: actions/checkout@v4
@@ -128,14 +128,6 @@ jobs:
           name="openpraxis_${{ steps.version.outputs.version }}_${{ matrix.os_label }}_${{ matrix.arch_label }}"
           tar -czf "${name}.tar.gz" -C stage .
           echo "ARCHIVE=${name}.tar.gz" >> "$GITHUB_ENV"
-
-      - name: Create archive (zip)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $name = "openpraxis_${{ steps.version.outputs.version }}_${{ matrix.os_label }}_${{ matrix.arch_label }}"
-          Compress-Archive -Path stage\* -DestinationPath "$name.zip"
-          "ARCHIVE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - uses: actions/upload-artifact@v4
         with:
