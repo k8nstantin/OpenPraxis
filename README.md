@@ -4,6 +4,19 @@
 
 OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/manifests.png" alt="Manifests view — peers, manifests grouped by product, full spec on click" /><br/><sub>Manifests — specs grouped by peer and product</sub></td>
+    <td align="center"><img src="docs/images/tasks.png" alt="Tasks view — peers, tasks grouped by manifest, status and schedule at a glance" /><br/><sub>Tasks — scheduled executions against manifests</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/memories.png" alt="Memories view — peers and sessions, full content detail on click" /><br/><sub>Memories — persistent context grouped by peer and session</sub></td>
+    <td align="center"><img src="docs/images/visceral.png" alt="Visceral rules — the mandatory constraints every agent acknowledges on session start" /><br/><sub>Visceral rules — non-negotiable constraints</sub></td>
+  </tr>
+</table>
+
 ## How It Works
 
 ```
