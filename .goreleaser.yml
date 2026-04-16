@@ -37,9 +37,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X openpraxis/cmd.Version={{.Version}}
-      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
-      - -X openpraxis/cmd.BuildDate={{.Date}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.Version={{.Version}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.BuildDate={{.Date}}
     hooks:
       # Ad-hoc codesign: macOS SIGKILLs unsigned Go binaries at runtime when it
       # lazily validates code pages. Ad-hoc (`-`) signing is enough to prevent
@@ -63,9 +63,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X openpraxis/cmd.Version={{.Version}}
-      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
-      - -X openpraxis/cmd.BuildDate={{.Date}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.Version={{.Version}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.BuildDate={{.Date}}
 
   - id: openpraxis-windows
     main: .
@@ -80,9 +80,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X openpraxis/cmd.Version={{.Version}}
-      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
-      - -X openpraxis/cmd.BuildDate={{.Date}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.Version={{.Version}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X github.com/k8nstantin/OpenPraxis/cmd.BuildDate={{.Date}}
 
 archives:
   - id: default

@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0-test). Required for manual dispatch.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+            os_label: macos
+            arch_label: x86_64
+            archive: tar.gz
+            binary: openpraxis
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            os_label: macos
+            arch_label: arm64
+            archive: tar.gz
+            binary: openpraxis
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            os_label: linux
+            arch_label: x86_64
+            archive: tar.gz
+            binary: openpraxis
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            os_label: linux
+            arch_label: arm64
+            archive: tar.gz
+            binary: openpraxis
+            cc: aarch64-linux-gnu-gcc
+            apt_deps: gcc-aarch64-linux-gnu
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            os_label: windows
+            arch_label: x86_64
+            archive: zip
+            binary: openpraxis.exe
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install cross-compile toolchain (linux/arm64)
+        if: matrix.apt_deps != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt_deps }}
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+        run: |
+          set -euxo pipefail
+          commit=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ldflags="-s -w \
+            -X github.com/k8nstantin/OpenPraxis/cmd.Version=${{ steps.version.outputs.version }} \
+            -X github.com/k8nstantin/OpenPraxis/cmd.GitCommit=${commit} \
+            -X github.com/k8nstantin/OpenPraxis/cmd.BuildDate=${date}"
+          go build -trimpath -ldflags "$ldflags" -o "${{ matrix.binary }}" .
+
+      - name: Ad-hoc codesign (macOS)
+        if: matrix.goos == 'darwin'
+        run: codesign --force --sign - "${{ matrix.binary }}"
+
+      - name: Stage archive payload
+        shell: bash
+        run: |
+          set -euxo pipefail
+          stage_dir="stage"
+          mkdir -p "$stage_dir"
+          cp "${{ matrix.binary }}" "$stage_dir/"
+          for f in README.md LICENSE CLAUDE.md CONTRIBUTING.md .env.example; do
+            if [ -f "$f" ]; then cp "$f" "$stage_dir/"; fi
+          done
+
+      - name: Create archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          name="openpraxis_${{ steps.version.outputs.version }}_${{ matrix.os_label }}_${{ matrix.arch_label }}"
+          tar -czf "${name}.tar.gz" -C stage .
+          echo "ARCHIVE=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Create archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $name = "openpraxis_${{ steps.version.outputs.version }}_${{ matrix.os_label }}_${{ matrix.arch_label }}"
+          Compress-Archive -Path stage\* -DestinationPath "$name.zip"
+          "ARCHIVE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openpraxis-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          ls -la
+          sha256sum * > "openpraxis_${{ steps.tag.outputs.version }}_checksums.txt"
+          cat "openpraxis_${{ steps.tag.outputs.version }}_checksums.txt"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: OpenPraxis ${{ steps.tag.outputs.tag }}
+          draft: true
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true
