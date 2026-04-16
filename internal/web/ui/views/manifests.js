@@ -253,6 +253,62 @@
         }
       } catch(e) {}
 
+      // Fetch all manifests for dependency picker
+      let allManifests = [];
+      try {
+        const manifestList = await fetchJSON('/api/manifests');
+        if (manifestList) allManifests = manifestList;
+      } catch(e) {}
+
+      // Build dependency pills from depends_on
+      const depIds = (m.depends_on || '').split(',').map(s => s.trim()).filter(Boolean);
+      const depTitles = m.depends_on_titles || [];
+      let depsHtml = '';
+      {
+        const statusColors = {draft:'var(--yellow)',open:'var(--green)',closed:'var(--text-muted)',archive:'var(--red)'};
+        const depPills = depIds.map((depId, idx) => {
+          const depManifest = allManifests.find(dm => dm.id === depId);
+          const depTitle = depTitles[idx] || (depManifest ? depManifest.title : depId.substring(0, 12));
+          const depMarker = depManifest ? depManifest.marker : depId.substring(0, 12);
+          const depStatus = depManifest ? depManifest.status : 'draft';
+          const borderColor = statusColors[depStatus] || 'var(--text-muted)';
+          return `<span class="dep-pill" data-dep-id="${esc(depId)}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid ${borderColor};border-radius:12px;font-size:11px;font-family:var(--font-mono);margin:2px 4px 2px 0;background:var(--bg-secondary)">` +
+            `<span class="dep-pill-nav" style="cursor:pointer;color:var(--accent)" data-dep-nav-id="${esc(depId)}">${esc(depMarker)}</span>` +
+            `<span style="color:var(--text-primary)">${esc(depTitle)}</span>` +
+            `<span style="color:${borderColor};font-size:9px;text-transform:uppercase;font-weight:600">${esc(depStatus)}</span>` +
+            `<span class="dep-remove" data-dep-rm-id="${esc(depId)}" style="cursor:pointer;color:var(--red);font-size:13px;line-height:1;margin-left:2px" title="Remove dependency">&times;</span>` +
+          `</span>`;
+        }).join('');
+
+        // Filter picker candidates: same product (or all if no product), exclude self and already-linked
+        const pickerCandidates = allManifests.filter(cm =>
+          cm.id !== m.id &&
+          !depIds.includes(cm.id) &&
+          (m.project_id ? cm.project_id === m.project_id : true) &&
+          cm.status !== 'archive'
+        );
+
+        const pickerOptions = pickerCandidates.map(cm =>
+          `<option value="${esc(cm.id)}">${esc(cm.marker)} ${esc(cm.title)} (${esc(cm.status)})</option>`
+        ).join('');
+
+        depsHtml = `<div id="manifest-deps-section" style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="color:var(--text-muted);font-size:12px;font-weight:500">Dependencies</span>
+            <button id="manifest-add-dep-btn" class="btn-search" style="padding:2px 10px;font-size:11px">+ Add</button>
+          </div>
+          <div id="manifest-dep-pills" style="display:flex;flex-wrap:wrap;align-items:center;min-height:24px">
+            ${depPills || '<span style="font-size:11px;color:var(--text-muted);font-style:italic">No dependencies</span>'}
+          </div>
+          <div id="manifest-dep-picker" style="display:none;margin-top:6px">
+            <select id="manifest-dep-select" class="conv-filter" style="font-size:12px;padding:4px 8px;font-family:var(--font-mono);min-width:300px">
+              <option value="">Select a manifest...</option>
+              ${pickerOptions}
+            </select>
+          </div>
+        </div>`;
+      }
+
       // Fetch linked ideas
       let linkedIdeasHtml = '';
       try {
@@ -348,6 +404,7 @@
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
           </div>
           <div id="manifest-edit-desc" class="manifest-editable" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;padding:4px;border-radius:4px;cursor:pointer" title="Click to edit description">${esc(m.description) || '<span style="color:var(--text-muted);font-style:italic">No description — click to add</span>'}</div>
+          ${depsHtml}
           ${linkedIdeasHtml}
           ${linkedTasksHtml}
           ${jira ? `<div style="margin-bottom:12px">Jira: ${jira}</div>` : ''}
@@ -383,6 +440,62 @@
           setTimeout(() => OL.loadTaskDetail(el.dataset.tid), 300);
         });
       });
+
+      // Bind dependency pill navigation
+      bodyEl.querySelectorAll('.dep-pill-nav').forEach(el => {
+        OL.onView(el, 'click', (e) => {
+          e.stopPropagation();
+          OL.loadManifest(el.dataset.depNavId);
+        });
+      });
+
+      // Bind dependency remove buttons
+      bodyEl.querySelectorAll('.dep-remove').forEach(el => {
+        OL.onView(el, 'click', async (e) => {
+          e.stopPropagation();
+          const removeId = el.dataset.depRmId;
+          const newDeps = depIds.filter(d => d !== removeId).join(',');
+          try {
+            await fetch('/api/manifests/' + m.id, {
+              method: 'PUT',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({depends_on: newDeps})
+            });
+            OL.loadManifest(m.id);
+            OL.loadManifests();
+          } catch(e) {
+            console.error('Remove dependency failed:', e);
+          }
+        });
+      });
+
+      // Bind "Add Dependency" button + picker
+      const addDepBtn = document.getElementById('manifest-add-dep-btn');
+      const depPicker = document.getElementById('manifest-dep-picker');
+      const depSelect = document.getElementById('manifest-dep-select');
+      if (addDepBtn && depPicker && depSelect) {
+        OL.onView(addDepBtn, 'click', () => {
+          const visible = depPicker.style.display !== 'none';
+          depPicker.style.display = visible ? 'none' : 'block';
+          if (!visible) depSelect.focus();
+        });
+        OL.onView(depSelect, 'change', async () => {
+          const selectedId = depSelect.value;
+          if (!selectedId) return;
+          const newDeps = depIds.concat(selectedId).join(',');
+          try {
+            await fetch('/api/manifests/' + m.id, {
+              method: 'PUT',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({depends_on: newDeps})
+            });
+            OL.loadManifest(m.id);
+            OL.loadManifests();
+          } catch(e) {
+            console.error('Add dependency failed:', e);
+          }
+        });
+      }
 
       // Bind status toggle buttons
       bodyEl.querySelectorAll('.manifest-status-btn').forEach(btn => {
