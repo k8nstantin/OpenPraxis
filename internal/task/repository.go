@@ -43,8 +43,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 
 // Get retrieves a task by ID or prefix.
 func (s *Store) Get(id string) (*Task, error) {
-	row := s.db.QueryRow(`SELECT id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, run_count, last_run_at, next_run_at, last_output, created_at, updated_at
-		FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
+	row := s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
 	t, err := scanTask(row)
 	if err == nil && t != nil {
 		s.enrichWithCosts([]*Task{t})
@@ -57,8 +56,7 @@ func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, run_count, last_run_at, next_run_at, last_output, created_at, updated_at
-		FROM tasks WHERE (manifest_id = ? OR manifest_id LIKE ?) AND deleted_at = '' ORDER BY created_at DESC LIMIT ?`, manifestID, manifestID+"%", limit)
+	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE (manifest_id = ? OR manifest_id LIKE ?) AND deleted_at = '' ORDER BY created_at DESC LIMIT ?`, manifestID, manifestID+"%", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +73,7 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, run_count, last_run_at, next_run_at, last_output, created_at, updated_at FROM tasks WHERE deleted_at = ''`
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE deleted_at = ''`
 	var args []any
 	if status != "" {
 		query += ` AND status = ?`
@@ -150,8 +148,7 @@ func (s *Store) ListDeleted(limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, run_count, last_run_at, next_run_at, last_output, created_at, updated_at
-		FROM tasks WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -162,6 +159,14 @@ func (s *Store) ListDeleted(limit int) ([]*Task, error) {
 // Restore un-deletes a soft-deleted task.
 func (s *Store) Restore(id string) error {
 	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = '' WHERE (id = ? OR id LIKE ?) AND deleted_at != ''`, id, id+"%")
+	return err
+}
+
+// SetBlockReason sets or clears the block_reason field for a task.
+func (s *Store) SetBlockReason(id, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE tasks SET block_reason = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		reason, now, id, id+"%")
 	return err
 }
 
@@ -290,7 +295,7 @@ func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT t.id, t.manifest_id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.max_turns, t.depends_on, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
+	rows, err := s.db.Query(`SELECT t.id, t.manifest_id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.max_turns, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
 		FROM tasks t JOIN task_manifests tm ON t.id = tm.task_id
 		WHERE tm.manifest_id = ? AND t.deleted_at = '' ORDER BY t.created_at DESC LIMIT ?`, manifestID, limit)
 	if err != nil {

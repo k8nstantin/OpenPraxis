@@ -443,6 +443,33 @@ func (n *Node) ResolveDependsOnTitles(dependsOn string) []string {
 	return titles
 }
 
+// CheckManifestDeps returns true if all dependency manifests for the given manifest are closed/archive.
+// Implements task.ManifestDepChecker interface for scheduler blocking.
+func (n *Node) CheckManifestDeps(manifestID string) (bool, string) {
+	m, err := n.Manifests.Get(manifestID)
+	if err != nil || m == nil {
+		return true, "" // manifest not found — don't block
+	}
+	deps := m.ParseDependsOn()
+	if len(deps) == 0 {
+		return true, "" // no dependencies
+	}
+	for _, depID := range deps {
+		dep, err := n.Manifests.Get(depID)
+		if err != nil || dep == nil {
+			continue // missing dependency — don't block on phantom
+		}
+		if dep.Status != "closed" && dep.Status != "archive" {
+			marker := depID
+			if len(depID) >= 12 {
+				marker = depID[:12]
+			}
+			return false, fmt.Sprintf("blocked by manifest %s (%s)", marker, dep.Title)
+		}
+	}
+	return true, ""
+}
+
 // ValidateArchiveProduct checks that all linked manifests are "archive" before allowing a product to be archived.
 func (n *Node) ValidateArchiveProduct(productID string) error {
 	manifests, err := n.Manifests.ListByProject(productID, 1000)

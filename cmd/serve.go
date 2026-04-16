@@ -279,7 +279,7 @@ var serveCmd = &cobra.Command{
 					"task_id": t.ID, "error": err.Error(),
 				}})
 			}
-		})
+		}, n)
 		scheduler.Start()
 		defer scheduler.Stop()
 

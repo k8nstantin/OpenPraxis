@@ -282,7 +282,8 @@
         <span style="font-size:12px;color:var(--text-muted)">Directed Acyclic Graph</span>
         <span style="margin-left:auto;display:flex;align-items:center;gap:16px;font-size:11px;color:var(--text-muted)">
           <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:20px;height:0;border-top:2px solid rgba(255,255,255,0.15)"></span>hierarchy</span>
-          <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:20px;height:0;border-top:2px dashed #f59e0b"></span>depends on</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:20px;height:0;border-top:2.5px solid #3b82f6"></span>manifest dep</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:20px;height:0;border-top:2px dashed #f59e0b"></span>task dep</span>
           <span>Scroll to zoom &middot; Drag to pan &middot; Click node to drill down</span>
         </span>
       </div>
@@ -340,7 +341,8 @@
         elements.push({ data: {
           id: m.id, label: nodeLabel(m.type), title: m.title, type: m.type, status: m.status,
           marker: m.marker, color: statusColor(m.type, m.status),
-          nodeSize: nodeSize(m.type), meta: JSON.stringify(m.meta || {})
+          nodeSize: nodeSize(m.type), meta: JSON.stringify(m.meta || {}),
+          depends_on: m.depends_on || '', depends_on_titles: m.depends_on_titles || []
         }});
         elements.push({ data: { source: data.id, target: m.id } });
 
@@ -355,6 +357,20 @@
           // Tasks with depends_on within the same manifest are reached via dependency edges
           if (!t.depends_on) {
             elements.push({ data: { source: m.id, target: t.id } });
+          }
+        }
+      }
+
+      // Add manifest-to-manifest dependency edges (solid blue)
+      for (const el of [...elements]) {
+        const d = el.data;
+        if (d && d.type === 'manifest' && d.depends_on) {
+          const depIds = d.depends_on.split(',').map(s => s.trim()).filter(Boolean);
+          for (const depId of depIds) {
+            const depExists = elements.some(e => e.data && e.data.id === depId);
+            if (depExists) {
+              elements.push({ data: { source: depId, target: d.id, edgeType: 'manifest_dependency' } });
+            }
           }
         }
       }
@@ -423,6 +439,18 @@
             }
           },
           {
+            selector: 'edge[edgeType="manifest_dependency"]',
+            style: {
+              'width': 2.5,
+              'line-color': '#3b82f6',
+              'line-style': 'solid',
+              'target-arrow-color': '#3b82f6',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier',
+              'arrow-scale': 1.0,
+            }
+          },
+          {
             selector: 'edge[edgeType="dependency"]',
             style: {
               'width': 2,
@@ -463,6 +491,14 @@
           html += `<div>${meta.total_tasks || 0} tasks</div>`;
         } else if (d.type === 'manifest') {
           html += `<div>${meta.total_tasks || 0} tasks</div>`;
+          if (d.depends_on) {
+            const depTitles = d.depends_on_titles || [];
+            if (depTitles.length) {
+              html += `<div style="color:#3b82f6">depends on: ${depTitles.map(t => esc(t)).join(', ')}</div>`;
+            } else {
+              html += `<div style="color:#3b82f6">depends on: ${d.depends_on.split(',').length} manifest(s)</div>`;
+            }
+          }
         } else {
           html += `<div>${meta.turns || 0} turns</div>`;
           if (meta.run_count > 0) html += `<div>${meta.run_count} runs</div>`;

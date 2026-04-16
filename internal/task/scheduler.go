@@ -8,21 +8,31 @@ import (
 	"time"
 )
 
+// ManifestDepChecker checks if a manifest's dependencies are satisfied.
+// Implemented by node.Node to avoid circular imports.
+type ManifestDepChecker interface {
+	// CheckManifestDeps returns true if all dependency manifests are closed/archive.
+	// Returns (satisfied bool, blockReason string).
+	CheckManifestDeps(manifestID string) (bool, string)
+}
+
 // Scheduler checks for due tasks and fires them on a timer.
 type Scheduler struct {
 	store    *Store
 	interval time.Duration
 	stopCh   chan struct{}
 	onFire   func(t *Task) // callback when a task fires
+	depCheck ManifestDepChecker
 }
 
 // NewScheduler creates a task scheduler.
-func NewScheduler(store *Store, checkInterval time.Duration, onFire func(t *Task)) *Scheduler {
+func NewScheduler(store *Store, checkInterval time.Duration, onFire func(t *Task), depCheck ManifestDepChecker) *Scheduler {
 	return &Scheduler{
 		store:    store,
 		interval: checkInterval,
 		stopCh:   make(chan struct{}),
 		onFire:   onFire,
+		depCheck: depCheck,
 	}
 }
 
@@ -60,7 +70,28 @@ func (s *Scheduler) check() {
 	}
 
 	for _, t := range tasks {
+		// Check manifest dependency blocking
+		if t.ManifestID != "" && s.depCheck != nil {
+			satisfied, reason := s.depCheck.CheckManifestDeps(t.ManifestID)
+			if !satisfied {
+				slog.Info("task blocked by manifest dependency", "component", "scheduler", "marker", t.Marker, "reason", reason)
+				// Put task back to waiting status so it doesn't re-fire every tick
+				if err := s.store.UpdateStatus(t.ID, "waiting"); err != nil {
+					slog.Error("update status to waiting failed", "component", "scheduler", "marker", t.Marker, "error", err)
+				}
+				if err := s.store.SetBlockReason(t.ID, reason); err != nil {
+					slog.Error("set block reason failed", "component", "scheduler", "marker", t.Marker, "error", err)
+				}
+				continue
+			}
+		}
+
 		slog.Info("firing task", "component", "scheduler", "marker", t.Marker, "title", t.Title, "schedule", t.Schedule)
+
+		// Clear any previous block reason
+		if err := s.store.SetBlockReason(t.ID, ""); err != nil {
+			slog.Error("clear block reason failed", "component", "scheduler", "marker", t.Marker, "error", err)
+		}
 
 		// Mark as running
 		if err := s.store.UpdateStatus(t.ID, "running"); err != nil {
@@ -173,8 +204,7 @@ func (s *Store) ScheduleTask(id, schedule string) error {
 // ListDue returns tasks whose next_run_at has passed and are in scheduled status.
 func (s *Store) ListDue() ([]*Task, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	rows, err := s.db.Query(`SELECT id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, run_count, last_run_at, next_run_at, last_output, created_at, updated_at
-		FROM tasks WHERE status = 'scheduled' AND next_run_at != '' AND next_run_at <= ? AND deleted_at = '' LIMIT 10`, now)
+	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE status = 'scheduled' AND next_run_at != '' AND next_run_at <= ? AND deleted_at = '' LIMIT 10`, now)
 	if err != nil {
 		return nil, err
 	}

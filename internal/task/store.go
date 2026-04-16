@@ -19,7 +19,8 @@ type Task struct {
 	SourceNode  string    `json:"source_node"`
 	CreatedBy   string    `json:"created_by"` // session or dashboard
 	MaxTurns    int       `json:"max_turns"`  // max agent turns (default 100)
-	DependsOn   string    `json:"depends_on"` // task ID that must complete before this runs
+	DependsOn   string    `json:"depends_on"`    // task ID that must complete before this runs
+	BlockReason string    `json:"block_reason"`  // reason task is blocked (e.g. manifest dependency)
 	RunCount    int       `json:"run_count"`
 	LastRunAt   string    `json:"last_run_at"`
 	NextRunAt   string    `json:"next_run_at"`
@@ -101,6 +102,7 @@ func (s *Store) init() error {
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 50`)
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE tasks ADD COLUMN block_reason TEXT NOT NULL DEFAULT ''`)
 
 	// Task runs history table
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runs (
@@ -159,11 +161,14 @@ func (s *Store) init() error {
 	return nil
 }
 
+// taskColumns is the standard column list for task SELECT queries.
+const taskColumns = `id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, block_reason, run_count, last_run_at, next_run_at, last_output, created_at, updated_at`
+
 func scanTask(row *sql.Row) (*Task, error) {
 	var t Task
 	var createdStr, updatedStr string
 	err := row.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
-		&t.MaxTurns, &t.DependsOn, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
+		&t.MaxTurns, &t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -184,7 +189,7 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		var t Task
 		var createdStr, updatedStr string
 		err := rows.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
-			&t.MaxTurns, &t.DependsOn, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
+			&t.MaxTurns, &t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 		if err != nil {
 			return nil, err
 		}
