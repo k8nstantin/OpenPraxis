@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"openloom/internal/conversation"
+	"openpraxis/internal/conversation"
 
 	"github.com/google/uuid"
 )

@@ -292,7 +292,7 @@
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = 'openloom-cost-' + new Date().toISOString().split('T')[0] + '.csv';
+    a.download = 'openpraxis-cost-' + new Date().toISOString().split('T')[0] + '.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -306,7 +306,7 @@
 
   // Threshold selector
   (function initThreshold() {
-    var saved = localStorage.getItem('openloom-cost-threshold');
+    var saved = localStorage.getItem('openpraxis-cost-threshold');
     if (saved) {
       _costThreshold = parseFloat(saved) || 0;
       var sel = document.getElementById('cost-threshold-select');
@@ -330,7 +330,7 @@
     }
     if (customEl) customEl.style.display = 'none';
     _costThreshold = parseFloat(this.value) || 0;
-    localStorage.setItem('openloom-cost-threshold', String(_costThreshold));
+    localStorage.setItem('openpraxis-cost-threshold', String(_costThreshold));
     OL.loadCostHistory();
   });
 
@@ -338,7 +338,7 @@
     var val = parseFloat(this.value) || 0;
     if (val > 0) {
       _costThreshold = val;
-      localStorage.setItem('openloom-cost-threshold', String(_costThreshold));
+      localStorage.setItem('openpraxis-cost-threshold', String(_costThreshold));
       OL.loadCostHistory();
     }
   });

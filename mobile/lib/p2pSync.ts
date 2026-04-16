@@ -2,7 +2,7 @@
  * P2P Sync Engine — offline-first bidirectional sync.
  *
  * The phone is a peer node with its own UUID. Data syncs between
- * phone and laptop via the OpenLoom server.
+ * phone and laptop via the OpenPraxis server.
  *
  * Sync flow:
  *   1. PUSH — Flush outbox (offline mutations) to server

@@ -13,7 +13,7 @@
 
 import * as SQLite from "expo-sqlite";
 
-const DB_NAME = "openloom-cache.db";
+const DB_NAME = "openpraxis-cache.db";
 
 let db: SQLite.SQLiteDatabase | null = null;
 

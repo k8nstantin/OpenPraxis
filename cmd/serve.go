@@ -12,15 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"openloom/internal/chat"
-	"openloom/internal/config"
-	mcpserver "openloom/internal/mcp"
-	"openloom/internal/node"
-	"openloom/internal/peer"
-	"openloom/internal/setup"
-	"openloom/internal/task"
-	"openloom/internal/watcher"
-	"openloom/internal/web"
+	"openpraxis/internal/chat"
+	"openpraxis/internal/config"
+	mcpserver "openpraxis/internal/mcp"
+	"openpraxis/internal/node"
+	"openpraxis/internal/peer"
+	"openpraxis/internal/setup"
+	"openpraxis/internal/task"
+	"openpraxis/internal/watcher"
+	"openpraxis/internal/web"
 
 	"github.com/spf13/cobra"
 )
@@ -29,7 +29,7 @@ var noBrowser bool
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the OpenLoom daemon",
+	Short: "Start the OpenPraxis daemon",
 	Long:  "Start the MCP server, web dashboard, peer discovery, and sync server.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(cfgFile)
@@ -42,7 +42,7 @@ var serveCmd = &cobra.Command{
 			Level: slog.LevelInfo,
 		})))
 
-		fmt.Printf("\n  OpenLoom %s\n\n", Version)
+		fmt.Printf("\n  OpenPraxis %s\n\n", Version)
 
 		// Auto-setup: install Ollama + model if missing
 		if err := setup.EnsureReady(cfg.Embedding.Model); err != nil {
@@ -284,7 +284,7 @@ var serveCmd = &cobra.Command{
 		defer scheduler.Stop()
 
 		// --- Startup State Log ---
-		fmt.Println("\n  === OpenLoom State ===")
+		fmt.Println("\n  === OpenPraxis State ===")
 		fmt.Printf("  Peer:      %s\n", cfg.Node.UUID)
 		fmt.Printf("  MAC:       %s\n", cfg.Node.MAC)
 		fmt.Printf("  Name:      %s %s\n", cfg.Node.Avatar, cfg.Node.DisplayName)

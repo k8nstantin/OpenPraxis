@@ -9,7 +9,7 @@ import (
 	"runtime"
 )
 
-// AgentConfig describes a coding agent that can be connected to OpenLoom.
+// AgentConfig describes a coding agent that can be connected to OpenPraxis.
 type AgentConfig struct {
 	Name       string `json:"name"`        // Display name
 	ID         string `json:"id"`          // Internal identifier
@@ -19,11 +19,11 @@ type AgentConfig struct {
 	Connected  bool   `json:"connected"`   // MCP config present
 }
 
-// binaryPath returns the path to the current openloom binary.
+// binaryPath returns the path to the current openpraxis binary.
 func binaryPath() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "openloom"
+		return "openpraxis"
 	}
 	// Resolve symlinks
 	resolved, err := filepath.EvalSymlinks(exe)
@@ -115,7 +115,7 @@ func ConfigureAgents() error {
 		if a.Connected {
 			continue
 		}
-		if askPermission(fmt.Sprintf("  Connect %s to OpenLoom? [Y/n] ", a.Name)) {
+		if askPermission(fmt.Sprintf("  Connect %s to OpenPraxis? [Y/n] ", a.Name)) {
 			if err := ConnectAgent(a); err != nil {
 				fmt.Printf("    Failed to configure %s: %v\n", a.Name, err)
 			} else {
@@ -168,7 +168,7 @@ func writeMCPJSON(path string) error {
 	if !ok {
 		servers = make(map[string]any)
 	}
-	servers["openloom"] = mcpEntry()
+	servers["openpraxis"] = mcpEntry()
 	config["mcpServers"] = servers
 
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -196,7 +196,7 @@ func writeSettingsJSON(path string) error {
 	if !ok {
 		servers = make(map[string]any)
 	}
-	servers["openloom"] = mcpEntry()
+	servers["openpraxis"] = mcpEntry()
 	config["mcpServers"] = servers
 
 	// Add hooks for automatic conversation capture
@@ -227,7 +227,7 @@ func writeSettingsJSON(path string) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-// removeMCPJSON removes openloom from an mcp.json file.
+// removeMCPJSON removes openpraxis from an mcp.json file.
 func removeMCPJSON(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -240,7 +240,7 @@ func removeMCPJSON(path string) error {
 	}
 
 	if servers, ok := config["mcpServers"].(map[string]any); ok {
-		delete(servers, "openloom")
+		delete(servers, "openpraxis")
 		config["mcpServers"] = servers
 	}
 
@@ -248,7 +248,7 @@ func removeMCPJSON(path string) error {
 	return os.WriteFile(path, append(out, '\n'), 0644)
 }
 
-// removeSettingsJSON removes openloom from Claude Code settings.json.
+// removeSettingsJSON removes openpraxis from Claude Code settings.json.
 func removeSettingsJSON(path string) error {
 	return removeMCPJSON(path) // Same structure
 }
@@ -291,7 +291,7 @@ func agentConnected(a AgentConfig) bool {
 		return false
 	}
 
-	_, exists := servers["openloom"]
+	_, exists := servers["openpraxis"]
 	return exists
 }
 

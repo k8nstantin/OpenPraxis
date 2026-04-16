@@ -10,7 +10,7 @@
  */
 
 import { create } from "zustand";
-import { OpenLoomSocket } from "./sync";
+import { OpenPraxisSocket } from "./sync";
 import { api } from "./api";
 import { configGet, configSet, outboxCount } from "./db";
 import {
@@ -38,7 +38,7 @@ interface AppState {
   serverStatus: StatusResponse | null;
 
   // --- WebSocket ---
-  socket: OpenLoomSocket | null;
+  socket: OpenPraxisSocket | null;
 
   // --- Push notifications ---
   pushToken: string | null;
@@ -147,7 +147,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 4. Start WebSocket
       let sock = existingSocket;
       if (!sock) {
-        sock = new OpenLoomSocket(peerHost);
+        sock = new OpenPraxisSocket(peerHost);
         set({ socket: sock });
       } else {
         sock.setHost(peerHost);

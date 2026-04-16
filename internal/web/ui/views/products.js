@@ -106,7 +106,7 @@
         </div>
         <div style="margin-bottom:16px">
           <label class="form-label-compact">Tags (comma-separated)</label>
-          <input id="new-product-tags" class="conv-search" style="width:100%;padding:8px 12px;font-size:13px" placeholder="e.g. openloom, backend">
+          <input id="new-product-tags" class="conv-search" style="width:100%;padding:8px 12px;font-size:13px" placeholder="e.g. openpraxis, backend">
         </div>
         <div class="flex-gap">
           <button class="btn-search" id="btn-save-product" style="padding:6px 20px;font-size:13px">Create Product</button>
@@ -326,7 +326,7 @@
       manifests.forEach(function(m) { topoSort(m); });
 
       function shortLabel(title) {
-        return title.replace(/^QA\s+/, '').replace(/^OpenLoom\s+/, '').replace(/\s*—\s*.+$/, '');
+        return title.replace(/^QA\s+/, '').replace(/^OpenPraxis\s+/, '').replace(/\s*—\s*.+$/, '');
       }
 
       var statusColor = function(status) {

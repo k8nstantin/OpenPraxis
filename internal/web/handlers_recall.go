@@ -3,7 +3,7 @@ package web
 import (
 	"net/http"
 
-	"openloom/internal/node"
+	"openpraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ContextBuilder builds system prompts with OpenLoom context injected.
+// ContextBuilder builds system prompts with OpenPraxis context injected.
 type ContextBuilder struct {
 	bridge NodeBridge
 }
@@ -15,13 +15,13 @@ func NewContextBuilder(bridge NodeBridge) *ContextBuilder {
 	return &ContextBuilder{bridge: bridge}
 }
 
-// Build constructs the full system prompt with OpenLoom context.
+// Build constructs the full system prompt with OpenPraxis context.
 // It auto-searches memories relevant to the user's message and includes
 // visceral rules, active manifests, and running tasks.
 func (cb *ContextBuilder) Build(ctx context.Context, userMessage string) string {
 	var parts []string
 
-	parts = append(parts, "You are an AI assistant integrated into OpenLoom, a shared memory layer for coding agents. You have access to tools that let you search memories, list manifests and tasks, and retrieve conversation history.")
+	parts = append(parts, "You are an AI assistant integrated into OpenPraxis, a shared memory layer for coding agents. You have access to tools that let you search memories, list manifests and tasks, and retrieve conversation history.")
 
 	// Visceral rules
 	rules := cb.buildVisceralRules()

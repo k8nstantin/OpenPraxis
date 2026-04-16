@@ -1,5 +1,5 @@
 /**
- * OpenLoom dark theme — matches dashboard CSS variables exactly.
+ * OpenPraxis dark theme — matches dashboard CSS variables exactly.
  * Use via tailwind classes (preferred) or direct import for StyleSheet.
  */
 

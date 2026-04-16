@@ -288,7 +288,7 @@
             <span>Cost: <strong style="color:var(--green)">$${(t.total_cost || 0).toFixed(2)}</strong></span>
             <span class="separator">|</span>
             <span>Agent: <strong style="color:var(--text-primary)">${esc(t.agent)}</strong></span>
-            <span>Branch: <strong style="color:var(--text-primary)">openloom/${esc(t.marker)}</strong></span>
+            <span>Branch: <strong style="color:var(--text-primary)">openpraxis/${esc(t.marker)}</strong></span>
             ${t.manifest_id ? `<span>Manifest: <span class="manifest-nav" style="cursor:pointer;color:var(--accent);text-decoration:underline;font-weight:600" data-mid="${esc(t.manifest_id)}">${esc(t.manifest_id.substring(0,12))} &#x2192;</span></span>` : '<span>standalone</span>'}
             <span class="separator">|</span>
             <span style="display:flex;align-items:center;gap:6px">Max turns: <input type="range" id="task-max-turns" value="${t.max_turns || 100}" min="10" max="500" step="10" style="width:100px;accent-color:var(--accent);cursor:pointer" oninput="document.getElementById('task-max-turns-val').textContent=this.value" onchange="OL.updateMaxTurns('${esc(t.id)}',this.value)" /><strong id="task-max-turns-val" style="color:var(--text-primary);min-width:28px">${t.max_turns || 100}</strong></span>

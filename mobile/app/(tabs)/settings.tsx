@@ -130,7 +130,7 @@ export default function SettingsScreen() {
             Connection
           </Text>
           <Text className="text-text-muted text-xs mb-2">
-            OpenLoom server address (IP:port)
+            OpenPraxis server address (IP:port)
           </Text>
           <TextInput
             className="bg-bg-input rounded-lg px-3 py-2.5 text-text-primary text-sm"
@@ -478,7 +478,7 @@ export default function SettingsScreen() {
             About
           </Text>
           <Text className="text-text-muted text-xs">
-            OpenLoom Mobile v1.0.0
+            OpenPraxis Mobile v1.0.0
           </Text>
           <Text className="text-text-muted text-xs mt-1">
             Phone as a Peer Node

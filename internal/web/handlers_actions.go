@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"openloom/internal/node"
+	"openpraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

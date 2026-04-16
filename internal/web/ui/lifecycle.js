@@ -1,4 +1,4 @@
-// OpenLoom — View lifecycle manager
+// OpenPraxis — View lifecycle manager
 // Tracks event listeners, timeouts, and intervals per view.
 // Auto-cleans all tracked resources on view switch.
 // Loaded after tree.js, before views.

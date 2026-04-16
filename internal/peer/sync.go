@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"openloom/internal/memory"
+	"openpraxis/internal/memory"
 
 	automerge "github.com/automerge/automerge-go"
 )

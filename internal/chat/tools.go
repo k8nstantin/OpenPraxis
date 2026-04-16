@@ -20,7 +20,7 @@ func (ct *ChatTools) Definitions() []ToolDef {
 	return []ToolDef{
 		{
 			Name:        "memory_search",
-			Description: "Semantic search across OpenLoom memories. Returns ranked results with relevance scores.",
+			Description: "Semantic search across OpenPraxis memories. Returns ranked results with relevance scores.",
 			InputSchema: `{"type":"object","properties":{"query":{"type":"string","description":"Natural language search query"},"limit":{"type":"integer","description":"Max results (default 5)"}},"required":["query"]}`,
 		},
 		{

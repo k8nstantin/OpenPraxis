@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"openloom/cmd"
+	"openpraxis/cmd"
 )
 
 func main() {

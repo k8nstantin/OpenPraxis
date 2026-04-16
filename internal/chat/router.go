@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"openloom/internal/config"
+	"openpraxis/internal/config"
 )
 
 // Router resolves providers from model IDs and manages available models.

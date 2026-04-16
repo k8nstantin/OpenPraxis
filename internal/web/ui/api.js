@@ -1,4 +1,4 @@
-// OpenLoom — Shared utilities and API layer
+// OpenPraxis — Shared utilities and API layer
 // All modules share the window.OL namespace.
 
 window.OL = {};

@@ -1,4 +1,4 @@
-module openloom
+module openpraxis
 
 go 1.25.5
 

@@ -116,7 +116,7 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 
 // RunGitGate checks if the task branch has commits.
 func (w *Watcher) RunGitGate(taskMarker string) GitResult {
-	branch := "openloom/" + taskMarker
+	branch := "openpraxis/" + taskMarker
 	result := GitResult{}
 
 	// Check if branch exists
@@ -255,7 +255,7 @@ func (w *Watcher) RunManifestGate(taskMarker, manifestContent string) ManifestRe
 	}
 
 	// Get the git diff for this task branch
-	branch := "openloom/" + taskMarker
+	branch := "openpraxis/" + taskMarker
 	cmd := exec.Command("git", "diff", "--name-only", branch+"^.."+branch)
 	cmd.Dir = w.repoDir
 	out, _ := cmd.Output()

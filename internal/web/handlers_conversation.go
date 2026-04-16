@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"openloom/internal/node"
+	"openpraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

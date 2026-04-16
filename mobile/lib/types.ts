@@ -1,5 +1,5 @@
 /**
- * OpenLoom API type definitions — mirrors Go structs from internal/.
+ * OpenPraxis API type definitions — mirrors Go structs from internal/.
  * All timestamps are RFC3339 strings unless noted.
  */
 

@@ -176,7 +176,7 @@ export default function OverviewScreen() {
         <View className="flex-row items-center justify-between pt-4 pb-6">
           <View>
             <Text className="text-text-primary text-2xl font-bold">
-              OpenLoom
+              OpenPraxis
             </Text>
             <Text className="text-text-muted text-sm">
               {liveStatus?.display_name || "Mobile Peer"}

@@ -1,5 +1,5 @@
 /**
- * Push notification system for OpenLoom Mobile.
+ * Push notification system for OpenPraxis Mobile.
  *
  * Handles:
  *   - Permission requests and registration

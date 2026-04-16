@@ -12,7 +12,7 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_create",
 			mcplib.WithDescription("Create a development manifest — a detailed spec document for a tool, feature, or module. Manifests are shared across sessions and can reference Jira tickets."),
-			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Manifest title (e.g. 'OpenLoom Visceral Compliance Engine')")),
+			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Manifest title (e.g. 'OpenPraxis Visceral Compliance Engine')")),
 			mcplib.WithString("description", mcplib.Required(), mcplib.Description("One-line description")),
 			mcplib.WithString("content", mcplib.Required(), mcplib.Description("Full spec in markdown — architecture, modules, features, requirements")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive. Default: draft")),

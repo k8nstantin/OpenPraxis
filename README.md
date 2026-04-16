@@ -1,8 +1,8 @@
-# OpenLoom
+# OpenPraxis
 
 **Spec-driven development platform for autonomous coding agents.** Define products, write specs, and let independent agent sessions build them — with persistent memory, compliance enforcement, and independent execution auditing.
 
-OpenLoom is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
+OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
 
 ## How It Works
 
@@ -45,7 +45,7 @@ You have an idea
                stdio MCP    hooks
                     |           |
               +-----+-----------+--------+
-              |         OpenLoom         |
+              |         OpenPraxis         |
               |                          |
               |  Products  > Manifests   |
               |  Manifests > Tasks       |
@@ -66,12 +66,12 @@ You have an idea
               Other Machines
 ```
 
-OpenLoom is a single Go binary that runs as:
+OpenPraxis is a single Go binary that runs as:
 1. **MCP server** (stdio) — spawned by coding agents as a subprocess, exposing 40+ tools
 2. **HTTP server** — dashboard UI, REST API, WebSocket events, hook handler
 3. **Task runner** — spawns autonomous agent sessions from scheduled tasks
 4. **Watcher** — independent server-side auditor that agents cannot override
-5. **Peer node** — mDNS discovery + Automerge CRDT sync with other OpenLoom instances
+5. **Peer node** — mDNS discovery + Automerge CRDT sync with other OpenPraxis instances
 
 ## Key Concepts
 
@@ -114,8 +114,8 @@ Capture product ideas, feature requests, bugs, and improvements with priority le
 Semantic, path-organized knowledge stored with embeddings for vector search. Memories persist across sessions and agents — decisions, patterns, bugs, and constraints survive.
 
 ```
-/project/openloom/bugs/macos-codesign-required
-/project/openloom/audit/task-e33-slog-postmortem
+/project/openpraxis/bugs/macos-codesign-required
+/project/openpraxis/audit/task-e33-slog-postmortem
 /personal/gryphon-data-lake/testing/preferences
 ```
 
@@ -185,7 +185,7 @@ ollama pull nomic-embed-text
 
 ```bash
 make build          # Build binary (includes macOS codesign)
-./openloom serve    # Start dashboard + MCP + sync (port 8765)
+./openpraxis serve    # Start dashboard + MCP + sync (port 8765)
 ```
 
 ### Connect to Claude Code
@@ -195,15 +195,15 @@ Add to your project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "openloom": {
-      "command": "/path/to/openloom",
+    "openpraxis": {
+      "command": "/path/to/openpraxis",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Claude Code will spawn OpenLoom as a subprocess. On first session, the agent receives instructions to call `visceral_rules` + `visceral_confirm` before any work.
+Claude Code will spawn OpenPraxis as a subprocess. On first session, the agent receives instructions to call `visceral_rules` + `visceral_confirm` before any work.
 
 ### Dashboard
 
@@ -223,7 +223,7 @@ Open `http://localhost:8765`.
 
 ## Database
 
-SQLite with WAL mode. Single file at `~/.openloom/data/memories.db`.
+SQLite with WAL mode. Single file at `~/.openpraxis/data/memories.db`.
 
 **Core:** `memories`, `conversations`, `manifests`, `tasks`, `task_runs`, `products`, `ideas`, `actions`, `sessions`
 
@@ -262,12 +262,12 @@ tools/                      Python utility scripts
 
 ## Hooks
 
-OpenLoom registers Claude Code hooks in `~/.claude/settings.json`:
+OpenPraxis registers Claude Code hooks in `~/.claude/settings.json`:
 
 | Hook | Trigger | What it does |
 |------|---------|-------------|
 | PostToolUse (`*`) | Every tool call | Records action, checks visceral compliance + manifest delusion |
-| PreToolUse (`mcp__openloom__*`) | OpenLoom tool calls | Enforces visceral rules are loaded first |
+| PreToolUse (`mcp__openpraxis__*`) | OpenPraxis tool calls | Enforces visceral rules are loaded first |
 | UserPromptSubmit | User sends message | Tracks session activity |
 | Stop | Session ends | Checks compliance, flags amnesia, saves conversation |
 | SessionEnd | Session cleanup | Saves conversation from transcript |
@@ -276,17 +276,17 @@ All hooks hit `http://127.0.0.1:8765/api/hook`.
 
 ## Peer Sync
 
-OpenLoom instances discover each other via mDNS on the local network and synchronize using Automerge CRDTs. Each node has a stable UUID v7 identity and MAC fingerprint.
+OpenPraxis instances discover each other via mDNS on the local network and synchronize using Automerge CRDTs. Each node has a stable UUID v7 identity and MAC fingerprint.
 
 ```
-Laptop (OpenLoom) <--mDNS--> Desktop (OpenLoom) <--mDNS--> Server (OpenLoom)
+Laptop (OpenPraxis) <--mDNS--> Desktop (OpenPraxis) <--mDNS--> Server (OpenPraxis)
 ```
 
 Memories, conversations, manifests, and visceral rules sync automatically. Each peer maintains its own SQLite database — sync is eventually consistent.
 
 ## Configuration
 
-Default config at `~/.openloom/config.yaml`:
+Default config at `~/.openpraxis/config.yaml`:
 
 ```yaml
 node:
@@ -306,12 +306,12 @@ embedding:
   model: nomic-embed-text
   dimension: 768
 storage:
-  data_dir: ~/.openloom/data
+  data_dir: ~/.openpraxis/data
 ```
 
 ## Mobile App
 
-React Native (Expo) companion app — acts as a full OpenLoom peer from your phone. Create manifests, schedule tasks, monitor execution, browse memories. Syncs to laptop peers over local network.
+React Native (Expo) companion app — acts as a full OpenPraxis peer from your phone. Create manifests, schedule tasks, monitor execution, browse memories. Syncs to laptop peers over local network.
 
 ```bash
 cd mobile

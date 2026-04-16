@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"openloom/internal/chat"
-	"openloom/internal/node"
+	"openpraxis/internal/chat"
+	"openpraxis/internal/node"
 )
 
 func joinRefs(refs []string) string {

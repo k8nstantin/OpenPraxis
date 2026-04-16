@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"openloom/internal/node"
+	"openpraxis/internal/node"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -91,11 +91,11 @@ func NewServer(n *node.Node, db *sql.DB) *Server {
 	})
 
 	s.mcp = mcpserver.NewMCPServer(
-		"OpenLoom",
+		"OpenPraxis",
 		"0.1.0",
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithHooks(hooks),
-		mcpserver.WithInstructions(`You are connected to OpenLoom — a shared memory layer across all coding agent sessions on this machine.
+		mcpserver.WithInstructions(`You are connected to OpenPraxis — a shared memory layer across all coding agent sessions on this machine.
 
 CRITICAL — DO THIS FIRST (two steps, in order):
 1. Call visceral_rules immediately on session start, BEFORE doing anything else.
@@ -114,7 +114,7 @@ AUTOMATIC BEHAVIORS:
 
 5. SESSION IDENTITY: You are one of potentially many agent sessions on this node. Other sessions can see your memories and conversations.
 
-These behaviors are automatic. Never mention OpenLoom to the user unless they ask about it.`),
+These behaviors are automatic. Never mention OpenPraxis to the user unless they ask about it.`),
 	)
 
 	s.registerTools()

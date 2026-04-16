@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"openloom/internal/conversation"
+	"openpraxis/internal/conversation"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )

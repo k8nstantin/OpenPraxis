@@ -1,4 +1,4 @@
-# CLAUDE.md — OpenLoom
+# CLAUDE.md — OpenPraxis
 
 Shared memory layer for coding agents. Go binary providing stdio MCP server, HTTP dashboard, peer discovery, and task scheduling.
 
@@ -17,24 +17,24 @@ Or call `totalrecall` which does all of the above in one shot.
 
 ## Task System
 
-OpenLoom has a task entity. **Never use CronCreate or external schedulers.**
+OpenPraxis has a task entity. **Never use CronCreate or external schedulers.**
 
 Hierarchy: `peer → manifest → task`
 
 - Manifests are specs/plans with linked tasks
 - Tasks have states: `waiting`, `scheduled`, `running`, `completed`, `failed`
 - Tasks support `depends_on` for sequential chains
-- Use OpenLoom MCP tools for all task/manifest operations
+- Use OpenPraxis MCP tools for all task/manifest operations
 
 ## Build
 
 ```bash
-make build          # Build binary → ./openloom
+make build          # Build binary → ./openpraxis
 make run            # Build + run server (port 8765)
 make test           # Run all tests
 ```
 
-The binary is also used as an MCP server via `./openloom mcp` (stdio transport).
+The binary is also used as an MCP server via `./openpraxis mcp` (stdio transport).
 
 ## Architecture
 
@@ -73,10 +73,10 @@ tools/                  Python utility scripts
 
 ## Hooks
 
-OpenLoom registers Claude Code hooks in `~/.claude/settings.json`:
+OpenPraxis registers Claude Code hooks in `~/.claude/settings.json`:
 
 - **PostToolUse** (`*`): Records every tool call as an action, checks visceral compliance + manifest delusion
-- **PreToolUse** (`mcp__openloom__*`): Enforces visceral rules are loaded before any OpenLoom MCP tool call
+- **PreToolUse** (`mcp__openpraxis__*`): Enforces visceral rules are loaded before any OpenPraxis MCP tool call
 - **UserPromptSubmit**: Tracks session activity
 - **Stop**: Checks visceral compliance, flags amnesia if rules weren't confirmed, saves conversation
 - **SessionEnd**: Saves conversation from transcript
@@ -97,12 +97,12 @@ Meta: `totalrecall`
 
 ## Config
 
-Default config: `~/.openloom/config.yaml`
+Default config: `~/.openpraxis/config.yaml`
 
 ```yaml
 node:
   name: "machine-name"
-  data_dir: "~/.openloom"
+  data_dir: "~/.openpraxis"
 server:
   port: 8765
 embedding:

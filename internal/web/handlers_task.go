@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"openloom/internal/node"
-	"openloom/internal/task"
+	"openpraxis/internal/node"
+	"openpraxis/internal/task"
 
 	"github.com/gorilla/mux"
 )

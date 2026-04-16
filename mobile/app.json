@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "OpenLoom",
-    "slug": "openloom-mobile",
+    "name": "OpenPraxis",
+    "slug": "openpraxis-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "openloom",
+    "scheme": "openpraxis",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.openloom.mobile"
+      "bundleIdentifier": "com.openpraxis.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.openloom.mobile"
+      "package": "com.openpraxis.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png",

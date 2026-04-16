@@ -1,5 +1,5 @@
 /**
- * React Query hooks for all OpenLoom API endpoints.
+ * React Query hooks for all OpenPraxis API endpoints.
  *
  * Convention:
  *   useXxx()          — query hook (GET)

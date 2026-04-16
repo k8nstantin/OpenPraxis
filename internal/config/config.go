@@ -131,7 +131,7 @@ func DefaultConfig() *Config {
 			Dimension: 768,
 		},
 		Storage: StorageConfig{
-			DataDir: filepath.Join(homeDir, ".openloom", "data"),
+			DataDir: filepath.Join(homeDir, ".openpraxis", "data"),
 		},
 		Defaults: DefaultsConfig{
 			Scope:   "project",
@@ -152,10 +152,13 @@ func DefaultConfig() *Config {
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
+	// Migrate old data directory: ~/.openloom → ~/.openpraxis
+	migrateDataDir()
+
 	// Determine config file path
 	if path == "" {
 		homeDir, _ := os.UserHomeDir()
-		path = filepath.Join(homeDir, ".openloom", "config.yaml")
+		path = filepath.Join(homeDir, ".openpraxis", "config.yaml")
 	}
 
 	// Read config file if it exists
@@ -198,7 +201,7 @@ func Load(path string) (*Config, error) {
 func (c *Config) Save() error {
 	if c.filePath == "" {
 		homeDir, _ := os.UserHomeDir()
-		c.filePath = filepath.Join(homeDir, ".openloom", "config.yaml")
+		c.filePath = filepath.Join(homeDir, ".openpraxis", "config.yaml")
 	}
 	if err := os.MkdirAll(filepath.Dir(c.filePath), 0755); err != nil {
 		return err
@@ -211,38 +214,38 @@ func (c *Config) Save() error {
 }
 
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("OPENLOOM_NODE_NAME"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_NODE_NAME"); v != "" {
 		cfg.Node.Name = v
 	}
-	if v := os.Getenv("OPENLOOM_HOST"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_HOST"); v != "" {
 		cfg.Server.Host = v
 	}
-	if v := os.Getenv("OPENLOOM_PORT"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = p
 		}
 	}
-	if v := os.Getenv("OPENLOOM_SYNC_HOST"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_SYNC_HOST"); v != "" {
 		cfg.Sync.Host = v
 	}
-	if v := os.Getenv("OPENLOOM_SYNC_PORT"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_SYNC_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.Sync.Port = p
 		}
 	}
-	if v := os.Getenv("OPENLOOM_OLLAMA_URL"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_OLLAMA_URL"); v != "" {
 		cfg.Embedding.OllamaURL = v
 	}
-	if v := os.Getenv("OPENLOOM_EMBEDDING_MODEL"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_EMBEDDING_MODEL"); v != "" {
 		cfg.Embedding.Model = v
 	}
-	if v := os.Getenv("OPENLOOM_DATA_DIR"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_DATA_DIR"); v != "" {
 		cfg.Storage.DataDir = v
 	}
-	if v := os.Getenv("OPENLOOM_DEFAULT_PROJECT"); v != "" {
+	if v := os.Getenv("OPENPRAXIS_DEFAULT_PROJECT"); v != "" {
 		cfg.Defaults.Project = v
 	}
-	if v := os.Getenv("OPENLOOM_OPEN_BROWSER"); v == "false" {
+	if v := os.Getenv("OPENPRAXIS_OPEN_BROWSER"); v == "false" {
 		cfg.Server.OpenBrowser = false
 	}
 }
@@ -253,4 +256,30 @@ func mustCwd() string {
 		return "unknown"
 	}
 	return dir
+}
+
+// migrateDataDir renames ~/.openloom to ~/.openpraxis on first run after rebrand.
+// Only migrates if the new directory doesn't exist but the old one does.
+func migrateDataDir() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	oldDir := filepath.Join(homeDir, ".openloom")
+	newDir := filepath.Join(homeDir, ".openpraxis")
+
+	// Only migrate if old exists and new does not
+	if _, err := os.Stat(newDir); err == nil {
+		return // new dir already exists, nothing to do
+	}
+	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
+		return // old dir doesn't exist either, fresh install
+	}
+
+	if err := os.Rename(oldDir, newDir); err != nil {
+		slog.Warn("failed to migrate data directory",
+			"from", oldDir, "to", newDir, "error", err)
+		return
+	}
+	slog.Info("migrated data directory", "from", oldDir, "to", newDir)
 }

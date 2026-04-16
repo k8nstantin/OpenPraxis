@@ -99,7 +99,7 @@
       html += '<tr class="top-task-row clickable" role="button" tabindex="0" onclick="OL.switchView(\'tasks\');setTimeout(function(){OL.loadTaskDetail&&OL.loadTaskDetail(\'' + esc(t.marker) + '\')},200)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
         '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:11px;color:var(--accent)">' + esc(t.marker) + '</td>' +
         '<td style="padding:6px 12px;font-size:12px">' + esc(titleTrunc) + '</td>' +
-        '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">openloom/' + esc(t.marker) + '</td>' +
+        '<td style="padding:6px 12px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">openpraxis/' + esc(t.marker) + '</td>' +
         '<td class="td-mono-right">' + t.turns + '</td>' +
         '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;color:' + costColor + '">$' + t.cost.toFixed(2) + '</td>' +
         '<td style="padding:6px 12px;text-align:right;font-size:11px;color:' + sColor + '">' + esc(t.status) + '</td>' +

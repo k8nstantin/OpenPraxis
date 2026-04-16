@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"openloom/internal/node"
+	"openpraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

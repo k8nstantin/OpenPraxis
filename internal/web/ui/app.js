@@ -1,4 +1,4 @@
-// OpenLoom — Dashboard entry point
+// OpenPraxis — Dashboard entry point
 // Loads after api.js, tree.js, and all views/*.js modules.
 // Wires navigation, WebSocket, refresh loop, and delegates to OL.* view functions.
 

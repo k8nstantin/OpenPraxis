@@ -1,4 +1,4 @@
-// OpenLoom — Reusable tree expand/collapse component
+// OpenPraxis — Reusable tree expand/collapse component
 // Provides renderTree() for multi-level collapsible tree UI.
 // Replaces 6+ duplicate toggle implementations across views.
 

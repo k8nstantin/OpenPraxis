@@ -1,5 +1,5 @@
 /**
- * WebSocket client for real-time OpenLoom events.
+ * WebSocket client for real-time OpenPraxis events.
  *
  * Connects to ws://{peerHost}/ws and emits typed events.
  * Auto-reconnects with exponential backoff (1s → 30s cap).
@@ -26,7 +26,7 @@ const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const RECONNECT_FACTOR = 2;
 
-export class OpenLoomSocket {
+export class OpenPraxisSocket {
   private ws: WebSocket | null = null;
   private listeners = new Map<WSEventType | "*", Set<EventHandler>>();
   private reconnectMs = RECONNECT_MIN_MS;

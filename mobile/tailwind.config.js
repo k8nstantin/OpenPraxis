@@ -5,7 +5,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Match OpenLoom dashboard dark theme
+        // Match OpenPraxis dashboard dark theme
         bg: {
           primary: "#0a0a0f",
           secondary: "#12121a",

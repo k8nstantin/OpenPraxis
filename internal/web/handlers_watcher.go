@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"openloom/internal/node"
-	"openloom/internal/watcher"
+	"openpraxis/internal/node"
+	"openpraxis/internal/watcher"
 
 	"github.com/gorilla/mux"
 )

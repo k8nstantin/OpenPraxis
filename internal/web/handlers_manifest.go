@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"openloom/internal/manifest"
-	"openloom/internal/node"
-	"openloom/internal/task"
+	"openpraxis/internal/manifest"
+	"openpraxis/internal/node"
+	"openpraxis/internal/task"
 
 	"github.com/gorilla/mux"
 )

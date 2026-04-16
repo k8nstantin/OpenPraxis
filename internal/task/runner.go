@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"openloom/internal/action"
+	"openpraxis/internal/action"
 )
 
 // RunningTask tracks an actively executing task.
@@ -95,16 +95,16 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// Build the prompt
 	prompt := buildPrompt(t, manifestTitle, manifestContent, visceralRules)
 
-	// Build allowed tools list — OpenLoom MCP tools + standard tools
+	// Build allowed tools list — OpenPraxis MCP tools + standard tools
 	allowedTools := []string{
 		"Bash", "Read", "Write", "Edit", "Glob", "Grep",
-		"mcp__openloom__memory_store",
-		"mcp__openloom__memory_search",
-		"mcp__openloom__memory_recall",
-		"mcp__openloom__visceral_rules",
-		"mcp__openloom__visceral_confirm",
-		"mcp__openloom__manifest_get",
-		"mcp__openloom__conversation_save",
+		"mcp__openpraxis__memory_store",
+		"mcp__openpraxis__memory_search",
+		"mcp__openpraxis__memory_recall",
+		"mcp__openpraxis__visceral_rules",
+		"mcp__openpraxis__visceral_confirm",
+		"mcp__openpraxis__manifest_get",
+		"mcp__openpraxis__conversation_save",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -522,7 +522,7 @@ func (r *Runner) GetOutput(taskID string) ([]string, bool) {
 
 func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string) string {
 	var b strings.Builder
-	b.WriteString("You are executing a scheduled task for OpenLoom.\n\n")
+	b.WriteString("You are executing a scheduled task for OpenPraxis.\n\n")
 
 	if visceralRules != "" {
 		b.WriteString("## Visceral Rules (MANDATORY — follow without exception)\n")
@@ -551,10 +551,10 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string) 
 	}
 	b.WriteString("## Git Workflow (MANDATORY)\n")
 	b.WriteString(fmt.Sprintf("1. Before making ANY code changes, create a new branch:\n"))
-	b.WriteString(fmt.Sprintf("   git checkout -b openloom/%s\n", marker))
+	b.WriteString(fmt.Sprintf("   git checkout -b openpraxis/%s\n", marker))
 	b.WriteString("2. Make all your changes on this branch.\n")
 	b.WriteString("3. Commit your work with a descriptive message.\n")
-	b.WriteString(fmt.Sprintf("4. Push the branch: git push -u origin openloom/%s\n", marker))
+	b.WriteString(fmt.Sprintf("4. Push the branch: git push -u origin openpraxis/%s\n", marker))
 	b.WriteString("5. Create a pull request using: gh pr create --title \"<title>\" --body \"<summary>\"\n")
 	b.WriteString("6. Include the PR URL in your final output.\n")
 	b.WriteString("NEVER work on an existing branch. NEVER push to main. Each task gets its own branch and PR.\n\n")

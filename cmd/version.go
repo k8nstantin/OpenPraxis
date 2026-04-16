@@ -17,7 +17,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("openloom %s (commit: %s, built: %s)\n", Version, GitCommit, BuildDate)
+		fmt.Printf("openpraxis %s (commit: %s, built: %s)\n", Version, GitCommit, BuildDate)
 	},
 }
 

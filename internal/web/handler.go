@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"time"
 
-	"openloom/internal/chat"
-	"openloom/internal/mcp"
-	"openloom/internal/node"
-	"openloom/internal/peer"
+	"openpraxis/internal/chat"
+	"openpraxis/internal/mcp"
+	"openpraxis/internal/node"
+	"openpraxis/internal/peer"
 
 	"github.com/gorilla/mux"
 )

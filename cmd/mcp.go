@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"openloom/internal/config"
-	mcpserver "openloom/internal/mcp"
-	"openloom/internal/node"
+	"openpraxis/internal/config"
+	mcpserver "openpraxis/internal/mcp"
+	"openpraxis/internal/node"
 
 	mcplib "github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"

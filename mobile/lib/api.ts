@@ -1,5 +1,5 @@
 /**
- * OpenLoom REST API client — fully typed, covers all server endpoints.
+ * OpenPraxis REST API client — fully typed, covers all server endpoints.
  * Base URL is read from Zustand store (peerHost).
  */
 

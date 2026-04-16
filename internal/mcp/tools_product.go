@@ -12,7 +12,7 @@ func (s *Server) registerProductTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("product_create",
 			mcplib.WithDescription("Create a product — top-level organizational entity grouping manifests. Hierarchy: peer → product → manifest → task."),
-			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Product title (e.g. 'OpenLoom', 'Gryphon Data Lake')")),
+			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Product title (e.g. 'OpenPraxis', 'Gryphon Data Lake')")),
 			mcplib.WithString("description", mcplib.Description("One-line description")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive. Default: draft")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),

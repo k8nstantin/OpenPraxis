@@ -9,7 +9,7 @@
     if (snippet) {
       snippet.textContent = JSON.stringify({
         "mcpServers": {
-          "openloom": {
+          "openpraxis": {
             "type": "http",
             "url": "http://127.0.0.1:8765/mcp"
           }

@@ -23,7 +23,7 @@ import sys
 
 
 def get_default_db_path():
-    return os.path.expanduser("~/.openloom/data/memories.db")
+    return os.path.expanduser("~/.openpraxis/data/memories.db")
 
 
 def truncate(text, max_len=5000):

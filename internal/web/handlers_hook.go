@@ -11,9 +11,9 @@ import (
 	"os"
 	"strings"
 
-	"openloom/internal/action"
-	"openloom/internal/conversation"
-	"openloom/internal/node"
+	"openpraxis/internal/action"
+	"openpraxis/internal/conversation"
+	"openpraxis/internal/node"
 )
 
 // apiHook handles Claude Code hook events — reads transcript file directly, no in-memory state.
