@@ -307,70 +307,106 @@
       if (!data) return;
 
       const elements = [];
-
-      // Color by depth layer for visual clarity
-      const layerColors = ['#8b5cf6', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
-
-      // Compute depth of each manifest based on depends_on chain
+      const positions = {};
       const manifests = data.children || [];
-      const depthMap = {};
-      function getDepth(m, visited) {
-        if (depthMap[m.id] !== undefined) return depthMap[m.id];
-        if (visited[m.id]) return 0;
+
+      // Sort manifests by dependency order (topological sort)
+      const sorted = [];
+      const visited = {};
+      function topoSort(m) {
+        if (visited[m.id]) return;
         visited[m.id] = true;
         var deps = (m.depends_on || '').split(',').filter(Boolean);
-        var maxDepth = 0;
         for (var i = 0; i < deps.length; i++) {
           var dep = manifests.find(function(x) { return x.id === deps[i].trim(); });
-          if (dep) maxDepth = Math.max(maxDepth, getDepth(dep, visited) + 1);
+          if (dep) topoSort(dep);
         }
-        depthMap[m.id] = maxDepth;
-        return maxDepth;
+        sorted.push(m);
       }
-      manifests.forEach(function(m) { getDepth(m, {}); });
+      manifests.forEach(function(m) { topoSort(m); });
 
-      // Short label: remove common prefixes
       function shortLabel(title) {
-        return title
-          .replace(/^QA\s+/, '')
-          .replace(/^OpenLoom\s+/, '')
-          .replace(/\s*—\s*.+$/, '');
+        return title.replace(/^QA\s+/, '').replace(/^OpenLoom\s+/, '').replace(/\s*—\s*.+$/, '');
       }
 
-      // Add product node
-      elements.push({ data: {
-        id: data.id, label: data.title, title: data.title, type: data.type,
-        status: data.status, marker: data.marker
-      }});
+      var statusColor = function(status) {
+        if (status === 'completed') return '#00d97e';
+        if (status === 'running') return '#f5c542';
+        if (status === 'failed') return '#e63757';
+        if (status === 'closed' || status === 'archive') return '#00d97e';
+        if (status === 'open') return '#3b82f6';
+        if (status === 'draft') return '#f5c542';
+        return '#71717a';
+      };
 
-      // Manifests only — no tasks
-      for (const m of manifests) {
-        var taskCount = (m.children || []).length;
-        var completedCount = (m.children || []).filter(function(t) { return t.status === 'completed'; }).length;
-        var depth = depthMap[m.id] || 0;
+      // Layout: manifests horizontal, tasks vertical below each
+      var colW = 180;  // horizontal spacing between manifests
+      var rowH = 60;   // vertical spacing between tasks
+      var manifestY = 0;
+      var taskStartY = 80;
+
+      // Place manifests horizontally
+      for (var col = 0; col < sorted.length; col++) {
+        var m = sorted[col];
+        var x = col * colW;
+        var tasks = m.children || [];
+        var taskCount = tasks.length;
+        var completedCount = tasks.filter(function(t) { return t.status === 'completed'; }).length;
+
+        // Manifest node
         elements.push({ data: {
           id: m.id,
-          label: shortLabel(m.title) + '\n' + completedCount + '/' + taskCount + ' tasks',
-          title: m.title, type: m.type, status: m.status,
-          marker: m.marker, depth: depth,
-          layerColor: layerColors[depth % layerColors.length],
-          depends_on: m.depends_on || '',
-          meta: JSON.stringify(m.meta || {})
+          label: shortLabel(m.title),
+          title: m.title, type: 'manifest', status: m.status,
+          marker: m.marker, depends_on: m.depends_on || '',
+          meta: JSON.stringify(m.meta || {}),
+          taskInfo: completedCount + '/' + taskCount
         }});
-        if (!m.depends_on) {
-          elements.push({ data: { source: data.id, target: m.id } });
-        }
-      }
+        positions[m.id] = { x: x, y: manifestY };
 
-      // Manifest dependency edges
-      for (const el of [...elements]) {
-        const d = el.data;
-        if (d && d.type === 'manifest' && d.depends_on) {
-          const depIds = d.depends_on.split(',').map(s => s.trim()).filter(Boolean);
-          for (const depId of depIds) {
-            if (elements.some(e => e.data && e.data.id === depId)) {
-              elements.push({ data: { source: depId, target: d.id, edgeType: 'manifest_dependency' } });
-            }
+        // Manifest-to-manifest edge
+        if (m.depends_on) {
+          var depIds = m.depends_on.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+          for (var di = 0; di < depIds.length; di++) {
+            elements.push({ data: { source: depIds[di], target: m.id, edgeType: 'manifest_dep' } });
+          }
+        }
+
+        // Sort tasks: first task has no depends_on, rest chain
+        var taskOrder = [];
+        var taskMap = {};
+        tasks.forEach(function(t) { taskMap[t.id] = t; });
+        // Find first task (no depends_on or depends_on not in this manifest)
+        var first = tasks.find(function(t) { return !t.depends_on || !taskMap[t.depends_on]; });
+        if (first) {
+          taskOrder.push(first);
+          var current = first;
+          while (true) {
+            var next = tasks.find(function(t) { return t.depends_on === current.id; });
+            if (!next) break;
+            taskOrder.push(next);
+            current = next;
+          }
+        }
+        // Add any remaining tasks not in chain
+        tasks.forEach(function(t) { if (taskOrder.indexOf(t) === -1) taskOrder.push(t); });
+
+        // Place tasks vertically below manifest
+        for (var ti = 0; ti < taskOrder.length; ti++) {
+          var t = taskOrder[ti];
+          var shortTitle = t.title.length > 25 ? t.title.substring(0, 23) + '…' : t.title;
+          elements.push({ data: {
+            id: t.id, label: shortTitle,
+            title: t.title, type: 'task', status: t.status,
+            marker: t.marker, depends_on: t.depends_on || ''
+          }});
+          positions[t.id] = { x: x, y: taskStartY + ti * rowH };
+
+          // Edge: manifest → first task, then task → task
+          if (ti === 0) {
+            elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
+          } else {
+            elements.push({ data: { source: taskOrder[ti - 1].id, target: t.id, edgeType: 'task_dep' } });
           }
         }
       }
@@ -380,12 +416,8 @@
         container: container,
         elements: elements,
         layout: {
-          name: 'dagre',
-          rankDir: 'LR',
-          spacingFactor: 1.8,
-          nodeSep: 60,
-          rankSep: 120,
-          ranker: 'longest-path',
+          name: 'preset',
+          positions: function(node) { return positions[node.id()] || { x: 0, y: 0 }; },
         },
         style: [
           {
@@ -393,67 +425,96 @@
             style: {
               'label': 'data(label)',
               'text-wrap': 'wrap',
-              'text-max-width': '130px',
-              'font-size': '10px',
-              'text-valign': 'center',
+              'text-max-width': '140px',
+              'font-size': '9px',
+              'text-valign': 'bottom',
               'text-halign': 'center',
-              'color': '#e4e4e7',
+              'text-margin-y': 8,
+              'color': '#a1a1aa',
               'background-color': '#1a1a2e',
-              'border-width': 3,
-              'border-color': 'data(layerColor)',
-              'width': 60,
-              'height': 60,
-              'shape': 'round-rectangle',
+              'border-width': 2,
+              'border-color': '#71717a',
+              'width': 30,
+              'height': 30,
+              'shape': 'ellipse',
               'text-outline-color': '#0a0a0f',
-              'text-outline-width': 2,
+              'text-outline-width': 1,
             }
           },
           {
-            selector: 'node[type="product"]',
+            selector: 'node[type="manifest"]',
             style: {
-              'font-size': '13px', 'font-weight': 'bold', 'text-max-width': '160px',
-              'width': 70, 'height': 70,
-              'background-color': '#8b5cf6', 'border-color': '#8b5cf6', 'color': '#fff'
+              'shape': 'round-rectangle',
+              'width': 55,
+              'height': 40,
+              'font-size': '10px',
+              'font-weight': 'bold',
+              'text-max-width': '150px',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'text-margin-y': 0,
+              'color': '#e4e4e7',
+              'background-color': '#1e3a5f',
+              'border-width': 3,
+              'border-color': '#3b82f6',
             }
+          },
+          {
+            selector: 'node[status="completed"]',
+            style: { 'border-color': '#00d97e', 'background-color': '#0a2e1a' }
+          },
+          {
+            selector: 'node[status="running"]',
+            style: { 'border-color': '#f5c542', 'background-color': '#2e2a0a' }
+          },
+          {
+            selector: 'node[status="failed"]',
+            style: { 'border-color': '#e63757', 'background-color': '#2e0a0a' }
           },
           {
             selector: 'edge',
             style: {
-              'width': 2,
-              'line-color': 'rgba(255,255,255,0.12)',
-              'target-arrow-color': 'rgba(255,255,255,0.12)',
+              'width': 1.5,
+              'line-color': 'rgba(255,255,255,0.1)',
+              'target-arrow-color': 'rgba(255,255,255,0.1)',
               'target-arrow-shape': 'triangle',
-              'curve-style': 'taxi',
-              'taxi-direction': 'rightward',
-              'taxi-turn': '50px',
-              'arrow-scale': 0.8,
+              'curve-style': 'straight',
+              'arrow-scale': 0.7,
             }
           },
           {
-            selector: 'edge[edgeType="manifest_dependency"]',
+            selector: 'edge[edgeType="manifest_dep"]',
             style: {
-              'width': 2.5,
+              'width': 3,
               'line-color': '#3b82f6',
-              'line-style': 'solid',
               'target-arrow-color': '#3b82f6',
               'target-arrow-shape': 'triangle',
-              'curve-style': 'taxi',
-              'taxi-direction': 'rightward',
-              'taxi-turn': '40px',
+              'curve-style': 'straight',
               'arrow-scale': 1.0,
             }
           },
           {
-            selector: 'edge[edgeType="dependency"]',
+            selector: 'edge[edgeType="ownership"]',
             style: {
-              'width': 2,
-              'line-color': '#f59e0b',
+              'width': 1.5,
+              'line-color': '#3b82f6',
               'line-style': 'dashed',
-              'line-dash-pattern': [6, 3],
+              'line-dash-pattern': [4, 4],
+              'target-arrow-color': '#3b82f6',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'straight',
+              'arrow-scale': 0.7,
+            }
+          },
+          {
+            selector: 'edge[edgeType="task_dep"]',
+            style: {
+              'width': 1.5,
+              'line-color': '#f59e0b',
               'target-arrow-color': '#f59e0b',
               'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
-              'arrow-scale': 0.9,
+              'curve-style': 'straight',
+              'arrow-scale': 0.7,
             }
           },
           {
