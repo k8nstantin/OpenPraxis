@@ -344,7 +344,11 @@
           nodeSize: nodeSize(m.type), meta: JSON.stringify(m.meta || {}),
           depends_on: m.depends_on || '', depends_on_titles: m.depends_on_titles || []
         }});
-        elements.push({ data: { source: data.id, target: m.id } });
+        // Only connect product to root manifests (no depends_on)
+        // Other manifests are reached via manifest dependency edges
+        if (!m.depends_on) {
+          elements.push({ data: { source: data.id, target: m.id } });
+        }
 
         for (const t of (m.children || [])) {
           elements.push({ data: {
