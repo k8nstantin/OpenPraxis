@@ -10,18 +10,100 @@
 
 OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
 
-## Screenshots
+## See it in action
+
+Most agent tools hand you a black box: you push "run", hope for the best, and find out what happened when the monthly bill lands. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and has the final say on "done."
+
+The result is cost control by construction — you set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+
+### Dashboard — cost today vs. budget, tasks ranked by spend
+
+<p align="center">
+  <img src="docs/images/overview.png" alt="OpenPraxis dashboard overview — running task with live elapsed time, daily cost vs budget, tasks-today ranked by cost" width="100%" />
+</p>
+
+One glance tells you the entire cost story of the day:
+
+- **Running Tasks** — live card with agent, action count, elapsed time, pause/stop/emergency-stop buttons. A runaway task is one click away from dead.
+- **Cost Today ($16.24 / $100)** — current spend against the daily budget you set as a visceral rule. Crosses into red the moment you exceed it.
+- **Turns Today (438)** — total agent turns billed today across every task.
+- **Tasks (147) · Memories (134) · Nodes (1) · Uptime** — the state of the platform at a glance.
+- **Productivity (99 A)** — score derived from lines-of-code changed per dollar per task, letter-graded.
+- **Tasks Today — By Cost** — every task that ran today, sorted by cost. Columns: marker, title, branch, turns, cost, status. No ranking favourite, no scrolling through 200 tasks to find the expensive one.
+
+### Live tool output — watch the agent work, turn by turn
+
+<p align="center">
+  <img src="docs/images/tasks-live-output.png" alt="Task detail with live bash, read, and edit tool calls streaming as the agent runs" width="100%" />
+</p>
+
+Open any running task and every tool call streams in as the agent makes it:
+
+- **Bash** — full command, working directory, stdout, stderr, exit code.
+- **Read / Edit / Write** — file path, line ranges, diffs.
+- **Web fetch, Grep, Glob** — full query and result.
+- **Turn counter** — each agent turn is numbered and costed individually, so you can see exactly where the session got expensive.
+- **Pause (SIGSTOP) / Stop / Emergency Stop All** — freeze or kill at any point; no waiting for the agent to decide.
+
+Every action row is stored and searchable forever. "What did the agent actually edit on Thursday?" is answerable.
+
+### Products → Manifests → Tasks — every cost and every turn rolls up
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/manifests.png" alt="Manifests view — peers, manifests grouped by product, full spec on click" /><br/><sub>Manifests — specs grouped by peer and product</sub></td>
-    <td align="center"><img src="docs/images/tasks.png" alt="Tasks view — peers, tasks grouped by manifest, status and schedule at a glance" /><br/><sub>Tasks — scheduled executions against manifests</sub></td>
+    <td width="50%"><img src="docs/images/products-detail.png" alt="Product detail showing three linked manifests with aggregate cost, tasks, turns, and status" /></td>
+    <td width="50%"><img src="docs/images/manifests-detail.png" alt="Manifest detail with four executed tasks inline, each showing status, cost, turns, and runs" /></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/memories.png" alt="Memories view — peers and sessions, full content detail on click" /><br/><sub>Memories — persistent context grouped by peer and session</sub></td>
-    <td align="center"><img src="docs/images/visceral.png" alt="Visceral rules — the mandatory constraints every agent acknowledges on session start" /><br/><sub>Visceral rules — non-negotiable constraints</sub></td>
+    <td align="center"><sub><b>Products</b> group manifests under one initiative. Header shows <b>Manifests / Tasks / Turns / Cost</b> aggregated across every child — spend per initiative, not guesswork.</sub></td>
+    <td align="center"><sub><b>Manifests</b> are markdown specs. Every executed task is linked inline with its status, cost, turns, run count, and branch — trace any line in the spec to the task that implemented it.</sub></td>
   </tr>
 </table>
+
+Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns aggregate at every level. Drill from "my product cost me $12" → "this manifest accounted for $8" → "this one task is $6" → "this one agent turn burned $3" → "here's the exact prompt and tool call."
+
+### Visualize the plan — interactive DAG, status-colored
+
+<p align="center">
+  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below with green/red status colors" width="100%" />
+</p>
+
+Cytoscape.js renders every product as an interactive directed acyclic graph:
+
+- **Purple product node** at the top.
+- **Manifest nodes** linked by **blue manifest-dep edges** — the build order.
+- **Task nodes** under each manifest linked by **yellow task-dep edges** — the execution chain.
+- **Status colors** — green done, gray pending, red failed, amber in flight.
+- **Zoom, pan, click to drill.** Every node is reachable by URL (`#view-products/<id>/dag`) so diagrams are shareable.
+
+### Every conversation, every tool call, every visceral-rule ack — searchable forever
+
+<p align="center">
+  <img src="docs/images/conversations-detail.png" alt="Conversation detail — an agent session's visceral rule acknowledgement at session start, plus tool calls" width="100%" />
+</p>
+
+Every agent session is captured as a conversation:
+
+- **Every turn** — prompt, response, tool call, tool result, thinking block.
+- **Visceral-rule acknowledgements** — an agent that skips the `visceral_rules` → `visceral_confirm` handshake is flagged as **amnesia** on the dashboard (look at the badge in the nav — 10000 violations shown here).
+- **Semantic search** — 768-dim embeddings via Ollama. "Find the session where we fixed the sqlite busy_timeout bug" is a similarity query, not a filename search.
+- **Per-peer, per-session grouping** — every conversation is tagged with the peer that ran it, so multi-machine teams get one unified history.
+
+### Independent evaluation — three gates an agent can't override
+
+<p align="center">
+  <img src="docs/images/watcher-audit-history.png" alt="Watcher audit history — 53 total audits, 24 passed, 29 failed, per-task verdict with git, build, and manifest checks" width="100%" />
+</p>
+
+The watcher is a **separate process** outside every agent session. After a task finishes, it runs three gates:
+
+1. **Git gate** — did the agent produce commits on the task branch? (Zero commits = instant fail. No "I did the work, I just didn't commit it" excuses.)
+2. **Build gate** — does the code compile? (`go build ./...` here; configurable per language.)
+3. **Manifest gate** — were the deliverables addressed? (Parses the manifest markdown into a checklist, scores how many items were actually touched in the diff.)
+
+The screenshot shows 53 total audits, 24 passed, 29 failed, 45 % pass rate — and the **Nice-to-have: Polish** manifest's tasks all green on all three gates. A task marked "completed" by the agent runner gets **downgraded to failed** if any gate fails. Nothing an agent can say overrides the watcher.
+
+The three gates together enforce what an outside reviewer would check: code exists, code builds, code addresses the spec. Agents don't self-grade. **The watcher does.**
 
 ## How It Works
 
