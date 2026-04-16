@@ -29,6 +29,13 @@
     }
   }
 
+  // Parse "#view-foo" from a hash and return "foo", or "" if it doesn't match.
+  function viewFromHash(hash) {
+    if (!hash) return '';
+    var m = hash.match(/^#view-([a-z][a-z0-9-]*)$/);
+    return m ? m[1] : '';
+  }
+
   // --- Init ---
   document.addEventListener('DOMContentLoaded', function() {
     setupNav();
@@ -55,6 +62,15 @@
         var view = a.getAttribute('href').replace('#view-', '');
         switchView(view);
       }
+    });
+
+    // Deep-link: honor #view-* from the URL on page load and on hashchange
+    // (back/forward nav, external links, headless screenshot tooling).
+    var initial = viewFromHash(window.location.hash);
+    if (initial) switchView(initial);
+    window.addEventListener('hashchange', function() {
+      var v = viewFromHash(window.location.hash);
+      if (v && v !== currentView) switchView(v);
     });
   });
 
