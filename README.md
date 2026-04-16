@@ -1,5 +1,11 @@
 # OpenPraxis
 
+[![CI](https://github.com/k8nstantin/OpenPraxis/actions/workflows/ci.yml/badge.svg)](https://github.com/k8nstantin/OpenPraxis/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/k8nstantin/OpenPraxis)](https://github.com/k8nstantin/OpenPraxis/blob/main/go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/k8nstantin/OpenPraxis)](https://goreportcard.com/report/github.com/k8nstantin/OpenPraxis)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
+
 **Spec-driven development platform for autonomous coding agents.** Define products, write specs, and let independent agent sessions build them — with persistent memory, compliance enforcement, and independent execution auditing.
 
 OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
