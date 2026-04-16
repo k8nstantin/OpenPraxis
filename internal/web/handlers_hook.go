@@ -11,9 +11,9 @@ import (
 	"os"
 	"strings"
 
-	"openpraxis/internal/action"
-	"openpraxis/internal/conversation"
-	"openpraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/conversation"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
 )
 
 // apiHook handles Claude Code hook events — reads transcript file directly, no in-memory state.

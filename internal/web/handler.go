@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"time"
 
-	"openpraxis/internal/chat"
-	"openpraxis/internal/mcp"
-	"openpraxis/internal/node"
-	"openpraxis/internal/peer"
+	"github.com/k8nstantin/OpenPraxis/internal/chat"
+	"github.com/k8nstantin/OpenPraxis/internal/mcp"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/peer"
 
 	"github.com/gorilla/mux"
 )

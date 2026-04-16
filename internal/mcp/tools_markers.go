@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"openpraxis/internal/marker"
+	"github.com/k8nstantin/OpenPraxis/internal/marker"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )

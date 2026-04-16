@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"openpraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"

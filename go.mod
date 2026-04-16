@@ -1,4 +1,4 @@
-module openpraxis
+module github.com/k8nstantin/OpenPraxis
 
 go 1.25.5
 

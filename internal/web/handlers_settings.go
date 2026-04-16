@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"openpraxis/internal/node"
-	"openpraxis/internal/setup"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/setup"
 
 	"github.com/gorilla/mux"
 )
