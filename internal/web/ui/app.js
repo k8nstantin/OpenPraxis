@@ -29,11 +29,70 @@
     }
   }
 
-  // Parse "#view-foo" from a hash and return "foo", or "" if it doesn't match.
+  // Parse a dashboard URL hash. Supported grammar:
+  //   #view-<view>
+  //   #view-<view>/<arg>
+  //   #view-<view>/<arg>/<sub>
+  // where <arg> is an entity id (UUID, marker, or date), and <sub> is an
+  // optional sub-action like "dag". Returns null if the hash doesn't match.
+  function parseHash(hash) {
+    if (!hash) return null;
+    var m = hash.match(/^#view-([a-z][a-z0-9-]*)(?:\/([^/]+)(?:\/(.+))?)?$/);
+    if (!m) return null;
+    return { view: m[1], arg: m[2] || '', sub: m[3] || '' };
+  }
+
+  // Legacy shim: callers that only care about the view name.
   function viewFromHash(hash) {
-    if (!hash) return '';
-    var m = hash.match(/^#view-([a-z][a-z0-9-]*)$/);
-    return m ? m[1] : '';
+    var p = parseHash(hash);
+    return p ? p.view : '';
+  }
+
+  // Run the view-specific deep-link action for a hash like
+  //   #view-<view>/<arg>[/<sub>]
+  //
+  // arg-only URLs (entity detail):
+  //   #view-products/<id>             drill into product + detail pane
+  //   #view-manifests/<id>            open the full manifest spec
+  //   #view-tasks/<marker>            open task detail (history, actions)
+  //   #view-actions/<id>              open action (tool-call) detail
+  //   #view-conversations/<id>        open conversation turns
+  //   #view-memories/<id>             open memory content
+  //   #view-ideas/<id>                open idea detail
+  //   #view-watcher/<audit-id>        open a specific watcher audit
+  //   #view-cost-history/<yyyy-mm-dd> drill into cost history for a date
+  //
+  // arg+sub URLs (secondary action on the entity):
+  //   #view-products/<id>/dag         render the full-page Cytoscape DAG
+  //
+  // If a loader or sub-action isn't registered yet (view's JS still
+  // initializing), we silently skip — hashchange's setTimeout retry covers
+  // the race.
+  function applyHashArg(view, arg, sub) {
+    if (!arg) return;
+    var loader = {
+      'products':      OL.loadProductDetail,
+      'manifests':     OL.loadManifest,
+      'tasks':         OL.loadTaskDetail,
+      'actions':       OL.loadActionDetail,
+      'conversations': OL.loadConv,
+      'memories':      OL.loadMemoryPeerDetail,
+      'ideas':         OL.loadIdea,
+      'watcher':       OL.loadWatcherDetail,
+      'cost-history':  OL.loadCostDrillDown
+    }[view];
+    if (typeof loader !== 'function') return;
+    Promise.resolve(loader(arg)).then(function() {
+      if (!sub) return;
+      if (view === 'products' && sub === 'dag' && typeof OL.showProductDiagram === 'function') {
+        OL.fetchJSON('/api/products/' + encodeURIComponent(arg)).then(function(p) {
+          var title = (p && p.title) ? p.title : arg;
+          OL.showProductDiagram((p && p.id) ? p.id : arg, title);
+        }).catch(function() {
+          OL.showProductDiagram(arg, arg);
+        });
+      }
+    });
   }
 
   // --- Init ---
@@ -64,13 +123,20 @@
       }
     });
 
-    // Deep-link: honor #view-* from the URL on page load and on hashchange
-    // (back/forward nav, external links, headless screenshot tooling).
-    var initial = viewFromHash(window.location.hash);
-    if (initial) switchView(initial);
+    // Deep-link: honor #view-*[/<arg>] from the URL on page load and on
+    // hashchange (back/forward nav, external links, headless screenshot
+    // tooling). The optional arg drills into a specific entity — for
+    // `#view-products/<id>`, that means rendering the product detail + DAG.
+    var initial = parseHash(window.location.hash);
+    if (initial) {
+      switchView(initial.view);
+      if (initial.arg) setTimeout(function() { applyHashArg(initial.view, initial.arg, initial.sub); }, 50);
+    }
     window.addEventListener('hashchange', function() {
-      var v = viewFromHash(window.location.hash);
-      if (v && v !== currentView) switchView(v);
+      var p = parseHash(window.location.hash);
+      if (!p) return;
+      if (p.view !== currentView) switchView(p.view);
+      if (p.arg) setTimeout(function() { applyHashArg(p.view, p.arg, p.sub); }, 50);
     });
   });
 
