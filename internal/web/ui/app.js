@@ -85,6 +85,7 @@
     if (view === 'manifests') OL.loadManifests();
     if (view === 'ideas') OL.loadIdeas();
     if (view === 'tasks') OL.loadTasks();
+    if (view === 'productivity') OL.loadProductivityView();
     if (view === 'cost-history') OL.loadCostHistory();
     if (view === 'delusions') OL.loadDelusions();
     if (view === 'watcher') OL.loadWatcher();

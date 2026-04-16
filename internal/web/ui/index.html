@@ -138,7 +138,7 @@
             <div class="metric-value" id="metric-tasks-total">-</div>
             <div class="metric-label">tasks</div>
           </div>
-          <div class="metric-card metric-card-primary" id="metric-productivity-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.showProductivityDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+          <div class="metric-card metric-card-primary" id="metric-productivity-card" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('productivity')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-productivity" style="color:var(--green)">-</div>
             <div class="metric-label">productivity</div>
           </div>
@@ -347,6 +347,41 @@
               <div class="empty-state">Click a task to view details, or click <strong>+ New Task</strong> to create one</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="view-productivity" class="view">
+        <div class="tab-hint">Agent productivity metrics. Completion rates, code output, efficiency, and quality scores over time.</div>
+        <!-- Trend Summary Cards -->
+        <div id="prod-trend-cards" class="metrics-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+          <div class="metric-card metric-card-sm">
+            <div class="metric-value metric-value-sm" id="prod-score-today" style="color:var(--green)">-</div>
+            <div class="metric-label">today</div>
+          </div>
+          <div class="metric-card metric-card-sm">
+            <div class="metric-value metric-value-sm" id="prod-score-week">-</div>
+            <div class="metric-label">this week</div>
+          </div>
+          <div class="metric-card metric-card-sm">
+            <div class="metric-value metric-value-sm" id="prod-score-month">-</div>
+            <div class="metric-label">this month</div>
+          </div>
+          <div class="metric-card metric-card-sm">
+            <div class="metric-value metric-value-sm" id="prod-score-all" style="color:var(--text-muted)">-</div>
+            <div class="metric-label">all time</div>
+          </div>
+        </div>
+        <!-- Controls -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+          <button id="prod-back-btn" class="btn-search" style="font-size:12px;padding:4px 12px">&larr; Overview</button>
+          <span style="flex:1"></span>
+        </div>
+        <!-- Breakdown -->
+        <div id="prod-breakdown" style="margin-bottom:16px"></div>
+        <!-- Daily table -->
+        <div class="panel">
+          <div class="panel-header">Daily Productivity</div>
+          <div class="panel-body" id="prod-daily-table" style="padding:0"></div>
         </div>
       </div>
 
@@ -714,6 +749,7 @@
   <script src="/views/ideas.js"></script>
   <script src="/views/tasks.js"></script>
   <script src="/views/cost.js"></script>
+  <script src="/views/productivity.js"></script>
   <script src="/views/compliance.js"></script>
   <script src="/views/watcher.js"></script>
   <script src="/views/recall.js"></script>
