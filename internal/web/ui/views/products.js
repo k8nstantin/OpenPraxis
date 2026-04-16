@@ -412,7 +412,8 @@
           elements.push({ data: {
             id: t.id, label: shortTitle,
             title: t.title, type: 'task', status: t.status,
-            marker: t.marker, depends_on: t.depends_on || ''
+            marker: t.marker, depends_on: t.depends_on || '',
+            meta: JSON.stringify(t.meta || {})
           }});
           positions[t.id] = { x: x, y: taskStartY + ti * rowH };
 
@@ -573,8 +574,9 @@
         const node = e.target;
         const d = node.data();
         const meta = JSON.parse(d.meta || '{}');
+        var sColor = d.status === 'completed' ? 'var(--green)' : d.status === 'running' ? '#f5c542' : d.status === 'failed' ? 'var(--red)' : 'var(--text-muted)';
         let html = `<div style="font-weight:600;margin-bottom:4px">${esc(d.title)}</div>`;
-        html += `<div><span style="color:var(--text-muted)">Status:</span> <span style="color:${d.color}">${d.status}</span></div>`;
+        html += `<div><span style="color:var(--text-muted)">Status:</span> <span style="color:${sColor}">${d.status}</span></div>`;
         html += `<div style="color:var(--text-muted);font-size:10px;margin-bottom:4px">${d.marker}</div>`;
         if (d.type === 'product') {
           html += `<div>${meta.total_manifests || 0} manifests</div>`;
