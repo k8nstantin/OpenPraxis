@@ -336,36 +336,27 @@
         nodeSize: nodeSize(data.type), meta: JSON.stringify(data.meta || {})
       }});
 
-      // Add manifest + task nodes
+      // Product DAG: manifests only — no tasks. Clean readable flow.
+      // Tasks are detail you see when you click a manifest.
       for (const m of (data.children || [])) {
+        var taskCount = (m.children || []).length;
+        var completedCount = (m.children || []).filter(function(t) { return t.status === 'completed'; }).length;
         elements.push({ data: {
-          id: m.id, label: nodeLabel(m.type), title: m.title, type: m.type, status: m.status,
+          id: m.id,
+          label: m.title.length > 35 ? m.title.substring(0, 33) + '…' : m.title,
+          title: m.title, type: m.type, status: m.status,
           marker: m.marker, color: statusColor(m.type, m.status),
-          nodeSize: nodeSize(m.type), meta: JSON.stringify(m.meta || {}),
-          depends_on: m.depends_on || '', depends_on_titles: m.depends_on_titles || []
+          nodeSize: 50, meta: JSON.stringify(m.meta || {}),
+          depends_on: m.depends_on || '', depends_on_titles: m.depends_on_titles || [],
+          taskInfo: completedCount + '/' + taskCount
         }});
         // Only connect product to root manifests (no depends_on)
-        // Other manifests are reached via manifest dependency edges
         if (!m.depends_on) {
           elements.push({ data: { source: data.id, target: m.id } });
         }
-
-        for (const t of (m.children || [])) {
-          elements.push({ data: {
-            id: t.id, label: nodeLabel(t.type), title: t.title, type: t.type, status: t.status,
-            marker: t.marker, color: statusColor(t.type, t.status),
-            nodeSize: nodeSize(t.type), meta: JSON.stringify(t.meta || {}),
-            depends_on: t.depends_on || ''
-          }});
-          // Connect task to manifest only if it's the first in the chain (no depends_on)
-          // Tasks with depends_on within the same manifest are reached via dependency edges
-          if (!t.depends_on) {
-            elements.push({ data: { source: m.id, target: t.id } });
-          }
-        }
       }
 
-      // Add manifest-to-manifest dependency edges (solid blue)
+      // Manifest-to-manifest dependency edges (solid blue)
       for (const el of [...elements]) {
         const d = el.data;
         if (d && d.type === 'manifest' && d.depends_on) {
@@ -379,18 +370,6 @@
         }
       }
 
-      // Add dependency edges between tasks (dashed, orange)
-      for (const el of [...elements]) {
-        const d = el.data;
-        if (d && d.type === 'task' && d.depends_on) {
-          // Edge from dependency TO dependent (arrow shows execution order)
-          const depExists = elements.some(e => e.data && e.data.id === d.depends_on);
-          if (depExists) {
-            elements.push({ data: { source: d.depends_on, target: d.id, edgeType: 'dependency' } });
-          }
-        }
-      }
-
       container.innerHTML = '';
       const cy = cytoscape({
         container: container,
@@ -398,9 +377,9 @@
         layout: {
           name: 'dagre',
           rankDir: 'TB',
-          spacingFactor: 1.4,
-          nodeSep: 30,
-          rankSep: 60,
+          spacingFactor: 1.6,
+          nodeSep: 50,
+          rankSep: 80,
         },
         style: [
           {
@@ -424,12 +403,12 @@
             }
           },
           {
-            selector: 'node[type="task"]',
-            style: { 'shape': 'ellipse', 'font-size': '8px', 'text-max-width': '90px' }
+            selector: 'node[type="manifest"]',
+            style: { 'font-size': '9px', 'text-max-width': '140px', 'width': 50, 'height': 50 }
           },
           {
             selector: 'node[type="product"]',
-            style: { 'font-size': '12px', 'font-weight': 'bold', 'text-max-width': '160px' }
+            style: { 'font-size': '12px', 'font-weight': 'bold', 'text-max-width': '160px', 'width': 65, 'height': 65 }
           },
           {
             selector: 'edge',
