@@ -186,8 +186,28 @@ func (s *Store) UpdateSchedule(id, schedule, nextRunAt string) error {
 }
 
 // ScheduleTask sets the next_run_at for a task and marks it as scheduled.
+// If the task has an unmet depends_on, it is parked in 'waiting' status instead —
+// ActivateDependents will wake it up when the dependency completes.
 func (s *Store) ScheduleTask(id, schedule string) error {
 	now := time.Now().UTC()
+
+	// Resolve the task's depends_on (if any) and its dep's status.
+	var dependsOn string
+	if err := s.db.QueryRow(`SELECT depends_on FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = '' LIMIT 1`,
+		id, id+"%").Scan(&dependsOn); err != nil {
+		return fmt.Errorf("lookup task: %w", err)
+	}
+	if dependsOn != "" {
+		var depStatus string
+		err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = '' LIMIT 1`,
+			dependsOn, dependsOn+"%").Scan(&depStatus)
+		if err == nil && depStatus != "completed" && depStatus != "max_turns" {
+			_, werr := s.db.Exec(`UPDATE tasks SET status = 'waiting', next_run_at = '', schedule = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+				schedule, now.Format(time.RFC3339), id, id+"%")
+			return werr
+		}
+	}
+
 	nextRun := ComputeNextRun(schedule)
 	if nextRun.IsZero() && schedule != "once" {
 		return fmt.Errorf("invalid schedule: %s", schedule)
@@ -196,8 +216,8 @@ func (s *Store) ScheduleTask(id, schedule string) error {
 		nextRun = now
 	}
 
-	_, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', next_run_at = ?, updated_at = ? WHERE id = ? OR id LIKE ?`,
-		nextRun.Format(time.RFC3339), now.Format(time.RFC3339), id, id+"%")
+	_, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', schedule = ?, next_run_at = ?, updated_at = ? WHERE id = ? OR id LIKE ?`,
+		schedule, nextRun.Format(time.RFC3339), now.Format(time.RFC3339), id, id+"%")
 	return err
 }
 

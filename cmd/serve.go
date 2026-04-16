@@ -283,6 +283,10 @@ var serveCmd = &cobra.Command{
 		scheduler.Start()
 		defer scheduler.Stop()
 
+		// Cross-process action watcher — applies pause/resume/cancel signals
+		// written by other binaries (MCP) to tasks this runner owns.
+		runner.StartActionWatcher(2 * time.Second)
+
 		// --- Startup State Log ---
 		fmt.Println("\n  === OpenPraxis State ===")
 		fmt.Printf("  Peer:      %s\n", cfg.Node.UUID)

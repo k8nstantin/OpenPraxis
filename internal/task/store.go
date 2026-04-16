@@ -106,6 +106,9 @@ func (s *Store) init() error {
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 50`)
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN block_reason TEXT NOT NULL DEFAULT ''`)
+	// Cross-process action signal: 'pause' | 'resume' | 'cancel'.
+	// MCP sets this; serve's runner watches and acts on the task process it owns.
+	s.db.Exec(`ALTER TABLE tasks ADD COLUMN action_request TEXT NOT NULL DEFAULT ''`)
 
 	// Task runs history table
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runs (

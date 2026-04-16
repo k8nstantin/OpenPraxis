@@ -190,6 +190,48 @@ func (s *Store) ActivateDependents(completedTaskID string) (int, error) {
 	return int(n), nil
 }
 
+// RequestAction writes a cross-process action signal on the task row.
+// The runner that owns the task's process (serve) polls this column and acts.
+// action must be one of: "pause", "resume", "cancel".
+func (s *Store) RequestAction(id, action string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE tasks SET action_request = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		action, now, id, id+"%")
+	return err
+}
+
+// PendingActionRequest holds a task ID + requested action.
+type PendingActionRequest struct {
+	TaskID string
+	Action string
+}
+
+// ListActionRequests returns all tasks with a non-empty action_request.
+// Used by the runner's watcher loop.
+func (s *Store) ListActionRequests() ([]PendingActionRequest, error) {
+	rows, err := s.db.Query(`SELECT id, action_request FROM tasks WHERE action_request != '' AND deleted_at = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PendingActionRequest
+	for rows.Next() {
+		var p PendingActionRequest
+		if err := rows.Scan(&p.TaskID, &p.Action); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// ClearActionRequest clears the action_request field after the runner has acted.
+func (s *Store) ClearActionRequest(id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE tasks SET action_request = '', updated_at = ? WHERE id = ?`, now, id)
+	return err
+}
+
 // RecordRun updates run stats after a task executes and saves to run history.
 func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time) error {
 	now := time.Now().UTC().Format(time.RFC3339)

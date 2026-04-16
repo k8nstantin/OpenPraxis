@@ -326,10 +326,24 @@ func (s *Server) handleTaskCancel(ctx context.Context, req mcplib.CallToolReques
 		return errResult("task not found: %s", id), nil
 	}
 
+	// If a process is alive (running or paused), route through the runner so it gets killed.
+	if t.Status == "running" || t.Status == "paused" {
+		if r := s.node.GetRunner(); r != nil {
+			if err := r.Cancel(t.ID); err != nil {
+				return errResult("cancel task: %v", err), nil
+			}
+			return textResult(fmt.Sprintf("Task [%s] cancelled and process killed: %s", t.Marker, t.Title)), nil
+		}
+		if err := s.node.Tasks.RequestAction(t.ID, "cancel"); err != nil {
+			return errResult("request cancel: %v", err), nil
+		}
+		return textResult(fmt.Sprintf("Task [%s] cancel requested: %s (serve runner will kill process within 2s)", t.Marker, t.Title)), nil
+	}
+
+	// Not running — just flip status.
 	if err := s.node.Tasks.UpdateStatus(t.ID, "cancelled"); err != nil {
 		return errResult("cancel task: %v", err), nil
 	}
-
 	return textResult(fmt.Sprintf("Task [%s] cancelled: %s", t.Marker, t.Title)), nil
 }
 
@@ -390,15 +404,17 @@ func (s *Server) handleTaskPause(ctx context.Context, req mcplib.CallToolRequest
 		return errResult("task not found: %s", id), nil
 	}
 
-	if s.node.GetRunner() == nil {
-		return errResult("task runner not initialized"), nil
+	// In-process (serve): pause directly. Out-of-process (MCP): write DB signal.
+	if r := s.node.GetRunner(); r != nil {
+		if err := r.Pause(t.ID); err != nil {
+			return errResult("pause task: %v", err), nil
+		}
+		return textResult(fmt.Sprintf("Task [%s] paused: %s (SIGSTOP sent to agent process)", t.Marker, t.Title)), nil
 	}
-
-	if err := s.node.GetRunner().Pause(t.ID); err != nil {
-		return errResult("pause task: %v", err), nil
+	if err := s.node.Tasks.RequestAction(t.ID, "pause"); err != nil {
+		return errResult("request pause: %v", err), nil
 	}
-
-	return textResult(fmt.Sprintf("Task [%s] paused: %s (SIGSTOP sent to agent process)", t.Marker, t.Title)), nil
+	return textResult(fmt.Sprintf("Task [%s] pause requested: %s (serve runner will apply within 2s)", t.Marker, t.Title)), nil
 }
 
 func (s *Server) handleTaskResume(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -413,13 +429,14 @@ func (s *Server) handleTaskResume(ctx context.Context, req mcplib.CallToolReques
 		return errResult("task not found: %s", id), nil
 	}
 
-	if s.node.GetRunner() == nil {
-		return errResult("task runner not initialized"), nil
+	if r := s.node.GetRunner(); r != nil {
+		if err := r.Resume(t.ID); err != nil {
+			return errResult("resume task: %v", err), nil
+		}
+		return textResult(fmt.Sprintf("Task [%s] resumed: %s (SIGCONT sent to agent process)", t.Marker, t.Title)), nil
 	}
-
-	if err := s.node.GetRunner().Resume(t.ID); err != nil {
-		return errResult("resume task: %v", err), nil
+	if err := s.node.Tasks.RequestAction(t.ID, "resume"); err != nil {
+		return errResult("request resume: %v", err), nil
 	}
-
-	return textResult(fmt.Sprintf("Task [%s] resumed: %s (SIGCONT sent to agent process)", t.Marker, t.Title)), nil
+	return textResult(fmt.Sprintf("Task [%s] resume requested: %s (serve runner will apply within 2s)", t.Marker, t.Title)), nil
 }

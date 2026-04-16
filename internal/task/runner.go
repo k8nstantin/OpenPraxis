@@ -475,6 +475,75 @@ func (r *Runner) Pause(taskID string) error {
 	return nil
 }
 
+// Cancel kills a running task's process, marks it cancelled.
+// For tasks that are not in the runner's in-memory map (e.g. queued scheduled),
+// it just sets the status — the scheduler will skip cancelled tasks.
+func (r *Runner) Cancel(taskID string) error {
+	r.mu.RLock()
+	rt, ok := r.running[taskID]
+	r.mu.RUnlock()
+	if ok && rt.cmd != nil && rt.cmd.Process != nil {
+		slog.Info("cancelling task — killing process", "component", "runner", "marker", rt.Marker, "pid", rt.PID)
+		if rt.Paused {
+			_ = rt.cmd.Process.Signal(syscall.SIGCONT)
+		}
+		if err := rt.cmd.Process.Kill(); err != nil {
+			slog.Error("kill process failed", "component", "runner", "marker", rt.Marker, "error", err)
+		}
+		if rt.cancel != nil {
+			rt.cancel()
+		}
+	}
+	if err := r.store.UpdateStatus(taskID, "cancelled"); err != nil {
+		return fmt.Errorf("update status to cancelled: %w", err)
+	}
+	if r.onEvent != nil {
+		r.onEvent("task_cancelled", map[string]string{"task_id": taskID})
+	}
+	return nil
+}
+
+// StartActionWatcher polls the tasks table for cross-process action_request signals
+// (pause/resume/cancel) and applies them to tasks this runner owns. Safe to call once
+// from serve after InitRunner.
+func (r *Runner) StartActionWatcher(interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for range t.C {
+			reqs, err := r.store.ListActionRequests()
+			if err != nil {
+				slog.Error("list action requests failed", "component", "runner", "error", err)
+				continue
+			}
+			for _, req := range reqs {
+				switch req.Action {
+				case "pause":
+					if err := r.Pause(req.TaskID); err != nil {
+						slog.Warn("pause action failed", "component", "runner", "task_id", req.TaskID, "error", err)
+					}
+				case "resume":
+					if err := r.Resume(req.TaskID); err != nil {
+						slog.Warn("resume action failed", "component", "runner", "task_id", req.TaskID, "error", err)
+					}
+				case "cancel":
+					if err := r.Cancel(req.TaskID); err != nil {
+						slog.Warn("cancel action failed", "component", "runner", "task_id", req.TaskID, "error", err)
+					}
+				default:
+					slog.Warn("unknown action request", "component", "runner", "task_id", req.TaskID, "action", req.Action)
+				}
+				if err := r.store.ClearActionRequest(req.TaskID); err != nil {
+					slog.Error("clear action request failed", "component", "runner", "task_id", req.TaskID, "error", err)
+				}
+			}
+		}
+	}()
+}
+
 // Resume sends SIGCONT to a paused task's process, resuming the agent.
 func (r *Runner) Resume(taskID string) error {
 	r.mu.RLock()
