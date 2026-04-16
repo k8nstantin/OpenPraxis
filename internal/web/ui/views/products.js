@@ -342,7 +342,6 @@
       // Layout: product on top, manifests horizontal below, tasks vertical below each
       var colW = 180;  // horizontal spacing between manifests
       var rowH = 60;   // vertical spacing between tasks
-      var productY = -100;
       var manifestY = 0;
       var taskStartY = 80;
 
@@ -353,11 +352,11 @@
         status: data.status, marker: data.marker,
         meta: JSON.stringify(data.meta || {})
       }});
-      positions[data.id] = { x: totalWidth / 2, y: productY };
+      positions[data.id] = { x: totalWidth / 2, y: -120 };
 
-      // Edge from product to first manifest (root of chain)
+      // Single edge from product down to the first manifest only
       if (sorted.length > 0) {
-        elements.push({ data: { source: data.id, target: sorted[0].id, edgeType: 'ownership' } });
+        elements.push({ data: { source: data.id, target: sorted[0].id, edgeType: 'product_link' } });
       }
 
       // Place manifests horizontally
@@ -457,6 +456,17 @@
             }
           },
           {
+            selector: 'node[type="product"]',
+            style: {
+              'shape': 'round-rectangle',
+              'width': 70, 'height': 50,
+              'font-size': '12px', 'font-weight': 'bold',
+              'text-max-width': '160px',
+              'text-valign': 'center', 'text-halign': 'center', 'text-margin-y': 0,
+              'background-color': '#8b5cf6', 'border-color': '#8b5cf6', 'color': '#fff',
+            }
+          },
+          {
             selector: 'node[type="manifest"]',
             style: {
               'shape': 'round-rectangle',
@@ -495,6 +505,17 @@
               'target-arrow-shape': 'triangle',
               'curve-style': 'straight',
               'arrow-scale': 0.7,
+            }
+          },
+          {
+            selector: 'edge[edgeType="product_link"]',
+            style: {
+              'width': 2,
+              'line-color': '#8b5cf6',
+              'target-arrow-color': '#8b5cf6',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'straight',
+              'arrow-scale': 0.8,
             }
           },
           {
