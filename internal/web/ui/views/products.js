@@ -339,11 +339,26 @@
         return '#71717a';
       };
 
-      // Layout: manifests horizontal, tasks vertical below each
+      // Layout: product on top, manifests horizontal below, tasks vertical below each
       var colW = 180;  // horizontal spacing between manifests
       var rowH = 60;   // vertical spacing between tasks
+      var productY = -100;
       var manifestY = 0;
       var taskStartY = 80;
+
+      // Product node centered above manifests
+      var totalWidth = (sorted.length - 1) * colW;
+      elements.push({ data: {
+        id: data.id, label: data.title, title: data.title, type: 'product',
+        status: data.status, marker: data.marker,
+        meta: JSON.stringify(data.meta || {})
+      }});
+      positions[data.id] = { x: totalWidth / 2, y: productY };
+
+      // Edge from product to first manifest (root of chain)
+      if (sorted.length > 0) {
+        elements.push({ data: { source: data.id, target: sorted[0].id, edgeType: 'ownership' } });
+      }
 
       // Place manifests horizontally
       for (var col = 0; col < sorted.length; col++) {
