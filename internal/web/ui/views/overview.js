@@ -150,12 +150,19 @@
       if (!p) return;
       var el = document.getElementById('metric-productivity');
       var card = document.getElementById('metric-productivity-card');
+      var statsEl = document.getElementById('metric-productivity-stats');
       if (el) {
         el.textContent = p.score + ' ' + p.grade;
         el.style.color = p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)';
       }
       if (card) {
         card.style.borderColor = p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)';
+      }
+      if (statsEl) {
+        statsEl.innerHTML =
+          (p.lines_committed || 0).toLocaleString() + ' lines &middot; ' +
+          (p.files_changed || 0) + ' files &middot; ' +
+          p.tasks_completed + ' tasks';
       }
       OL._productivityData = p;
     } catch(e) { /* ignore */ }
