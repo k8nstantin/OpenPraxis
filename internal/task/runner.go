@@ -341,13 +341,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			}
 		}
 
-		// Activate dependent tasks
-		if status == "completed" || status == "max_turns" {
-			activated, _ := r.store.ActivateDependents(t.ID)
-			if activated > 0 {
-				slog.Info("activated dependent tasks", "component", "runner", "marker", marker, "count", activated)
-			}
-		}
+		// Dependent-task activation is deferred to the watcher audit path
+		// (cmd/serve.go). Activating here races the audit: a task the runner
+		// marks "completed" can be downgraded to "failed" by the 5s-later
+		// watcher check, but any dependents activated in the interim would
+		// already be scheduled/running.
 
 		if r.onEvent != nil {
 			r.onEvent("task_completed", map[string]string{

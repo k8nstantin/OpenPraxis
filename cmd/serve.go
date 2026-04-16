@@ -223,12 +223,30 @@ var serveCmd = &cobra.Command{
 					)
 
 					// If audit failed and original was "completed", downgrade the task
+					finalStatus := status
 					if audit.Status == "failed" && status == "completed" {
 						if err := n.Tasks.UpdateStatus(t.ID, "failed"); err != nil {
-						slog.Error("update task status to failed after audit", "error", err)
-					}
+							slog.Error("update task status to failed after audit", "error", err)
+						}
+						finalStatus = "failed"
 						slog.Warn("watcher downgraded task", "marker", t.Marker, "from", "completed", "to", "failed",
 							"git_passed", audit.GitPassed, "build_passed", audit.BuildPassed, "manifest_score", audit.ManifestScore*100)
+					}
+
+					// Activate dependents ONLY after the audit verdict is known.
+					// Gating here (instead of the runner) prevents the race where a
+					// task the runner marked "completed" gets downgraded by the
+					// watcher but its dependents have already been scheduled.
+					if finalStatus == "completed" || finalStatus == "max_turns" {
+						activated, actErr := n.Tasks.ActivateDependents(t.ID)
+						if actErr != nil {
+							slog.Error("activate dependents failed", "marker", t.Marker, "error", actErr)
+						} else if activated > 0 {
+							slog.Info("activated dependent tasks after audit", "marker", t.Marker, "count", activated)
+						}
+					} else {
+						slog.Info("skipping dependent activation — task did not pass audit",
+							"marker", t.Marker, "final_status", finalStatus)
 					}
 
 					hub.Broadcast(web.Event{Type: "watcher_audit", Data: map[string]string{
