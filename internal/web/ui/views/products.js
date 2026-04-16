@@ -354,9 +354,9 @@
       }});
       positions[data.id] = { x: totalWidth / 2, y: -120 };
 
-      // Single edge from product down to the first manifest only
-      if (sorted.length > 0) {
-        elements.push({ data: { source: data.id, target: sorted[0].id, edgeType: 'product_link' } });
+      // Connect product to all its manifests
+      for (var mi = 0; mi < sorted.length; mi++) {
+        elements.push({ data: { source: data.id, target: sorted[mi].id, edgeType: 'product_link' } });
       }
 
       // Place manifests horizontally
