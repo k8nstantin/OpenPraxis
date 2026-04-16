@@ -8,6 +8,9 @@ openloom
 # Data directory
 data/
 
+# GoReleaser output
+dist/
+
 # Dependencies
 vendor/
 

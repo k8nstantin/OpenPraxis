@@ -1,0 +1,176 @@
+# GoReleaser config for OpenPraxis.
+# Docs: https://goreleaser.com
+#
+# Usage:
+#   goreleaser check                  # validate this file
+#   goreleaser release --snapshot --clean --skip=publish   # local dry run
+#   goreleaser release --clean        # tagged release (in CI)
+#
+# Note: OpenPraxis depends on mattn/go-sqlite3 and sqlite-vec-go-bindings, both
+# of which require CGO. Cross-compilation across OS/arch from a single host
+# needs matching C toolchains. The recommended setup is a GitHub Actions matrix
+# that runs goreleaser natively on each OS (darwin / linux / windows runners),
+# with each runner producing only its own platform's artifacts and a final
+# "continue" job merging them. See .github/workflows/release.yml (added with
+# the release binary task).
+
+version: 2
+
+project_name: openpraxis
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: openpraxis-darwin
+    main: .
+    binary: openpraxis
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X openpraxis/cmd.Version={{.Version}}
+      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X openpraxis/cmd.BuildDate={{.Date}}
+    hooks:
+      # Ad-hoc codesign: macOS SIGKILLs unsigned Go binaries at runtime when it
+      # lazily validates code pages. Ad-hoc (`-`) signing is enough to prevent
+      # the kill for local/dev use. For distribution, replace with a Developer
+      # ID identity and enable notarization in CI.
+      post:
+        - cmd: codesign --force --sign - "{{ .Path }}"
+          output: true
+
+  - id: openpraxis-linux
+    main: .
+    binary: openpraxis
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X openpraxis/cmd.Version={{.Version}}
+      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X openpraxis/cmd.BuildDate={{.Date}}
+
+  - id: openpraxis-windows
+    main: .
+    binary: openpraxis
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X openpraxis/cmd.Version={{.Version}}
+      - -X openpraxis/cmd.GitCommit={{.ShortCommit}}
+      - -X openpraxis/cmd.BuildDate={{.Date}}
+
+archives:
+  - id: default
+    ids:
+      - openpraxis-darwin
+      - openpraxis-linux
+      - openpraxis-windows
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macos
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - CLAUDE.md
+      - CONTRIBUTING.md
+      - .env.example
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+    - title: Features
+      regexp: "^.*(feat|add)[(\\w)]*:?.*"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:?.*"
+      order: 1
+    - title: Performance
+      regexp: "^.*perf[(\\w)]*:?.*"
+      order: 2
+    - title: Refactor
+      regexp: "^.*refactor[(\\w)]*:?.*"
+      order: 3
+    - title: Documentation
+      regexp: "^.*docs?[(\\w)]*:?.*"
+      order: 4
+    - title: Tests
+      regexp: "^.*test[(\\w)]*:?.*"
+      order: 5
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^build"
+      - "merge conflict"
+      - "Merge pull request"
+      - "Merge remote-tracking branch"
+      - "Merge branch"
+
+release:
+  draft: true
+  prerelease: auto
+  name_template: "OpenPraxis {{ .Version }}"
+  header: |
+    ## OpenPraxis {{ .Version }}
+
+    Shared memory layer for coding agents: stdio MCP server, HTTP dashboard,
+    peer discovery, and task scheduling.
+  footer: |
+    **Full changelog:** https://github.com/k8nstantin/OpenPraxis/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ### Install
+
+    Download the archive for your platform from the assets below, verify
+    against `{{ .ProjectName }}_{{ .Version }}_checksums.txt`, extract, and
+    place `openpraxis` on your `PATH`.
+
+    On macOS, if Gatekeeper blocks the binary, run:
+    ```
+    xattr -dr com.apple.quarantine openpraxis
+    codesign --force --sign - openpraxis
+    ```
