@@ -20,6 +20,14 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Suppress the "(commit: unknown, built: unknown)" suffix for
+		// `go install`-built binaries: their Version string is a pseudo
+		// version that already encodes both timestamp and commit, and
+		// vcs.revision/vcs.time aren't available from the module proxy.
+		if GitCommit == "unknown" && BuildDate == "unknown" {
+			fmt.Printf("openpraxis %s\n", Version)
+			return
+		}
 		fmt.Printf("openpraxis %s (commit: %s, built: %s)\n", Version, GitCommit, BuildDate)
 	},
 }
