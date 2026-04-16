@@ -21,13 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
-            goos: darwin
-            goarch: amd64
-            os_label: macos
-            arch_label: x86_64
-            archive: tar.gz
-            binary: openpraxis
           - os: macos-latest
             goos: darwin
             goarch: arm64
@@ -42,22 +35,15 @@ jobs:
             arch_label: x86_64
             archive: tar.gz
             binary: openpraxis
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            os_label: linux
-            arch_label: arm64
-            archive: tar.gz
-            binary: openpraxis
-            cc: aarch64-linux-gnu-gcc
-            apt_deps: gcc-aarch64-linux-gnu
-          # Windows is intentionally omitted from v0.1.0. Two blockers:
-          #   1. internal/task pause/resume uses syscall.SIGSTOP / SIGCONT,
-          #      which don't exist on Windows — needs build tags.
-          #   2. sqlite-vec CGo binding #include's sqlite3.h, and the Windows
-          #      runner image does not ship SQLite dev headers — needs MSYS2
-          #      or vcpkg setup to produce sqlite3.h + libsqlite3.
-          # Track: re-add windows/amd64 once both are addressed.
+          # Intentionally omitted from v0.1.0 — re-add per platform when needed:
+          #   darwin/amd64: macos-13 Intel runners are scarce on the free tier
+          #     (queue times 30m-2h). Re-add once cross-compile from arm64 host
+          #     is wired up, or if Intel Mac demand justifies the wait.
+          #   linux/arm64: works via gcc-aarch64-linux-gnu cross toolchain but
+          #     not needed for the first release. Re-add when there's a user.
+          #   windows/amd64: two blockers — syscall.SIGSTOP / SIGCONT don't
+          #     exist on Windows (needs build tags on internal/task), and the
+          #     Windows runner image ships no sqlite3.h (needs MSYS2 / vcpkg).
 
     steps:
       - uses: actions/checkout@v4
