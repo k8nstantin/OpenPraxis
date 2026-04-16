@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"openpraxis/internal/action"
-	"openpraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

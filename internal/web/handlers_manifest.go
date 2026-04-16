@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"openpraxis/internal/manifest"
-	"openpraxis/internal/node"
-	"openpraxis/internal/task"
+	"github.com/k8nstantin/OpenPraxis/internal/manifest"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	"github.com/gorilla/mux"
 )

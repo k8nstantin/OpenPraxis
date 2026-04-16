@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"openpraxis/internal/node"
-	"openpraxis/internal/task"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	"github.com/gorilla/mux"
 )

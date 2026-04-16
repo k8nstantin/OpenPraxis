@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"openpraxis/internal/config"
+	"github.com/k8nstantin/OpenPraxis/internal/config"
 )
 
 // Router resolves providers from model IDs and manages available models.

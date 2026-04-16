@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"openpraxis/cmd"
+	"github.com/k8nstantin/OpenPraxis/cmd"
 )
 
 func main() {

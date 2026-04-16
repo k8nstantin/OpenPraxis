@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"openpraxis/internal/config"
-	mcpserver "openpraxis/internal/mcp"
-	"openpraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/config"
+	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	mcplib "github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"

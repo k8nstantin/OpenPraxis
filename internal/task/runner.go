@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"openpraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/action"
 )
 
 // RunningTask tracks an actively executing task.

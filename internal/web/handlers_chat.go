@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"openpraxis/internal/chat"
-	"openpraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/chat"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	"github.com/gorilla/mux"
 )

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"openpraxis/internal/node"
-	"openpraxis/internal/watcher"
+	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 
 	"github.com/gorilla/mux"
 )

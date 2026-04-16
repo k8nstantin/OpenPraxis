@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"openpraxis/internal/memory"
+	"github.com/k8nstantin/OpenPraxis/internal/memory"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
