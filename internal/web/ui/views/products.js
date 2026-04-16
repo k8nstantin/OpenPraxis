@@ -307,63 +307,68 @@
       if (!data) return;
 
       const elements = [];
-      const statusColor = (type, status) => {
-        if (type === 'task') {
-          if (status === 'completed') return '#00d97e';
-          if (status === 'running') return '#f5c542';
-          if (status === 'failed') return '#e63757';
-          if (status === 'scheduled' || status === 'waiting') return '#f5c542';
-          return '#71717a';
+
+      // Color by depth layer for visual clarity
+      const layerColors = ['#8b5cf6', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
+
+      // Compute depth of each manifest based on depends_on chain
+      const manifests = data.children || [];
+      const depthMap = {};
+      function getDepth(m, visited) {
+        if (depthMap[m.id] !== undefined) return depthMap[m.id];
+        if (visited[m.id]) return 0;
+        visited[m.id] = true;
+        var deps = (m.depends_on || '').split(',').filter(Boolean);
+        var maxDepth = 0;
+        for (var i = 0; i < deps.length; i++) {
+          var dep = manifests.find(function(x) { return x.id === deps[i].trim(); });
+          if (dep) maxDepth = Math.max(maxDepth, getDepth(dep, visited) + 1);
         }
-        // product + manifest
-        if (status === 'closed' || status === 'archive') return '#00d97e';
-        if (status === 'open') return '#3b82f6';
-        if (status === 'draft') return '#f5c542';
-        return '#71717a';
-      };
+        depthMap[m.id] = maxDepth;
+        return maxDepth;
+      }
+      manifests.forEach(function(m) { getDepth(m, {}); });
 
-      const nodeShape = (type) => type === 'product' ? 'round-rectangle' : type === 'manifest' ? 'round-rectangle' : 'ellipse';
-      const nodeSize = (type) => type === 'product' ? 60 : type === 'manifest' ? 45 : 30;
-
-      const nodeLabel = (type) => {
-        return type === 'product' ? 'Product' : type === 'manifest' ? 'Manifest' : 'Task';
-      };
+      // Short label: remove common prefixes
+      function shortLabel(title) {
+        return title
+          .replace(/^QA\s+/, '')
+          .replace(/^OpenLoom\s+/, '')
+          .replace(/\s*—\s*.+$/, '');
+      }
 
       // Add product node
       elements.push({ data: {
-        id: data.id, label: nodeLabel(data.type), title: data.title, type: data.type, status: data.status,
-        marker: data.marker, color: statusColor(data.type, data.status),
-        nodeSize: nodeSize(data.type), meta: JSON.stringify(data.meta || {})
+        id: data.id, label: data.title, title: data.title, type: data.type,
+        status: data.status, marker: data.marker
       }});
 
-      // Product DAG: manifests only — no tasks. Clean readable flow.
-      // Tasks are detail you see when you click a manifest.
-      for (const m of (data.children || [])) {
+      // Manifests only — no tasks
+      for (const m of manifests) {
         var taskCount = (m.children || []).length;
         var completedCount = (m.children || []).filter(function(t) { return t.status === 'completed'; }).length;
+        var depth = depthMap[m.id] || 0;
         elements.push({ data: {
           id: m.id,
-          label: m.title.length > 35 ? m.title.substring(0, 33) + '…' : m.title,
+          label: shortLabel(m.title) + '\n' + completedCount + '/' + taskCount + ' tasks',
           title: m.title, type: m.type, status: m.status,
-          marker: m.marker, color: statusColor(m.type, m.status),
-          nodeSize: 50, meta: JSON.stringify(m.meta || {}),
-          depends_on: m.depends_on || '', depends_on_titles: m.depends_on_titles || [],
-          taskInfo: completedCount + '/' + taskCount
+          marker: m.marker, depth: depth,
+          layerColor: layerColors[depth % layerColors.length],
+          depends_on: m.depends_on || '',
+          meta: JSON.stringify(m.meta || {})
         }});
-        // Only connect product to root manifests (no depends_on)
         if (!m.depends_on) {
           elements.push({ data: { source: data.id, target: m.id } });
         }
       }
 
-      // Manifest-to-manifest dependency edges (solid blue)
+      // Manifest dependency edges
       for (const el of [...elements]) {
         const d = el.data;
         if (d && d.type === 'manifest' && d.depends_on) {
           const depIds = d.depends_on.split(',').map(s => s.trim()).filter(Boolean);
           for (const depId of depIds) {
-            const depExists = elements.some(e => e.data && e.data.id === depId);
-            if (depExists) {
+            if (elements.some(e => e.data && e.data.id === depId)) {
               elements.push({ data: { source: depId, target: d.id, edgeType: 'manifest_dependency' } });
             }
           }
@@ -376,10 +381,11 @@
         elements: elements,
         layout: {
           name: 'dagre',
-          rankDir: 'TB',
-          spacingFactor: 1.6,
-          nodeSep: 50,
-          rankSep: 80,
+          rankDir: 'LR',
+          spacingFactor: 1.8,
+          nodeSep: 60,
+          rankSep: 120,
+          ranker: 'longest-path',
         },
         style: [
           {
@@ -387,37 +393,39 @@
             style: {
               'label': 'data(label)',
               'text-wrap': 'wrap',
-              'text-max-width': '120px',
+              'text-max-width': '130px',
               'font-size': '10px',
               'text-valign': 'center',
               'text-halign': 'center',
               'color': '#e4e4e7',
-              'background-color': 'data(color)',
-              'border-width': 2,
-              'border-color': 'data(color)',
-              'width': 'data(nodeSize)',
-              'height': 'data(nodeSize)',
+              'background-color': '#1a1a2e',
+              'border-width': 3,
+              'border-color': 'data(layerColor)',
+              'width': 60,
+              'height': 60,
               'shape': 'round-rectangle',
               'text-outline-color': '#0a0a0f',
               'text-outline-width': 2,
             }
           },
           {
-            selector: 'node[type="manifest"]',
-            style: { 'font-size': '9px', 'text-max-width': '140px', 'width': 50, 'height': 50 }
-          },
-          {
             selector: 'node[type="product"]',
-            style: { 'font-size': '12px', 'font-weight': 'bold', 'text-max-width': '160px', 'width': 65, 'height': 65 }
+            style: {
+              'font-size': '13px', 'font-weight': 'bold', 'text-max-width': '160px',
+              'width': 70, 'height': 70,
+              'background-color': '#8b5cf6', 'border-color': '#8b5cf6', 'color': '#fff'
+            }
           },
           {
             selector: 'edge',
             style: {
-              'width': 1.5,
-              'line-color': 'rgba(255,255,255,0.15)',
-              'target-arrow-color': 'rgba(255,255,255,0.15)',
+              'width': 2,
+              'line-color': 'rgba(255,255,255,0.12)',
+              'target-arrow-color': 'rgba(255,255,255,0.12)',
               'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
+              'curve-style': 'taxi',
+              'taxi-direction': 'rightward',
+              'taxi-turn': '50px',
               'arrow-scale': 0.8,
             }
           },
@@ -429,7 +437,9 @@
               'line-style': 'solid',
               'target-arrow-color': '#3b82f6',
               'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
+              'curve-style': 'taxi',
+              'taxi-direction': 'rightward',
+              'taxi-turn': '40px',
               'arrow-scale': 1.0,
             }
           },
