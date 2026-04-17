@@ -95,7 +95,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// Build the prompt
 	prompt := buildPrompt(t, manifestTitle, manifestContent, visceralRules)
 
-	// Build allowed tools list — OpenPraxis MCP tools + standard tools
+	// Build allowed tools list — OpenPraxis MCP tools + standard tools.
+	// settings_set is deliberately NOT allowlisted: agents should consult their
+	// own budgets via settings_get/resolve but must not mutate them mid-run.
 	allowedTools := []string{
 		"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 		"mcp__openpraxis__memory_store",
@@ -105,6 +107,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		"mcp__openpraxis__visceral_confirm",
 		"mcp__openpraxis__manifest_get",
 		"mcp__openpraxis__conversation_save",
+		"mcp__openpraxis__settings_get",
+		"mcp__openpraxis__settings_resolve",
+		"mcp__openpraxis__settings_catalog",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
