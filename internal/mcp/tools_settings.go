@@ -14,21 +14,22 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-// visceralRuleLoader returns the text of every active visceral rule. The MCP
-// layer calls this before writing settings that carry a visceral-backed cap
-// (e.g. daily_budget_usd is capped by rule #8). The indirection keeps the
-// core settings handlers testable without an index/memory store.
-type visceralRuleLoader func(ctx context.Context) ([]string, error)
+// VisceralRuleLoader returns the text of every active visceral rule. The MCP
+// and HTTP layers call this before writing settings that carry a
+// visceral-backed cap (e.g. daily_budget_usd is capped by rule #8). The
+// indirection keeps the core settings handlers testable without an
+// index/memory store.
+type VisceralRuleLoader func(ctx context.Context) ([]string, error)
 
 // visceralBudgetRe extracts a numeric ceiling from a rule text like
 // "daily budget = $100" or "cap is 100 USD". First capture group is the value.
 var visceralBudgetRe = regexp.MustCompile(`\$?([0-9]+(?:\.[0-9]+)?)`)
 
-// visceralCapFor reports the numeric ceiling enforced by active visceral rules
+// VisceralCapFor reports the numeric ceiling enforced by active visceral rules
 // for a given knob key, if any. v1 hardcodes one mapping: daily_budget_usd →
 // the first rule whose text contains "daily budget". Extend here as new caps
 // are added. Returns (cap, true) when a cap applies; (0, false) otherwise.
-func visceralCapFor(key string, rules []string) (float64, bool) {
+func VisceralCapFor(key string, rules []string) (float64, bool) {
 	switch key {
 	case "daily_budget_usd":
 		for _, rule := range rules {
@@ -89,12 +90,12 @@ func (s *Server) registerSettingsTools() {
 // -------- handlers -----------------------------------------------------------
 
 func (s *Server) handleSettingsCatalog(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	return jsonOrError(doSettingsCatalog())
+	return jsonOrError(DoSettingsCatalog())
 }
 
 func (s *Server) handleSettingsGet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
-	out, err := doSettingsGet(ctx, s.node.SettingsStore, argStr(a, "scope_type"), argStr(a, "scope_id"))
+	out, err := DoSettingsGet(ctx, s.node.SettingsStore, argStr(a, "scope_type"), argStr(a, "scope_id"))
 	if err != nil {
 		return errResult("settings_get: %v", err), nil
 	}
@@ -103,7 +104,7 @@ func (s *Server) handleSettingsGet(ctx context.Context, req mcplib.CallToolReque
 
 func (s *Server) handleSettingsSet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
-	out, err := doSettingsSet(ctx, s.node.SettingsStore, s.loadActiveVisceralRules,
+	out, err := DoSettingsSet(ctx, s.node.SettingsStore, s.LoadActiveVisceralRules,
 		argStr(a, "scope_type"), argStr(a, "scope_id"),
 		argStr(a, "key"), argStr(a, "value"),
 		mcpSetAuthor(ctx))
@@ -115,7 +116,7 @@ func (s *Server) handleSettingsSet(ctx context.Context, req mcplib.CallToolReque
 
 func (s *Server) handleSettingsResolve(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
-	out, err := doSettingsResolve(ctx, s.node.SettingsResolver, argStr(a, "task_id"))
+	out, err := DoSettingsResolve(ctx, s.node.SettingsResolver, argStr(a, "task_id"))
 	if err != nil {
 		return errResult("settings_resolve: %v", err), nil
 	}
@@ -124,129 +125,153 @@ func (s *Server) handleSettingsResolve(ctx context.Context, req mcplib.CallToolR
 
 // -------- core (testable) ----------------------------------------------------
 
-type catalogOut struct {
+// CatalogOut is the wire shape of DoSettingsCatalog. Exported so HTTP handlers
+// can name the type when serializing to JSON.
+type CatalogOut struct {
 	Knobs []settings.KnobDef `json:"knobs"`
 }
 
-func doSettingsCatalog() catalogOut {
-	return catalogOut{Knobs: settings.Catalog()}
+// DoSettingsCatalog returns the full v1 knob catalog. Pure — safe to call from
+// any caller (MCP, HTTP, test).
+func DoSettingsCatalog() CatalogOut {
+	return CatalogOut{Knobs: settings.Catalog()}
 }
 
-type getOut struct {
+// GetOut is the wire shape of DoSettingsGet — explicit entries at a single
+// scope, with the scope echoed back so callers can confirm the lookup target.
+type GetOut struct {
 	ScopeType string           `json:"scope_type"`
 	ScopeID   string           `json:"scope_id"`
 	Entries   []settings.Entry `json:"entries"`
 }
 
-func doSettingsGet(ctx context.Context, store *settings.Store, scopeType, scopeID string) (getOut, error) {
+// DoSettingsGet reads the explicit settings written at one scope. No
+// inheritance walk — use DoSettingsResolve for that.
+func DoSettingsGet(ctx context.Context, store *settings.Store, scopeType, scopeID string) (GetOut, error) {
 	if store == nil {
-		return getOut{}, fmt.Errorf("settings store not configured")
+		return GetOut{}, fmt.Errorf("settings store not configured")
 	}
 	if scopeType == "" || scopeID == "" {
-		return getOut{}, fmt.Errorf("scope_type and scope_id are required")
+		return GetOut{}, fmt.Errorf("scope_type and scope_id are required")
 	}
 	st := settings.ScopeType(scopeType)
-	if err := validateWritableScope(st); err != nil {
-		return getOut{}, err
+	if err := ValidateWritableScope(st); err != nil {
+		return GetOut{}, err
 	}
 	entries, err := store.ListScope(ctx, st, scopeID)
 	if err != nil {
-		return getOut{}, err
+		return GetOut{}, err
 	}
 	if entries == nil {
 		entries = []settings.Entry{}
 	}
-	return getOut{ScopeType: scopeType, ScopeID: scopeID, Entries: entries}, nil
+	return GetOut{ScopeType: scopeType, ScopeID: scopeID, Entries: entries}, nil
 }
 
-type setOut struct {
-	OK       bool             `json:"ok"`
-	Warnings []string         `json:"warnings,omitempty"`
-	Entry    *settings.Entry  `json:"entry,omitempty"`
+// SetOut is the wire shape of DoSettingsSet. OK is true when the write
+// succeeded; Warnings are soft (e.g. slider out of range) but do not block.
+// Entry is the readback after write so callers can verify persistence;
+// Catalog is the matching knob definition for UI hinting.
+type SetOut struct {
+	OK       bool              `json:"ok"`
+	Warnings []string          `json:"warnings,omitempty"`
+	Entry    *settings.Entry   `json:"entry,omitempty"`
 	Catalog  *settings.KnobDef `json:"catalog,omitempty"`
 }
 
-func doSettingsSet(
+// DoSettingsSet writes an explicit value at one scope after running:
+//  1. catalog validation (type/enum/range)
+//  2. visceral-rule cap enforcement for capped knobs (e.g. daily_budget_usd)
+//
+// loadRules may be nil; in that case capped keys are blocked unless the cap
+// lookup returns no rule. Author is the caller identity recorded on the row
+// (e.g. "mcp:sess-X" or "http:user-Y").
+func DoSettingsSet(
 	ctx context.Context,
 	store *settings.Store,
-	loadRules visceralRuleLoader,
+	loadRules VisceralRuleLoader,
 	scopeType, scopeID, key, value, author string,
-) (setOut, error) {
+) (SetOut, error) {
 	if store == nil {
-		return setOut{}, fmt.Errorf("settings store not configured")
+		return SetOut{}, fmt.Errorf("settings store not configured")
 	}
 	if scopeType == "" || scopeID == "" || key == "" || value == "" {
-		return setOut{}, fmt.Errorf("scope_type, scope_id, key, value are required")
+		return SetOut{}, fmt.Errorf("scope_type, scope_id, key, value are required")
 	}
 	st := settings.ScopeType(scopeType)
-	if err := validateWritableScope(st); err != nil {
-		return setOut{}, err
+	if err := ValidateWritableScope(st); err != nil {
+		return SetOut{}, err
 	}
 
 	warnings, err := settings.ValidateValue(key, value)
 	if err != nil {
-		return setOut{}, err
+		return SetOut{}, err
 	}
 
-	// Visceral-rule clamp — MCP layer only. Catalog layer intentionally
+	// Visceral-rule clamp — MCP/HTTP layer only. Catalog layer intentionally
 	// skips this so pure catalog validation stays shape/type focused.
-	if hasVisceralCap(key) {
+	if HasVisceralCap(key) {
 		var rules []string
 		if loadRules != nil {
 			loaded, lerr := loadRules(ctx)
 			if lerr != nil {
-				return setOut{}, fmt.Errorf("load visceral rules: %w", lerr)
+				return SetOut{}, fmt.Errorf("load visceral rules: %w", lerr)
 			}
 			rules = loaded
 		}
-		if ceiling, ok := visceralCapFor(key, rules); ok {
-			exceeds, err := valueExceedsCap(value, ceiling)
+		if ceiling, ok := VisceralCapFor(key, rules); ok {
+			exceeds, err := ValueExceedsCap(value, ceiling)
 			if err != nil {
-				return setOut{}, err
+				return SetOut{}, err
 			}
 			if exceeds {
-				return setOut{}, fmt.Errorf("Visceral rule #8 caps %s at $%v. Raise the rule first via visceral_set.", key, ceiling)
+				return SetOut{}, fmt.Errorf("Visceral rule #8 caps %s at $%v. Raise the rule first via visceral_set.", key, ceiling)
 			}
 		}
 	}
 
 	if err := store.Set(ctx, st, scopeID, key, value, author); err != nil {
-		return setOut{}, err
+		return SetOut{}, err
 	}
 
 	entry, err := store.Get(ctx, st, scopeID, key)
 	if err != nil {
-		return setOut{}, fmt.Errorf("readback after set: %w", err)
+		return SetOut{}, fmt.Errorf("readback after set: %w", err)
 	}
 	knob, _ := settings.KnobByKey(key)
-	return setOut{OK: true, Warnings: warnings, Entry: &entry, Catalog: &knob}, nil
+	return SetOut{OK: true, Warnings: warnings, Entry: &entry, Catalog: &knob}, nil
 }
 
-type resolveOut struct {
+// ResolveOut is the wire shape of DoSettingsResolve — every knob's effective
+// value with provenance (source tier + source id). Stable across MCP and HTTP
+// so dashboards and agents share the same mental model.
+type ResolveOut struct {
 	TaskID   string                       `json:"task_id"`
 	Resolved map[string]settings.Resolved `json:"resolved"`
 }
 
-func doSettingsResolve(ctx context.Context, resolver *settings.Resolver, taskID string) (resolveOut, error) {
+// DoSettingsResolve walks task → manifest → product → system for every knob
+// and returns the effective value for each.
+func DoSettingsResolve(ctx context.Context, resolver *settings.Resolver, taskID string) (ResolveOut, error) {
 	if resolver == nil {
-		return resolveOut{}, fmt.Errorf("settings resolver not configured")
+		return ResolveOut{}, fmt.Errorf("settings resolver not configured")
 	}
 	if taskID == "" {
-		return resolveOut{}, fmt.Errorf("task_id is required")
+		return ResolveOut{}, fmt.Errorf("task_id is required")
 	}
 	resolved, err := resolver.ResolveAll(ctx, settings.Scope{TaskID: taskID})
 	if err != nil {
-		return resolveOut{}, err
+		return ResolveOut{}, err
 	}
-	return resolveOut{TaskID: taskID, Resolved: resolved}, nil
+	return ResolveOut{TaskID: taskID, Resolved: resolved}, nil
 }
 
 // -------- helpers ------------------------------------------------------------
 
-// validateWritableScope rejects scope_type values that aren't one of the three
+// ValidateWritableScope rejects scope_type values that aren't one of the three
 // user-writable tiers. System-scope values come from the catalog defaults and
-// cannot be mutated via the MCP surface.
-func validateWritableScope(st settings.ScopeType) error {
+// cannot be mutated via the MCP/HTTP surface.
+func ValidateWritableScope(st settings.ScopeType) error {
 	switch st {
 	case settings.ScopeProduct, settings.ScopeManifest, settings.ScopeTask:
 		return nil
@@ -257,17 +282,17 @@ func validateWritableScope(st settings.ScopeType) error {
 	}
 }
 
-// hasVisceralCap reports whether a knob key has a visceral-rule ceiling
+// HasVisceralCap reports whether a knob key has a visceral-rule ceiling
 // registered in v1. Used to short-circuit the visceral-rule load for keys
 // that never need it.
-func hasVisceralCap(key string) bool {
+func HasVisceralCap(key string) bool {
 	return key == "daily_budget_usd"
 }
 
-// valueExceedsCap parses a JSON-encoded numeric value and reports whether it
+// ValueExceedsCap parses a JSON-encoded numeric value and reports whether it
 // is greater than the ceiling. Type mismatch returns an error; non-numeric
-// knobs should never reach this path (hasVisceralCap gates entry).
-func valueExceedsCap(jsonValue string, ceiling float64) (bool, error) {
+// knobs should never reach this path (HasVisceralCap gates entry).
+func ValueExceedsCap(jsonValue string, ceiling float64) (bool, error) {
 	var n float64
 	if err := json.Unmarshal([]byte(jsonValue), &n); err != nil {
 		return false, fmt.Errorf("visceral cap check: %q is not numeric: %w", jsonValue, err)
@@ -275,9 +300,10 @@ func valueExceedsCap(jsonValue string, ceiling float64) (bool, error) {
 	return n > ceiling, nil
 }
 
-// loadActiveVisceralRules pulls the text of every active visceral rule from
-// the memory index. Production wiring for doSettingsSet.
-func (s *Server) loadActiveVisceralRules(_ context.Context) ([]string, error) {
+// LoadActiveVisceralRules pulls the text of every active visceral rule from
+// the memory index. Production wiring for DoSettingsSet — both MCP and HTTP
+// handlers route through this so the rule source is unambiguous.
+func (s *Server) LoadActiveVisceralRules(_ context.Context) ([]string, error) {
 	mems, err := s.node.Index.ListByType("visceral", 100)
 	if err != nil {
 		return nil, err
@@ -293,7 +319,7 @@ func (s *Server) loadActiveVisceralRules(_ context.Context) ([]string, error) {
 // MCP session id when available so audits can trace who set what; falls back
 // to "mcp:unknown" for calls that arrive without a session (e.g. bare stdio
 // invocations before initialize). The "mcp:" prefix distinguishes MCP writes
-// from HTTP/UI writes M2-T6 will add later.
+// from HTTP writes ("http:" prefix, M2-T6).
 func mcpSetAuthor(ctx context.Context) string {
 	session := mcpserver.ClientSessionFromContext(ctx)
 	if session == nil {
