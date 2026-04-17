@@ -57,6 +57,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 		w.Write(data)
 	}
 	r.PathPrefix("/views/").HandlerFunc(serveJS)
+	r.PathPrefix("/components/").HandlerFunc(serveJS)
 	r.Path("/app.js").HandlerFunc(serveJS)
 	r.Path("/api.js").HandlerFunc(serveJS)
 	r.Path("/tree.js").HandlerFunc(serveJS)

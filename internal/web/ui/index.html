@@ -731,10 +731,11 @@
     </main>
   </div>
 
-  <!-- Module loading order: api → tree → lifecycle → views → app (entry point) -->
+  <!-- Module loading order: api → tree → lifecycle → components → views → app (entry point) -->
   <script src="/api.js"></script>
   <script src="/tree.js"></script>
   <script src="/lifecycle.js"></script>
+  <script src="/components/knobs.js"></script>
   <script src="/views/overview.js"></script>
   <script src="/views/memories.js"></script>
   <script src="/views/conversations.js"></script>

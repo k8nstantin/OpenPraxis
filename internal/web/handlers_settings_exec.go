@@ -223,6 +223,45 @@ func apiTaskSettingsResolved(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiScopeSettingsDelete removes the explicit entry at (scopeType, id, key) so
+// the resolver falls back to the next tier up. This is the "Reset to inherited"
+// action in the dashboard — M2 built GET + PUT but no per-key DELETE; M3-T7
+// added this minimal endpoint so the Reset button in OL.renderKnobSection has
+// semantically clear wire shape instead of overloading PUT with a null value.
+//
+// Unknown keys are rejected (keeps typo safety on the URL). The store's Delete
+// is idempotent, so deleting a key that has no explicit row returns 200.
+func apiScopeSettingsDelete(n *node.Node, scopeType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		key := vars["key"]
+		if id == "" || key == "" {
+			writeError(w, "scope id and key are required", http.StatusBadRequest)
+			return
+		}
+		if _, ok := settings.KnobByKey(key); !ok {
+			writeError(w, fmt.Sprintf("%s: %q", settings.ErrUnknownKey, key), http.StatusBadRequest)
+			return
+		}
+		st := settings.ScopeType(scopeType)
+		if err := mcp.ValidateWritableScope(st); err != nil {
+			writeError(w, err.Error(), settingsHTTPStatus(err))
+			return
+		}
+		if err := n.SettingsStore.Delete(r.Context(), st, id, key); err != nil {
+			writeError(w, err.Error(), settingsHTTPStatus(err))
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":         true,
+			"scope_type": scopeType,
+			"scope_id":   id,
+			"key":        key,
+		})
+	}
+}
+
 // registerSettingsExecRoutes attaches all 9 hierarchical-settings endpoints to
 // the /api subrouter. Centralized here so the wiring stays in lockstep with
 // the catalog of scopes.
@@ -232,6 +271,8 @@ func registerSettingsExecRoutes(api *mux.Router, n *node.Node) {
 		path := fmt.Sprintf("/%ss/{id}/settings", scope)
 		api.HandleFunc(path, apiScopeSettingsGet(n, scope)).Methods("GET")
 		api.HandleFunc(path, apiScopeSettingsPut(n, scope)).Methods("PUT")
+		// Per-key delete — Reset-to-inherited for the knob UI (M3-T7).
+		api.HandleFunc(path+"/{key}", apiScopeSettingsDelete(n, scope)).Methods("DELETE")
 	}
 	api.HandleFunc("/tasks/{id}/settings/resolved", apiTaskSettingsResolved(n)).Methods("GET")
 }
