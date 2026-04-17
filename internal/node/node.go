@@ -16,6 +16,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/marker"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
+	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 )
@@ -95,6 +96,10 @@ func New(cfg *config.Config) (*Node, error) {
 	watcherStore, err := watcher.NewStore(index.DB())
 	if err != nil {
 		return nil, fmt.Errorf("init watcher store: %w", err)
+	}
+
+	if err := settings.InitSchema(index.DB()); err != nil {
+		return nil, fmt.Errorf("init settings schema: %w", err)
 	}
 
 	embedder := embedding.NewEngine(cfg.Embedding.OllamaURL, cfg.Embedding.Model, cfg.Embedding.Dimension)
