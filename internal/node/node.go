@@ -23,21 +23,23 @@ import (
 
 // Node is the central orchestrator that wires all components together.
 type Node struct {
-	Config        *config.Config
-	Store         *memory.Store
-	Index         *memory.Index
-	Conversations *conversation.Store
-	Markers       *marker.Store
-	Actions       *action.Store
-	Products      *product.Store
-	Manifests     *manifest.Store
-	Ideas         *idea.Store
-	Tasks         *task.Store
-	ChatSessions  *chat.SessionStore
-	Watcher       *watcher.Store
-	runner        *task.Runner
-	Embedder      *embedding.Engine
-	StartedAt     time.Time
+	Config           *config.Config
+	Store            *memory.Store
+	Index            *memory.Index
+	Conversations    *conversation.Store
+	Markers          *marker.Store
+	Actions          *action.Store
+	Products         *product.Store
+	Manifests        *manifest.Store
+	Ideas            *idea.Store
+	Tasks            *task.Store
+	ChatSessions     *chat.SessionStore
+	Watcher          *watcher.Store
+	SettingsStore    *settings.Store
+	SettingsResolver *settings.Resolver
+	runner           *task.Runner
+	Embedder         *embedding.Engine
+	StartedAt        time.Time
 }
 
 // New creates and initializes a Node.
@@ -102,23 +104,30 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init settings schema: %w", err)
 	}
 
+	settingsStore := settings.NewStore(index.DB())
+	taskSettingsAdapter := &task.SettingsAdapter{Store: taskStore}
+	manifestSettingsAdapter := &manifest.SettingsAdapter{Store: manifestStore}
+	settingsResolver := settings.NewResolver(settingsStore, taskSettingsAdapter, manifestSettingsAdapter)
+
 	embedder := embedding.NewEngine(cfg.Embedding.OllamaURL, cfg.Embedding.Model, cfg.Embedding.Dimension)
 
 	n := &Node{
-		Config:        cfg,
-		Store:         store,
-		Index:         index,
-		Conversations: convStore,
-		Markers:       markerStore,
-		Actions:       actionStore,
-		Products:      productStore,
-		Manifests:     manifestStore,
-		Ideas:         ideaStore,
-		Tasks:         taskStore,
-		ChatSessions:  chatStore,
-		Watcher:       watcherStore,
-		Embedder:      embedder,
-		StartedAt:     time.Now(),
+		Config:           cfg,
+		Store:            store,
+		Index:            index,
+		Conversations:    convStore,
+		Markers:          markerStore,
+		Actions:          actionStore,
+		Products:         productStore,
+		Manifests:        manifestStore,
+		Ideas:            ideaStore,
+		Tasks:            taskStore,
+		ChatSessions:     chatStore,
+		Watcher:          watcherStore,
+		SettingsStore:    settingsStore,
+		SettingsResolver: settingsResolver,
+		Embedder:         embedder,
+		StartedAt:        time.Now(),
 	}
 
 	// One-time migration: normalize source_node from hostname to UUID
