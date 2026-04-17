@@ -1241,6 +1241,33 @@ body {
 .btn-md { font-size: 12px; padding: 6px 14px; }
 .btn-action { font-size: 12px; padding: 6px 16px; }
 
+/* === Execution Controls (knobs) — shared component rendered by OL.renderKnobSection === */
+.knob-section { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
+.knob-section-title { font-weight: 600; margin-bottom: 12px; color: var(--text-primary); font-size: 13px; }
+.knob-section-body { display: flex; flex-direction: column; }
+.knob-section-loading { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.knob-section-error { color: var(--red); font-size: 12px; padding: 8px 0; }
+.knob-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.knob-row:last-child { border-bottom: none; }
+.knob-row-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.knob-row-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-left: 170px; }
+.knob-label { min-width: 160px; color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); }
+.knob-input-range { accent-color: var(--accent); flex: 1; max-width: 200px; cursor: pointer; }
+.knob-input-number { width: 80px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.knob-input-text { flex: 1; min-width: 160px; max-width: 400px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 8px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.knob-input-select { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 3px 8px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.knob-unit { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+.knob-source { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.knob-source.explicit { color: var(--green); font-style: normal; font-weight: 600; }
+.knob-reset { background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+.knob-reset:hover { color: var(--accent); border-color: var(--accent); }
+.knob-warning { font-size: 11px; color: var(--yellow); }
+.knob-save-status { font-size: 13px; min-width: 16px; text-align: center; }
+.knob-save-status.ok { color: var(--green); }
+.knob-save-status.err { color: var(--red); }
+.knob-save-status.pending { color: var(--text-muted); }
+.knob-unsupported { color: var(--text-muted); font-size: 11px; font-style: italic; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .sidebar { display: none; }
@@ -1248,4 +1275,6 @@ body {
   .panels-grid { grid-template-columns: 1fr; }
   .memories-layout { grid-template-columns: 1fr; }
   .search-results { left: 0; }
+  .knob-row-meta { padding-left: 0; }
+  .knob-label { min-width: 0; }
 }

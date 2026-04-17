@@ -111,6 +111,7 @@ func buildRouter(env *settingsTestEnv, loader mcp.VisceralRuleLoader) *mux.Route
 		path := fmt.Sprintf("/%ss/{id}/settings", scope)
 		api.HandleFunc(path, scopeGetHandler(env, scope)).Methods("GET")
 		api.HandleFunc(path, scopePutHandler(env, scope, loader)).Methods("PUT")
+		api.HandleFunc(path+"/{key}", scopeDeleteHandler(env, scope)).Methods("DELETE")
 	}
 	api.HandleFunc("/tasks/{id}/settings/resolved", taskResolvedHandler(env)).Methods("GET")
 	return r
@@ -175,6 +176,39 @@ func taskResolvedHandler(env *settingsTestEnv) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, resolvedResponse{TaskID: out.TaskID, Resolved: out.Resolved})
+	}
+}
+
+// scopeDeleteHandler mirrors the production apiScopeSettingsDelete without
+// requiring a full Node. Keeps the test router isomorphic to production wiring.
+func scopeDeleteHandler(env *settingsTestEnv, scopeType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+		key := vars["key"]
+		if id == "" || key == "" {
+			writeError(w, "scope id and key are required", http.StatusBadRequest)
+			return
+		}
+		if _, ok := settings.KnobByKey(key); !ok {
+			writeError(w, fmt.Sprintf("%s: %q", settings.ErrUnknownKey, key), http.StatusBadRequest)
+			return
+		}
+		st := settings.ScopeType(scopeType)
+		if err := mcp.ValidateWritableScope(st); err != nil {
+			writeError(w, err.Error(), settingsHTTPStatus(err))
+			return
+		}
+		if err := env.store.Delete(r.Context(), st, id, key); err != nil {
+			writeError(w, err.Error(), settingsHTTPStatus(err))
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":         true,
+			"scope_type": scopeType,
+			"scope_id":   id,
+			"key":        key,
+		})
 	}
 }
 
@@ -542,6 +576,10 @@ func TestRoutes_AllSettingsEndpointsRegistered(t *testing.T) {
 		{http.MethodGet, "/api/tasks/t1/settings"},
 		{http.MethodPut, "/api/tasks/t1/settings"},
 		{http.MethodGet, "/api/tasks/t1/settings/resolved"},
+		// M3-T7 additions — per-key DELETE for "Reset to inherited" UX.
+		{http.MethodDelete, "/api/products/p1/settings/max_turns"},
+		{http.MethodDelete, "/api/manifests/m1/settings/max_turns"},
+		{http.MethodDelete, "/api/tasks/t1/settings/max_turns"},
 	}
 	for _, c := range cases {
 		var body []byte
@@ -552,5 +590,52 @@ func TestRoutes_AllSettingsEndpointsRegistered(t *testing.T) {
 		if rec.Code == http.StatusNotFound {
 			t.Errorf("route %s %s returned 404 — not registered", c.method, c.path)
 		}
+	}
+}
+
+// ---- DELETE /api/{scope}/:id/settings/:key ----------------------------------
+//
+// M3-T7 added this endpoint so the Reset-to-inherited button in the knob UI
+// has a semantically clean wire shape (instead of overloading PUT with null).
+
+func TestHandleDeleteScopeSettings_RemovesExplicitEntry(t *testing.T) {
+	env := newSettingsTestEnv(t)
+	ctx := context.Background()
+	if err := env.store.Set(ctx, settings.ScopeTask, "t1", "max_turns", "75", "seed"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	r := buildRouter(env, noVisceralRulesHTTP)
+	rec := doRequest(t, r, http.MethodDelete, "/api/tasks/t1/settings/max_turns", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d body=%s", rec.Code, rec.Body.String())
+	}
+	// Entry must be gone so the resolver falls through to the next tier.
+	if _, err := env.store.Get(ctx, settings.ScopeTask, "t1", "max_turns"); err == nil {
+		t.Errorf("explicit entry still present after DELETE")
+	}
+}
+
+func TestHandleDeleteScopeSettings_Idempotent_ReturnsOKOnMissingEntry(t *testing.T) {
+	env := newSettingsTestEnv(t)
+	r := buildRouter(env, noVisceralRulesHTTP)
+	// No prior Set — delete should still report ok=true (store.Delete is idempotent).
+	rec := doRequest(t, r, http.MethodDelete, "/api/products/p1/settings/temperature", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on missing entry, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Errorf("body should report ok=true, got %s", rec.Body.String())
+	}
+}
+
+func TestHandleDeleteScopeSettings_UnknownKey_Returns400(t *testing.T) {
+	env := newSettingsTestEnv(t)
+	r := buildRouter(env, noVisceralRulesHTTP)
+	rec := doRequest(t, r, http.MethodDelete, "/api/tasks/t1/settings/no_such_knob", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown key, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "unknown key") {
+		t.Errorf("error should mention unknown key, got %s", rec.Body.String())
 	}
 }
