@@ -257,8 +257,14 @@
             <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
           </div>
           ${manifestsHtml}
+          <div id="product-knobs-mount" style="margin-top:16px"></div>
           ${ideasHtml}
         </div>`;
+
+      const knobMount = document.getElementById('product-knobs-mount');
+      if (knobMount && OL.renderKnobSection) {
+        OL.renderKnobSection(knobMount, { type: 'product', id: p.id });
+      }
 
     } catch (e) {
       console.error('Load product detail failed:', e);
