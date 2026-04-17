@@ -84,13 +84,13 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	}
 }
 
-// noVisceralRules is the visceralRuleLoader used when the test does not care
+// noVisceralRules is the VisceralRuleLoader used when the test does not care
 // about visceral clamping.
 func noVisceralRules(_ context.Context) ([]string, error) { return nil, nil }
 
 // budgetRuleLoader returns a single rule mirroring rule #8 ("daily budget =
 // $100") so tests can exercise the visceral cap path deterministically.
-func budgetRuleLoader(ceiling string) visceralRuleLoader {
+func budgetRuleLoader(ceiling string) VisceralRuleLoader {
 	return func(_ context.Context) ([]string, error) {
 		return []string{"daily budget = " + ceiling}, nil
 	}
@@ -99,7 +99,7 @@ func budgetRuleLoader(ceiling string) visceralRuleLoader {
 // -------- settings_catalog ---------------------------------------------------
 
 func TestTool_SettingsCatalog_ReturnsAllKnobs(t *testing.T) {
-	out := doSettingsCatalog()
+	out := DoSettingsCatalog()
 	if got, want := len(out.Knobs), len(settings.Catalog()); got != want {
 		t.Fatalf("knob count: got %d want %d", got, want)
 	}
@@ -112,7 +112,7 @@ func TestTool_SettingsCatalog_ReturnsAllKnobs(t *testing.T) {
 }
 
 func TestTool_SettingsCatalog_EveryKnobHasRequiredFields(t *testing.T) {
-	out := doSettingsCatalog()
+	out := DoSettingsCatalog()
 	for _, k := range out.Knobs {
 		if k.Key == "" {
 			t.Errorf("knob has empty key: %+v", k)
@@ -145,9 +145,9 @@ func TestTool_SettingsGet_ReturnsExplicitOnly(t *testing.T) {
 		t.Fatalf("seed manifest: %v", err)
 	}
 
-	out, err := doSettingsGet(ctx, h.store, "product", "p1")
+	out, err := DoSettingsGet(ctx, h.store, "product", "p1")
 	if err != nil {
-		t.Fatalf("doSettingsGet: %v", err)
+		t.Fatalf("DoSettingsGet: %v", err)
 	}
 	if len(out.Entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d: %+v", len(out.Entries), out.Entries)
@@ -162,9 +162,9 @@ func TestTool_SettingsGet_ReturnsExplicitOnly(t *testing.T) {
 
 func TestTool_SettingsGet_EmptyScope_ReturnsEmptyList(t *testing.T) {
 	h := newSettingsHarness(t)
-	out, err := doSettingsGet(context.Background(), h.store, "task", "t-empty")
+	out, err := DoSettingsGet(context.Background(), h.store, "task", "t-empty")
 	if err != nil {
-		t.Fatalf("doSettingsGet: %v", err)
+		t.Fatalf("DoSettingsGet: %v", err)
 	}
 	if len(out.Entries) != 0 {
 		t.Fatalf("expected empty, got %+v", out.Entries)
@@ -177,7 +177,7 @@ func TestTool_SettingsGet_EmptyScope_ReturnsEmptyList(t *testing.T) {
 
 func TestTool_SettingsGet_UnknownScopeType_Returns400(t *testing.T) {
 	h := newSettingsHarness(t)
-	_, err := doSettingsGet(context.Background(), h.store, "region", "us-east")
+	_, err := DoSettingsGet(context.Background(), h.store, "region", "us-east")
 	if err == nil {
 		t.Fatal("expected error for unknown scope_type, got nil")
 	}
@@ -185,7 +185,7 @@ func TestTool_SettingsGet_UnknownScopeType_Returns400(t *testing.T) {
 		t.Errorf("error should mention scope_type, got: %v", err)
 	}
 	// system scope is declared but not writable via the MCP surface.
-	if _, err := doSettingsGet(context.Background(), h.store, "system", "whatever"); err == nil {
+	if _, err := DoSettingsGet(context.Background(), h.store, "system", "whatever"); err == nil {
 		t.Fatal("expected error for system scope, got nil")
 	}
 }
@@ -196,10 +196,10 @@ func TestTool_SettingsSet_ValidValue_Persists(t *testing.T) {
 	h := newSettingsHarness(t)
 	ctx := context.Background()
 
-	out, err := doSettingsSet(ctx, h.store, noVisceralRules,
+	out, err := DoSettingsSet(ctx, h.store, noVisceralRules,
 		"product", "p1", "max_turns", "250", "mcp:sess-A")
 	if err != nil {
-		t.Fatalf("doSettingsSet: %v", err)
+		t.Fatalf("DoSettingsSet: %v", err)
 	}
 	if !out.OK {
 		t.Fatalf("OK=false: %+v", out)
@@ -221,7 +221,7 @@ func TestTool_SettingsSet_ValidValue_Persists(t *testing.T) {
 func TestTool_SettingsSet_TypeMismatch_Returns400(t *testing.T) {
 	h := newSettingsHarness(t)
 	// max_turns is int; passing a JSON string must hard-fail.
-	_, err := doSettingsSet(context.Background(), h.store, noVisceralRules,
+	_, err := DoSettingsSet(context.Background(), h.store, noVisceralRules,
 		"product", "p1", "max_turns", `"lots"`, "mcp:sess-A")
 	if err == nil {
 		t.Fatal("expected type mismatch error, got nil")
@@ -238,7 +238,7 @@ func TestTool_SettingsSet_TypeMismatch_Returns400(t *testing.T) {
 
 func TestTool_SettingsSet_UnknownKey_Returns400(t *testing.T) {
 	h := newSettingsHarness(t)
-	_, err := doSettingsSet(context.Background(), h.store, noVisceralRules,
+	_, err := DoSettingsSet(context.Background(), h.store, noVisceralRules,
 		"product", "p1", "no_such_knob", "42", "mcp:sess-A")
 	if err == nil {
 		t.Fatal("expected unknown-key error, got nil")
@@ -253,10 +253,10 @@ func TestTool_SettingsSet_SliderOverRange_ReturnsWarningButPersists(t *testing.T
 	ctx := context.Background()
 
 	// max_turns slider caps at 10000 per catalog. 99999 should warn, not block.
-	out, err := doSettingsSet(ctx, h.store, noVisceralRules,
+	out, err := DoSettingsSet(ctx, h.store, noVisceralRules,
 		"product", "p1", "max_turns", "99999", "mcp:sess-A")
 	if err != nil {
-		t.Fatalf("doSettingsSet: %v", err)
+		t.Fatalf("DoSettingsSet: %v", err)
 	}
 	if !out.OK {
 		t.Fatalf("OK=false: %+v", out)
@@ -278,7 +278,7 @@ func TestTool_SettingsSet_DailyBudgetOverVisceralCap_Rejected(t *testing.T) {
 	ctx := context.Background()
 
 	// Visceral rule #8 caps daily_budget_usd at $100.
-	_, err := doSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
+	_, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
 		"product", "p1", "daily_budget_usd", "500", "mcp:sess-A")
 	if err == nil {
 		t.Fatal("expected visceral cap rejection, got nil")
@@ -293,13 +293,13 @@ func TestTool_SettingsSet_DailyBudgetOverVisceralCap_Rejected(t *testing.T) {
 	}
 
 	// Value at the cap must pass.
-	if _, err := doSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
+	if _, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
 		"product", "p1", "daily_budget_usd", "100", "mcp:sess-A"); err != nil {
 		t.Fatalf("value at cap should pass: %v", err)
 	}
 
 	// Non-budget keys must not be blocked even when visceral rules are loaded.
-	if _, err := doSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
+	if _, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
 		"product", "p1", "max_turns", "200", "mcp:sess-A"); err != nil {
 		t.Fatalf("unrelated key blocked by cap path: %v", err)
 	}
@@ -310,9 +310,9 @@ func TestTool_SettingsSet_RecordsAuthor(t *testing.T) {
 	ctx := context.Background()
 
 	author := "mcp:sess-deadbeef"
-	if _, err := doSettingsSet(ctx, h.store, noVisceralRules,
+	if _, err := DoSettingsSet(ctx, h.store, noVisceralRules,
 		"manifest", "m1", "temperature", "0.5", author); err != nil {
-		t.Fatalf("doSettingsSet: %v", err)
+		t.Fatalf("DoSettingsSet: %v", err)
 	}
 	entry, err := h.store.Get(ctx, settings.ScopeManifest, "m1", "temperature")
 	if err != nil {
@@ -340,9 +340,9 @@ func TestTool_SettingsResolve_ReturnsProvenanceForEveryKnob(t *testing.T) {
 		t.Fatalf("seed product: %v", err)
 	}
 
-	out, err := doSettingsResolve(ctx, h.resolver, "t1")
+	out, err := DoSettingsResolve(ctx, h.resolver, "t1")
 	if err != nil {
-		t.Fatalf("doSettingsResolve: %v", err)
+		t.Fatalf("DoSettingsResolve: %v", err)
 	}
 	if got, want := len(out.Resolved), len(settings.Catalog()); got != want {
 		t.Fatalf("resolved count: got %d want %d", got, want)
@@ -370,7 +370,7 @@ func TestTool_SettingsResolve_ReturnsProvenanceForEveryKnob(t *testing.T) {
 
 func TestTool_SettingsResolve_UnknownTask_ReturnsError(t *testing.T) {
 	h := newSettingsHarness(t)
-	_, err := doSettingsResolve(context.Background(), h.resolver, "t-does-not-exist")
+	_, err := DoSettingsResolve(context.Background(), h.resolver, "t-does-not-exist")
 	if err == nil {
 		t.Fatal("expected resolver lookup error, got nil")
 	}

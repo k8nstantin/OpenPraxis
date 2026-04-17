@@ -181,6 +181,12 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/recall", apiRecall(n)).Methods("GET")
 	api.HandleFunc("/recall/{type}/{id}/restore", apiRestore(n)).Methods("POST")
 
+	// Hierarchical execution-controls settings (M2-T6) — registered before
+	// the profile/agents/chat /settings/* routes because gorilla/mux matches
+	// paths in registration order. catalog + scope-keyed endpoints share the
+	// /settings prefix without colliding (different verbs / suffixes).
+	registerSettingsExecRoutes(api, n)
+
 	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
 	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")
 	api.HandleFunc("/settings/agents", apiSettingsAgents()).Methods("GET")
