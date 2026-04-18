@@ -407,6 +407,7 @@
           ${depsHtml}
           ${linkedIdeasHtml}
           ${linkedTasksHtml}
+          <div id="manifest-knobs-mount" style="margin-top:16px"></div>
           ${jira ? `<div style="margin-bottom:12px">Jira: ${jira}</div>` : ''}
           ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
@@ -427,6 +428,11 @@
             <span>ID: ${esc(m.id)}</span>
           </div>
         </div>`;
+
+      const knobMount = document.getElementById('manifest-knobs-mount');
+      if (knobMount && OL.renderKnobSection) {
+        OL.renderKnobSection(knobMount, { type: 'manifest', id: m.id });
+      }
 
       // Bind idea navigation links
       bodyEl.querySelectorAll('.idea-nav').forEach(el => {
