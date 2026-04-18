@@ -30,10 +30,12 @@ import (
 // comment is here so future edits do not accidentally narrow the scope.
 func TestTripwire_NoHardcodedKnobDefaults(t *testing.T) {
 	patterns := map[string]*regexp.Regexp{
-		"maxParallel = 3":          regexp.MustCompile(`\bmaxParallel\s*=\s*3\b`),
-		"maxTurns := 50":           regexp.MustCompile(`\bmaxTurns\s*:?=\s*50\b`),
-		"hardcoded 30*time.Minute": regexp.MustCompile(`30\s*\*\s*time\.Minute\b`),
-		"hardcoded temperature":    regexp.MustCompile(`\btemperature\s*:?=\s*0\.\d+\b`),
+		"maxParallel = 3":                regexp.MustCompile(`\bmaxParallel\s*=\s*3\b`),
+		"maxTurns := 50":                 regexp.MustCompile(`\bmaxTurns\s*:?=\s*50\b`),
+		"hardcoded 30*time.Minute":       regexp.MustCompile(`30\s*\*\s*time\.Minute\b`),
+		"hardcoded temperature":          regexp.MustCompile(`\btemperature\s*:?=\s*0\.\d+\b`),
+		"Task.MaxTurns field reference":  regexp.MustCompile(`\bTask\.MaxTurns\b`),
+		"t.MaxTurns field reference":     regexp.MustCompile(`\bt\.MaxTurns\b`),
 	}
 
 	// Directories to walk, relative to the repo root. internal/task runs in

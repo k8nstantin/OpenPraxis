@@ -653,16 +653,6 @@
               <option value="custom">Custom</option>
             </select>
           </div>
-          <div style="flex:1">
-            <label class="form-label">Max Turns</label>
-            <select id="tc-max-turns" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100" selected>100 (default)</option>
-              <option value="200">200</option>
-            </select>
-          </div>
         </div>
         <div id="tc-datetime-row" style="margin-bottom:16px">
           <label class="form-label">Run At</label>
@@ -710,7 +700,6 @@
       const desc = bodyEl.querySelector('#tc-description').value.trim();
       const sched = schedType.value;
       const agent = bodyEl.querySelector('#tc-agent').value;
-      const maxTurns = parseInt(bodyEl.querySelector('#tc-max-turns').value) || 100;
       const instrErr = bodyEl.querySelector('#tc-instructions-error');
       if (!desc) { instrErr.style.display = 'block'; return; } else { instrErr.style.display = 'none'; }
       if (!manifestId && !title) { bodyEl.querySelector('#tc-status').textContent = 'Title is required for standalone tasks'; return; }
@@ -725,7 +714,7 @@
       await fetch('/api/tasks', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({manifest_id: manifestId, title, description: desc, schedule, agent, max_turns: maxTurns})
+        body: JSON.stringify({manifest_id: manifestId, title, description: desc, schedule, agent})
       });
       bodyEl.querySelector('#tc-status').textContent = 'Created!';
       OL.loadTasks();

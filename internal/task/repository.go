@@ -10,24 +10,24 @@ import (
 	"github.com/google/uuid"
 )
 
-// Create stores a new task.
-func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNode, createdBy, dependsOn string, maxTurns int) (*Task, error) {
+// Create stores a new task. Per-task max_turns is set via the settings
+// resolver (PUT /api/tasks/:id/settings) after creation — the legacy
+// max_turns column was retired in M4-T14, so callers that still want to
+// pin a value must write a settings row.
+func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNode, createdBy, dependsOn string) (*Task, error) {
 	if schedule == "" {
 		schedule = "once"
 	}
 	if agent == "" {
 		agent = "claude-code"
 	}
-	if maxTurns <= 0 {
-		maxTurns = 100
-	}
 
 	id := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 
-	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
-		id, manifestID, title, description, schedule, agent, sourceNode, createdBy, maxTurns, dependsOn,
+	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+		id, manifestID, title, description, schedule, agent, sourceNode, createdBy, dependsOn,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		ID: id, Marker: id[:12], ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
 		Status: "pending", Agent: agent, SourceNode: sourceNode,
-		CreatedBy: createdBy, MaxTurns: maxTurns, DependsOn: dependsOn, CreatedAt: now, UpdatedAt: now,
+		CreatedBy: createdBy, DependsOn: dependsOn, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -94,9 +94,11 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 	return tasks, err
 }
 
-// Update modifies optional fields on a task (title, description, max_turns).
-// Only non-nil fields are updated.
-func (s *Store) Update(id string, title, description *string, maxTurns *int) (*Task, error) {
+// Update modifies optional fields on a task (title, description). Only
+// non-nil fields are updated. Per-task max_turns is no longer a task-row
+// field — callers who want to set it go through the settings resolver
+// (PUT /api/tasks/:id/settings). Retired in M4-T14.
+func (s *Store) Update(id string, title, description *string) (*Task, error) {
 	var sets []string
 	var args []any
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -108,10 +110,6 @@ func (s *Store) Update(id string, title, description *string, maxTurns *int) (*T
 	if description != nil {
 		sets = append(sets, "description = ?")
 		args = append(args, *description)
-	}
-	if maxTurns != nil {
-		sets = append(sets, "max_turns = ?")
-		args = append(args, *maxTurns)
 	}
 	if len(sets) == 0 {
 		return s.Get(id)
@@ -337,7 +335,7 @@ func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT t.id, t.manifest_id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.max_turns, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
+	rows, err := s.db.Query(`SELECT t.id, t.manifest_id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
 		FROM tasks t JOIN task_manifests tm ON t.id = tm.task_id
 		WHERE tm.manifest_id = ? AND t.deleted_at = '' ORDER BY t.created_at DESC LIMIT ?`, manifestID, limit)
 	if err != nil {
