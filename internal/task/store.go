@@ -168,6 +168,10 @@ func (s *Store) init() error {
 		return fmt.Errorf("create task_manifests table: %w", err)
 	}
 
+	if err := s.initPricingSchema(); err != nil {
+		return fmt.Errorf("create model_pricing table: %w", err)
+	}
+
 	return nil
 }
 
