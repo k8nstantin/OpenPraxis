@@ -105,6 +105,31 @@ The screenshot shows 53 total audits, 24 passed, 29 failed, 45 % pass rate — a
 
 The three gates together enforce what an outside reviewer would check: code exists, code builds, code addresses the spec. Agents don't self-grade. **The watcher does.**
 
+### Hierarchical execution controls — budgets, turns, and agent knobs that inherit
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/exec-controls-product.png" alt="Product detail — Execution Controls panel with 12 knobs at product scope (max_parallel, max_turns, temperature, daily_budget_usd, etc.), soft-cap warning shown on daily_budget_usd" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-manifest.png" alt="Manifest detail — same 12 knobs at manifest scope, showing which inherit from product vs. locally overridden" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-task.png" alt="Task detail — same 12 knobs at task scope, narrowest override point with inheritance provenance" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Product</b> — set the wide default once</sub></td>
+    <td align="center"><sub><b>Manifest</b> — override for a feature area</sub></td>
+    <td align="center"><sub><b>Task</b> — override for a single run</sub></td>
+  </tr>
+</table>
+
+Twelve execution knobs — `max_parallel`, `max_turns`, `max_cost_usd`, `daily_budget_usd`, `timeout_minutes`, `temperature`, `reasoning_effort`, `default_agent`, `default_model`, `retry_on_failure`, `approval_mode`, `allowed_tools` — configurable at **four scopes with inheritance**: **task → manifest → product → system**. Set a product-wide budget once; every task under it inherits. Override one manifest's `max_turns` for a hard job; the product default still covers the rest.
+
+- **Inline provenance** — every knob shows where the value came from ("inherited from product X") so you know which scope to edit to change it everywhere vs. here.
+- **Reset to inherited** — one click drops a local override, reverts to the scope above.
+- **Soft-cap warnings** — push `daily_budget_usd` above the visceral rule's hard cap and the UI warns before save; the runner clamps at runtime regardless.
+- **Debounced save** — slide the value, it saves 300 ms after you stop; no "Apply" button to forget.
+- **Agent-readable** — the MCP `settings_resolve` tool returns the effective value walking the inheritance chain, so agents query the budget instead of guessing.
+
+Storage: a single `settings` table with `(scope_type, scope_id, key)` primary key. The resolver walks task → linked manifests → product → system on every read, clamped by visceral rules. Nine HTTP endpoints (`/api/settings/...`) mirror the four MCP tools for dashboard use.
+
 ## How It Works
 
 ```
@@ -270,6 +295,7 @@ Multi-provider AI chat built into the dashboard. Supports Anthropic (Claude), Go
 | **Tasks** | `task_create`, `task_list`, `task_get`, `task_start`, `task_pause`, `task_resume`, `task_cancel`, `task_link_manifest`, `task_unlink_manifest` |
 | **Ideas** | `idea_add`, `idea_list`, `idea_update`, `link_idea_manifest`, `unlink_idea_manifest` |
 | **Markers** | `marker_flag`, `marker_list`, `marker_done` |
+| **Settings** | `settings_catalog`, `settings_get`, `settings_set`, `settings_resolve` (task/manifest/product/system scoped knobs with inheritance) |
 
 ## Quick Start
 
@@ -317,9 +343,9 @@ Open `http://localhost:8765`.
 | Go source files | 78+ |
 | Go lines of code | ~18,000 |
 | Dashboard JS | ~6,000 lines (modular: api.js, tree.js, lifecycle.js, 16 view modules) |
-| MCP tools | 40+ |
-| REST API endpoints | 70+ |
-| SQLite tables | 31 |
+| MCP tools | 44+ |
+| REST API endpoints | 79+ |
+| SQLite tables | 32 |
 | Dashboard tabs | 16 |
 
 ## Database
