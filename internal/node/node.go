@@ -138,9 +138,10 @@ func New(cfg *config.Config) (*Node, error) {
 
 // InitRunner creates and sets the task Runner using the Node's own stores.
 // Must be called after New() and before serving requests.
-// Returns the Runner for use by the task scheduler.
-func (n *Node) InitRunner(maxParallel int, onEvent func(string, map[string]string)) *task.Runner {
-	n.runner = task.NewRunner(n.Tasks, n.Actions, maxParallel, onEvent)
+// The Runner reads its max_parallel cap per task via n.SettingsResolver —
+// there is no process-wide cap argument because caps are now per-product.
+func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner {
+	n.runner = task.NewRunner(n.Tasks, n.Actions, n.SettingsResolver, onEvent)
 	return n.runner
 }
 
