@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/settings"
 )
 
 // RunningTask tracks an actively executing task.
@@ -21,6 +22,9 @@ type RunningTask struct {
 	Marker    string    `json:"marker"`
 	Title     string    `json:"title"`
 	Manifest  string    `json:"manifest"`
+	// ProductID is the resolved product scope for the task — empty for
+	// standalone tasks with no manifest. Used by the per-product dispatch cap.
+	ProductID string    `json:"product_id"`
 	Agent     string    `json:"agent"`
 	PID       int       `json:"pid"`
 	Paused    bool      `json:"paused"`
@@ -34,26 +38,29 @@ type RunningTask struct {
 }
 
 // Runner manages task execution — spawning agents and tracking running tasks.
+//
+// The max_parallel dispatch cap is resolved per-task at Execute time via the
+// settings Resolver: it walks task → manifest → product → system so two
+// products can have different caps. Standalone tasks (no manifest/product)
+// fall through to the catalog system default.
 type Runner struct {
-	store       *Store
-	actions     *action.Store
-	running     map[string]*RunningTask
-	mu          sync.RWMutex
-	maxParallel int
-	onEvent     func(event string, data map[string]string) // broadcast callback
+	store    *Store
+	actions  *action.Store
+	resolver *settings.Resolver
+	running  map[string]*RunningTask
+	mu       sync.RWMutex
+	onEvent  func(event string, data map[string]string) // broadcast callback
 }
 
-// NewRunner creates a task runner.
-func NewRunner(store *Store, actions *action.Store, maxParallel int, onEvent func(string, map[string]string)) *Runner {
-	if maxParallel <= 0 {
-		maxParallel = 3
-	}
+// NewRunner creates a task runner. The resolver is required — dispatch caps
+// are looked up through it on every Execute call.
+func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, onEvent func(string, map[string]string)) *Runner {
 	return &Runner{
-		store:       store,
-		actions:     actions,
-		running:     make(map[string]*RunningTask),
-		maxParallel: maxParallel,
-		onEvent:     onEvent,
+		store:    store,
+		actions:  actions,
+		resolver: resolver,
+		running:  make(map[string]*RunningTask),
+		onEvent:  onEvent,
 	}
 }
 
@@ -83,13 +90,76 @@ func (r *Runner) RunningCount() int {
 	return len(r.running)
 }
 
+// RunningCountForProduct returns the number of active executions whose
+// resolved ProductID matches productID. Standalone tasks (ProductID == "")
+// share their own pool — pass "" to count them.
+func (r *Runner) RunningCountForProduct(productID string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := 0
+	for _, rt := range r.running {
+		if rt.ProductID == productID {
+			n++
+		}
+	}
+	return n
+}
+
+// resolveMaxParallel walks settings task → manifest → product → system for
+// the max_parallel knob at the task's scope. Returns the normalized scope
+// (with ManifestID/ProductID auto-filled) and the int cap. Extracted so the
+// dispatch gate is unit-testable without spawning an agent.
+func (r *Runner) resolveMaxParallel(ctx context.Context, taskID string) (settings.Scope, int, error) {
+	if r.resolver == nil {
+		return settings.Scope{}, 0, fmt.Errorf("runner has no settings resolver")
+	}
+	scope, err := r.resolver.NormalizeScope(ctx, settings.Scope{TaskID: taskID})
+	if err != nil {
+		return scope, 0, fmt.Errorf("normalize scope: %w", err)
+	}
+	resolved, err := r.resolver.Resolve(ctx, scope, "max_parallel")
+	if err != nil {
+		return scope, 0, fmt.Errorf("resolve max_parallel: %w", err)
+	}
+	cap, err := resolvedInt(resolved.Value)
+	if err != nil {
+		return scope, 0, fmt.Errorf("max_parallel: %w", err)
+	}
+	return scope, cap, nil
+}
+
+// resolvedInt coerces a resolver-returned Value to a Go int. The resolver
+// decodes explicit settings rows as int64 (encoding/json round-trip), while
+// system-default fallthrough returns the catalog's raw Go int. We accept both
+// plus float64 for defensive symmetry with any future catalog changes.
+func resolvedInt(v interface{}) (int, error) {
+	switch n := v.(type) {
+	case int:
+		return n, nil
+	case int64:
+		return int(n), nil
+	case float64:
+		return int(n), nil
+	}
+	return 0, fmt.Errorf("expected int value, got %T", v)
+}
+
 // Execute spawns an autonomous agent for a task.
 func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules string) error {
-	if r.RunningCount() >= r.maxParallel {
-		return fmt.Errorf("max parallel tasks reached (%d)", r.maxParallel)
-	}
 	if r.IsRunning(t.ID) {
 		return fmt.Errorf("task already running")
+	}
+
+	// Resolve per-product cap via the settings walker. Runs BEFORE we spawn
+	// so a cap breach returns an error instead of starting a process we'd
+	// immediately have to kill. A background context is fine — the lookups
+	// are cheap and the task's own context is built below.
+	scope, cap, err := r.resolveMaxParallel(context.Background(), t.ID)
+	if err != nil {
+		return err
+	}
+	if r.RunningCountForProduct(scope.ProductID) >= cap {
+		return fmt.Errorf("max parallel tasks reached for product %s (%d)", scope.ProductID, cap)
 	}
 
 	// Build the prompt
@@ -149,6 +219,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		Marker:    marker,
 		Title:     t.Title,
 		Manifest:  manifestTitle,
+		ProductID: scope.ProductID,
 		Agent:     t.Agent,
 		PID:       cmd.Process.Pid,
 		StartedAt: time.Now(),

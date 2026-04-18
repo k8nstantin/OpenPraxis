@@ -180,7 +180,7 @@ var serveCmd = &cobra.Command{
 		cwd, _ := os.Getwd()
 		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", cfg.Node.PeerID())
 
-		runner := n.InitRunner(3, func(event string, data map[string]string) {
+		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
 
 			// Watcher hook: audit completed tasks
