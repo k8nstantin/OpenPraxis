@@ -244,6 +244,7 @@
           <!-- CONTROLS -->
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
             <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="OL.editProduct('${esc(p.id)}')">&#9998; Edit</button>
+            <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="OL.createManifest({productId:'${esc(p.id)}'})">+ New Manifest</button>
             <button class="btn-search" style="font-size:11px;padding:4px 12px;background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
             ${['draft','open','closed','archive'].map(s => {
               const active = p.status === s;
