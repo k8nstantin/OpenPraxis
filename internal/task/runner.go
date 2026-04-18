@@ -37,8 +37,15 @@ type RunningTask struct {
 	// cost cap has a live value to compare against.
 	CumulativeCostUSD float64  `json:"cumulative_cost_usd"`
 	Output            []string `json:"-"` // ring buffer, not serialized
-	cancel            context.CancelFunc
-	cmd               *exec.Cmd
+	// Model is the model id reported by the first assistant event — used to
+	// pick a pricing table and for calibration after the run.
+	Model string `json:"model"`
+	// usageByMessage tracks the last-seen usage per message id so we can
+	// dedupe the repeated assistant events Claude Code emits while a single
+	// logical message streams. Not serialized; live-estimate only.
+	usageByMessage map[string]Usage
+	cancel         context.CancelFunc
+	cmd            *exec.Cmd
 }
 
 // Runner manages task execution — spawning agents and tracking running tasks.
@@ -561,17 +568,18 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	}
 
 	rt := &RunningTask{
-		TaskID:    t.ID,
-		Marker:    marker,
-		Title:     t.Title,
-		Manifest:  manifestTitle,
-		ProductID: scope.ProductID,
-		Agent:     t.Agent,
-		PID:       cmd.Process.Pid,
-		StartedAt: time.Now(),
-		Output:    make([]string, 0, 200),
-		cancel:    cancel,
-		cmd:       cmd,
+		TaskID:         t.ID,
+		Marker:         marker,
+		Title:          t.Title,
+		Manifest:       manifestTitle,
+		ProductID:      scope.ProductID,
+		Agent:          t.Agent,
+		PID:            cmd.Process.Pid,
+		StartedAt:      time.Now(),
+		Output:         make([]string, 0, 200),
+		usageByMessage: make(map[string]Usage),
+		cancel:         cancel,
+		cmd:            cmd,
 	}
 
 	r.mu.Lock()
@@ -714,22 +722,50 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				}
 			}
 
-			// Live cost tracking: each stream event may carry a cost field.
-			// We accept cumulative (total_cost_usd) directly and treat per-
-			// event cost_usd as an additive delta. Either way rt tracks the
-			// max seen so the mid-run cap has a monotonic value to compare.
+			// Live cost tracking.
+			//
+			// Real Claude Code stream-json only puts total_cost_usd on the
+			// terminal result event, so the cost cap would have nothing to
+			// read mid-run if we relied on it alone. Instead, each assistant
+			// event carries message.usage (input/output/cache tokens); we
+			// dedupe by message.id (Claude Code re-emits the same message as
+			// the response streams) and multiply by the model's calibrated
+			// rates. The authoritative total_cost_usd still wins when the
+			// result event arrives — it snaps rt.CumulativeCostUSD to the
+			// exact billed value before the run is recorded.
+			if event != nil {
+				if id, model, u, ok := parseAssistantUsage(event); ok {
+					if rt.Model == "" && model != "" {
+						rt.Model = model
+					}
+					if id != "" {
+						rt.usageByMessage[id] = u
+					}
+					var total Usage
+					for _, mu := range rt.usageByMessage {
+						total = total.Add(mu)
+					}
+					mult := r.store.GetModelMultiplier(rt.Model)
+					est := EstimateCost(rt.Model, mult, total)
+					if est > rt.CumulativeCostUSD {
+						rt.CumulativeCostUSD = est
+					}
+				}
+			}
+			// Still accept an authoritative total_cost_usd if the stream
+			// emits one (future Claude Code versions may send it earlier).
 			if c, ok := extractCostFromEvent(line); ok {
 				if c > rt.CumulativeCostUSD {
 					rt.CumulativeCostUSD = c
 				}
-				if maxCostCap > 0 && rt.CumulativeCostUSD > maxCostCap && !costCapExceeded {
-					costCapExceeded = true
-					slog.Warn("killing task: cost cap exceeded",
-						"component", "runner", "marker", marker,
-						"cap_usd", maxCostCap, "cost_usd", rt.CumulativeCostUSD)
-					if cmd.Process != nil {
-						_ = cmd.Process.Signal(syscall.SIGTERM)
-					}
+			}
+			if maxCostCap > 0 && rt.CumulativeCostUSD > maxCostCap && !costCapExceeded {
+				costCapExceeded = true
+				slog.Warn("killing task: cost cap exceeded",
+					"component", "runner", "marker", marker,
+					"cap_usd", maxCostCap, "cost_usd", rt.CumulativeCostUSD)
+				if cmd.Process != nil {
+					_ = cmd.Process.Signal(syscall.SIGTERM)
 				}
 			}
 
@@ -793,6 +829,25 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		costUSD, numTurns := ParseCostFromOutput(output)
 		if costUSD == 0 && rt.CumulativeCostUSD > 0 {
 			costUSD = rt.CumulativeCostUSD
+		}
+
+		// Calibrate model pricing from the authoritative final cost so the
+		// next run's live estimate is closer to reality. We use the result
+		// event's usage if present; otherwise fall back to the summed
+		// per-message usage we tracked during the run.
+		if costUSD > 0 {
+			var finalUsage Usage
+			if ru, ok := parseFinalResultUsage(output); ok {
+				finalUsage = ru
+			} else {
+				for _, mu := range rt.usageByMessage {
+					finalUsage = finalUsage.Add(mu)
+				}
+			}
+			if err := r.store.CalibrateModelPricing(rt.Model, costUSD, finalUsage); err != nil {
+				slog.Warn("calibrate model pricing failed", "component", "runner",
+					"marker", marker, "model", rt.Model, "error", err)
+			}
 		}
 
 		// Record the run with history — always use real status, not "scheduled"
