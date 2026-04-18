@@ -130,6 +130,8 @@ Twelve execution knobs — `max_parallel`, `max_turns`, `max_cost_usd`, `daily_b
 
 Storage: a single `settings` table with `(scope_type, scope_id, key)` primary key. The resolver walks task → linked manifests → product → system on every read, clamped by visceral rules. Nine HTTP endpoints (`/api/settings/...`) mirror the four MCP tools for dashboard use.
 
+📖 **[Full reference: all 12 knobs, types, ranges, and enforcement](docs/execution-controls.md)** — what each knob does, how the runner uses it, and which scope typically owns it.
+
 ## How It Works
 
 ```
