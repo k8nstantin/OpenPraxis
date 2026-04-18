@@ -483,13 +483,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// is the whole reason we keep the column.
 	agent := chooseAgent(t.Agent, knobs.DefaultAgent)
 
-	// max_turns: per-task column override wins over resolver (same rationale
-	// as agent). Once M4-T14 drops the column, this falls back to the
-	// resolved value alone.
-	maxTurns := t.MaxTurns
-	if maxTurns <= 0 {
-		maxTurns = knobs.MaxTurns
-	}
+	// max_turns: post-M4-T14, 100% resolver-driven. Legacy per-task column
+	// override (t.MaxTurns) was retired along with the tasks.max_turns
+	// column. Per-task overrides now live in the settings table at task
+	// scope and are already folded into knobs.MaxTurns by ResolveAll.
+	maxTurns := knobs.MaxTurns
 
 	args := []string{
 		"-p", prompt,

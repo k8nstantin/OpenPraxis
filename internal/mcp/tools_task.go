@@ -19,7 +19,7 @@ func (s *Server) registerTaskTools() {
 			mcplib.WithString("schedule", mcplib.Description("Schedule: 'once', '5m', '1h', 'at:ISO8601'. Default: once")),
 			mcplib.WithString("manifest_id", mcplib.Description("Manifest ID or marker to link task to (optional — omit for standalone task)")),
 			mcplib.WithString("agent", mcplib.Description("Agent type: claude-code, cursor, etc. Default: claude-code")),
-			mcplib.WithNumber("max_turns", mcplib.Description("Max agent turns. Default: 50")),
+			mcplib.WithNumber("max_turns", mcplib.Description("DEPRECATED (M4-T14): silently ignored with warn log. Set per-task max_turns via settings_set at task scope instead. Retained for backwards compatibility.")),
 			mcplib.WithString("depends_on", mcplib.Description("Task ID that must complete before this runs")),
 		),
 		s.handleTaskCreate,
@@ -106,8 +106,18 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 	schedule := argStr(a, "schedule")
 	manifestID := argStr(a, "manifest_id")
 	agent := argStr(a, "agent")
-	maxTurns := int(argFloat(a, "max_turns"))
 	dependsOn := argStr(a, "depends_on")
+
+	// M4-T14: max_turns on task_create is deprecated and silently ignored.
+	// Warn once per call so existing callers see it in logs and can migrate
+	// to settings_set at task scope.
+	if legacy := int(argFloat(a, "max_turns")); legacy > 0 {
+		slog.Warn("ignored deprecated max_turns arg on task_create; use settings_set at task scope",
+			"tool", "task_create",
+			"value", legacy,
+			"successor", "settings_set",
+			"retired_in", "M4-T14")
+	}
 
 	// Resolve manifest marker to full ID if provided
 	if manifestID != "" {
@@ -127,7 +137,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 		dependsOn = dep.ID
 	}
 
-	t, err := s.node.Tasks.Create(manifestID, title, description, schedule, agent, s.node.PeerID(), s.sessionSource(ctx), dependsOn, maxTurns)
+	t, err := s.node.Tasks.Create(manifestID, title, description, schedule, agent, s.node.PeerID(), s.sessionSource(ctx), dependsOn)
 	if err != nil {
 		return errResult("create task: %v", err), nil
 	}
@@ -144,8 +154,8 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 		manifestLabel = manifestID[:12]
 	}
 
-	return textResult(fmt.Sprintf("Task created [%s]: %s\nManifest: %s | Schedule: %s | Agent: %s | Max turns: %d",
-		t.Marker, t.Title, manifestLabel, t.Schedule, t.Agent, t.MaxTurns)), nil
+	return textResult(fmt.Sprintf("Task created [%s]: %s\nManifest: %s | Schedule: %s | Agent: %s",
+		t.Marker, t.Title, manifestLabel, t.Schedule, t.Agent)), nil
 }
 
 func (s *Server) handleTaskList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -241,7 +251,7 @@ func (s *Server) handleTaskGet(ctx context.Context, req mcplib.CallToolRequest) 
 	if t.DependsOn != "" {
 		output += fmt.Sprintf("Depends on: %s\n", t.DependsOn[:min(8, len(t.DependsOn))])
 	}
-	output += fmt.Sprintf("Runs: %d | Max turns: %d\n", t.RunCount, t.MaxTurns)
+	output += fmt.Sprintf("Runs: %d\n", t.RunCount)
 	output += fmt.Sprintf("Created: %s | Updated: %s\n", t.CreatedAt.Format("2006-01-02 15:04"), t.UpdatedAt.Format("2006-01-02 15:04"))
 	if t.LastRunAt != "" {
 		output += fmt.Sprintf("Last run: %s\n", t.LastRunAt)

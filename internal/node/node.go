@@ -109,6 +109,18 @@ func New(cfg *config.Config) (*Node, error) {
 	manifestSettingsAdapter := &manifest.SettingsAdapter{Store: manifestStore}
 	settingsResolver := settings.NewResolver(settingsStore, taskSettingsAdapter, manifestSettingsAdapter)
 
+	// M4-T14: one-time migration of legacy tasks.max_turns column values into
+	// settings rows at task scope, followed by dropping the column. Both are
+	// idempotent — the migration is gated by a marker row; the drop is a
+	// no-op when the column is already absent. Must run before any code
+	// path (scanTask, taskColumns) that assumes the column is gone.
+	if _, err := task.MigrateMaxTurnsToSettings(index.DB(), settingsStore); err != nil {
+		return nil, fmt.Errorf("migrate max_turns to settings: %w", err)
+	}
+	if err := task.DropMaxTurnsColumn(index.DB()); err != nil {
+		return nil, fmt.Errorf("drop max_turns column: %w", err)
+	}
+
 	embedder := embedding.NewEngine(cfg.Embedding.OllamaURL, cfg.Embedding.Model, cfg.Embedding.Dimension)
 
 	n := &Node{

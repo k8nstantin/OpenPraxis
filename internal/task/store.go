@@ -18,7 +18,6 @@ type Task struct {
 	Agent       string    `json:"agent"`      // agent type: claude-code, cursor, etc.
 	SourceNode  string    `json:"source_node"`
 	CreatedBy   string    `json:"created_by"` // session or dashboard
-	MaxTurns    int       `json:"max_turns"`  // max agent turns (default 100)
 	DependsOn   string    `json:"depends_on"`    // task ID that must complete before this runs
 	BlockReason string    `json:"block_reason"`  // reason task is blocked (e.g. manifest dependency)
 	RunCount    int       `json:"run_count"`
@@ -103,7 +102,12 @@ func (s *Store) init() error {
 		return err
 	}
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE tasks ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 50`)
+	// NOTE: max_turns column is retired in M4-T14. The migration routine
+	// (task.MigrateMaxTurnsToSettings + task.DropMaxTurnsColumn in
+	// node.New) copies prior column values into settings rows at task scope
+	// and then drops the column. No ADD COLUMN here — fresh installs never
+	// see the column, and upgrades have it removed before any Store query
+	// that references the new taskColumns list runs.
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE tasks ADD COLUMN block_reason TEXT NOT NULL DEFAULT ''`)
 	// Cross-process action signal: 'pause' | 'resume' | 'cancel'.
@@ -168,13 +172,13 @@ func (s *Store) init() error {
 }
 
 // taskColumns is the standard column list for task SELECT queries.
-const taskColumns = `id, manifest_id, title, description, schedule, status, agent, source_node, created_by, max_turns, depends_on, block_reason, run_count, last_run_at, next_run_at, last_output, created_at, updated_at`
+const taskColumns = `id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, run_count, last_run_at, next_run_at, last_output, created_at, updated_at`
 
 func scanTask(row *sql.Row) (*Task, error) {
 	var t Task
 	var createdStr, updatedStr string
 	err := row.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
-		&t.MaxTurns, &t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
+		&t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -195,7 +199,7 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		var t Task
 		var createdStr, updatedStr string
 		err := rows.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
-			&t.MaxTurns, &t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
+			&t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 		if err != nil {
 			return nil, err
 		}

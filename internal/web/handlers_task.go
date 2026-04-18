@@ -151,11 +151,21 @@ func apiTaskCreate(n *node.Node) http.HandlerFunc {
 			Description string `json:"description"`
 			Schedule    string `json:"schedule"`
 			Agent       string `json:"agent"`
-			MaxTurns    int    `json:"max_turns"`
-			DependsOn   string `json:"depends_on"`
+			// MaxTurns is accepted for backwards compatibility with legacy
+			// callers, silently ignored with a warn log (M4-T14). Per-task
+			// max_turns is now set via PUT /api/tasks/:id/settings.
+			MaxTurns  *int   `json:"max_turns,omitempty"`
+			DependsOn string `json:"depends_on"`
 		}
 		if !decodeBody(w, r, &req) {
 			return
+		}
+		if req.MaxTurns != nil {
+			slog.Warn("ignored deprecated max_turns field on POST /api/tasks; set per-task value via PUT /api/tasks/:id/settings",
+				"endpoint", "POST /api/tasks",
+				"value", *req.MaxTurns,
+				"successor", "PUT /api/tasks/:id/settings",
+				"retired_in", "M4-T14")
 		}
 		if req.Title == "" {
 			if req.ManifestID != "" {
@@ -165,7 +175,7 @@ func apiTaskCreate(n *node.Node) http.HandlerFunc {
 				return
 			}
 		}
-		t, err := n.Tasks.Create(req.ManifestID, req.Title, req.Description, req.Schedule, req.Agent, n.PeerID(), "dashboard", req.DependsOn, req.MaxTurns)
+		t, err := n.Tasks.Create(req.ManifestID, req.Title, req.Description, req.Schedule, req.Agent, n.PeerID(), "dashboard", req.DependsOn)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -196,22 +206,24 @@ func apiTaskUpdate(n *node.Node) http.HandlerFunc {
 		var req struct {
 			Title       *string `json:"title"`
 			Description *string `json:"description"`
-			MaxTurns    *int    `json:"max_turns"`
+			// MaxTurns is accepted for backwards compatibility with legacy
+			// callers, silently ignored with a warn log (M4-T14 retirement).
+			// Per-task max_turns lives in the settings table now; callers
+			// should use PUT /api/tasks/:id/settings.
+			MaxTurns *int `json:"max_turns,omitempty"`
 		}
 		if !decodeBody(w, r, &req) {
 			return
 		}
-		// Deprecation signal for the legacy max_turns-in-PATCH path. M4-T14
-		// retires this field; T13 adds the log so we can spot remaining
-		// callers in the wild before removal.
 		if req.MaxTurns != nil {
-			slog.Warn("deprecated max_turns field on PATCH /api/tasks/:id; use PUT /api/tasks/:id/settings instead",
+			slog.Warn("ignored deprecated max_turns field on PATCH /api/tasks/:id; use PUT /api/tasks/:id/settings instead",
 				"endpoint", "PATCH /api/tasks/:id",
 				"task_id", id,
+				"value", *req.MaxTurns,
 				"successor", "PUT /api/tasks/:id/settings",
-				"retires_in", "M4-T14")
+				"retired_in", "M4-T14")
 		}
-		t, err := n.Tasks.Update(id, req.Title, req.Description, req.MaxTurns)
+		t, err := n.Tasks.Update(id, req.Title, req.Description)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
