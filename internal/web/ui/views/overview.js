@@ -389,6 +389,7 @@
             '<span style="font-weight:500;font-size:13px;flex:1">' + esc(rt.title) + '</span>' +
             '<span class="badge type badge-sm">' + esc(rt.agent) + '</span>' +
             '<span style="font-size:12px;color:var(--text-muted)">' + rt.actions + ' actions</span>' +
+            '<span style="font-size:12px;color:var(--green);font-weight:500" title="Live cost — ticks up per turn; task terminates at max_cost_usd">$' + (rt.cumulative_cost_usd || 0).toFixed(2) + '</span>' +
             '<span style="font-size:12px;color:' + (rt.paused ? 'var(--yellow)' : 'var(--green)') + ';font-weight:500">' + (rt.paused ? 'PAUSED' : mins + 'm ' + secs + 's') + '</span>' +
             (rt.paused
               ? '<button class="btn-search" onclick="event.stopPropagation();OL.resumeTask(\'' + esc(rt.task_id) + '\')" style="font-size:11px;padding:3px 10px">Resume</button>'
