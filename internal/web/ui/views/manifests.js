@@ -6,9 +6,11 @@
     const el = document.getElementById('manifest-list');
     const searchInput = document.getElementById('manifest-search-input');
     const searchBtn = document.getElementById('manifest-search-btn');
+    const newBtn = document.getElementById('manifest-new-btn');
 
     searchBtn.onclick = () => searchManifests(searchInput.value);
     searchInput.onkeypress = (e) => { if (e.key === 'Enter') searchManifests(searchInput.value); };
+    if (newBtn) newBtn.onclick = () => OL.createManifest();
 
     try {
       var results = await Promise.all([
