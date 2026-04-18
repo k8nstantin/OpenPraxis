@@ -639,3 +639,65 @@ func TestHandleDeleteScopeSettings_UnknownKey_Returns400(t *testing.T) {
 		t.Errorf("error should mention unknown key, got %s", rec.Body.String())
 	}
 }
+
+// TestHandlePutScopeSettings_DailyBudgetVisceralClampViaHTTP mirrors
+// TestTool_SettingsSet_DailyBudgetOverVisceralCap_Rejected (the MCP-layer
+// check in internal/mcp/tools_settings_test.go) but drives it through the
+// HTTP scope-PUT handler. M2-T5 only proved the MCP surface; this proves the
+// HTTP surface inherits the same enforcement because both paths funnel into
+// mcp.DoSettingsSet. Regressing the HTTP author wrapper or the router wiring
+// would let a 500-dollar override leak past visceral rule #8.
+func TestHandlePutScopeSettings_DailyBudgetVisceralClampViaHTTP(t *testing.T) {
+	env := newSettingsTestEnv(t)
+	r := buildRouter(env, budgetRuleLoaderHTTP("$100"))
+
+	// Attempt to overwrite daily_budget_usd with a value five times the
+	// visceral-rule ceiling. Per M2-T6 the HTTP layer returns 200 with
+	// per-key failure so the dashboard can surface the warning inline,
+	// matching the pattern used by type-mismatch and unknown-key rejections.
+	body := []byte(`{"daily_budget_usd":500}`)
+	rec := doRequest(t, r, http.MethodPut, "/api/products/p1/settings", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (per-key results carry the rejection), got %d body=%s",
+			rec.Code, rec.Body.String())
+	}
+	var got putResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Results) != 1 {
+		t.Fatalf("expected exactly 1 result, got %d", len(got.Results))
+	}
+	res := got.Results[0]
+	if res.Key != "daily_budget_usd" {
+		t.Errorf("result key: got %q want daily_budget_usd", res.Key)
+	}
+	if res.OK {
+		t.Errorf("expected ok=false for visceral-cap violation, got %+v", res)
+	}
+	if !strings.Contains(res.Error, "Visceral rule") {
+		t.Errorf("error should mention Visceral rule, got %q", res.Error)
+	}
+
+	// Persistence check: the cap must hard-block the write, not merely warn.
+	if _, err := env.store.Get(context.Background(), settings.ScopeProduct, "p1", "daily_budget_usd"); err == nil {
+		t.Errorf("daily_budget_usd leaked past visceral cap (should still be unset)")
+	}
+
+	// A value AT the cap must pass — confirms the clamp rejects only excess.
+	body = []byte(`{"daily_budget_usd":100}`)
+	rec = doRequest(t, r, http.MethodPut, "/api/products/p1/settings", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("at-cap write: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var okResp putResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &okResp); err != nil {
+		t.Fatalf("decode at-cap: %v", err)
+	}
+	if len(okResp.Results) != 1 || !okResp.Results[0].OK {
+		t.Fatalf("at-cap write should succeed, got %+v", okResp.Results)
+	}
+	if _, err := env.store.Get(context.Background(), settings.ScopeProduct, "p1", "daily_budget_usd"); err != nil {
+		t.Errorf("at-cap write should persist: %v", err)
+	}
+}

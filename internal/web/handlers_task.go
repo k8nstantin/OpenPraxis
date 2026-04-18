@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -199,6 +200,16 @@ func apiTaskUpdate(n *node.Node) http.HandlerFunc {
 		}
 		if !decodeBody(w, r, &req) {
 			return
+		}
+		// Deprecation signal for the legacy max_turns-in-PATCH path. M4-T14
+		// retires this field; T13 adds the log so we can spot remaining
+		// callers in the wild before removal.
+		if req.MaxTurns != nil {
+			slog.Warn("deprecated max_turns field on PATCH /api/tasks/:id; use PUT /api/tasks/:id/settings instead",
+				"endpoint", "PATCH /api/tasks/:id",
+				"task_id", id,
+				"successor", "PUT /api/tasks/:id/settings",
+				"retires_in", "M4-T14")
 		}
 		t, err := n.Tasks.Update(id, req.Title, req.Description, req.MaxTurns)
 		if err != nil {
