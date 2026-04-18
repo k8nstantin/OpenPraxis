@@ -10,6 +10,38 @@
 
 OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
 
+## Table of contents
+
+- [See it in action](#see-it-in-action)
+  - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
+  - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
+  - [Products → Manifests → Tasks — every cost and every turn rolls up](#products--manifests--tasks--every-cost-and-every-turn-rolls-up)
+  - [Visualize the plan — interactive DAG, status-colored](#visualize-the-plan--interactive-dag-status-colored)
+  - [Every conversation, every tool call, every visceral-rule ack — searchable forever](#every-conversation-every-tool-call-every-visceral-rule-ack--searchable-forever)
+  - [Independent evaluation — three gates an agent can't override](#independent-evaluation--three-gates-an-agent-cant-override)
+  - [Hierarchical execution controls — budgets, turns, and agent knobs that inherit](#hierarchical-execution-controls--budgets-turns-and-agent-knobs-that-inherit)
+- [How It Works](#how-it-works)
+  - [The Workflow](#the-workflow)
+- [Architecture](#architecture)
+- [Key Concepts](#key-concepts)
+  - [Products](#products) · [Manifests (Specs)](#manifests-specs) · [Tasks (Autonomous Execution)](#tasks-autonomous-execution) · [Watcher (Independent Auditor)](#watcher-independent-auditor)
+  - [Ideas](#ideas) · [Memories](#memories) · [Visceral Rules](#visceral-rules) · [Conversations](#conversations) · [Chat](#chat)
+- [Dashboard (16 Tabs)](#dashboard-16-tabs)
+- [MCP Tools (44+)](#mcp-tools-44)
+- [Quick Start](#quick-start)
+  - [Prerequisites](#prerequisites) · [Build and Run](#build-and-run) · [Connect to Claude Code](#connect-to-claude-code) · [Dashboard](#dashboard)
+- [Stats](#stats)
+- [Database](#database)
+- [Project Structure](#project-structure)
+- [Hooks](#hooks)
+- [Peer Sync](#peer-sync)
+- [Configuration](#configuration)
+- [Mobile App](#mobile-app)
+- [License](#license)
+
+**Deeper references:**
+- [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
+
 ## See it in action
 
 Most agent tools hand you a black box: you push "run", hope for the best, and find out what happened when the monthly bill lands. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and has the final say on "done."
