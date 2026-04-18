@@ -1,6 +1,34 @@
 # Hierarchical Execution Controls
 
-Twelve knobs that govern how autonomous agent tasks run — cost, concurrency, model behaviour, agent selection, tool access. Each knob is configurable at four scopes, inherited top-down, and resolved fresh at execution time.
+Autonomous coding agents don't fail uniformly. A polish task needs 30 turns and $0.50; a migration needs three hours and $30. A read-only audit must never call `Edit`; a feature build lives or dies by it. A single global "max turns" slider can't encode any of that — so OpenPraxis doesn't offer one.
+
+Instead: **twelve execution knobs**, each configurable at **four scopes** (`task → manifest → product → system`), inherited top-down, resolved fresh at execution time. Set a budget once on the product and every task under it inherits. Crank `max_turns` for one stubborn refactor without touching any sibling. Narrow `allowed_tools` on an audit manifest and every task it spawns is read-only by construction — not by the agent's goodwill.
+
+This document is the full reference: the inheritance model, the save/clamp/cap semantics, every knob with what it does, how the runner enforces it, its type and bounds, and the scope it typically lives at. The underlying tables, HTTP endpoints, and MCP tools are at the bottom so agents and dashboards can read these values programmatically.
+
+## Table of contents
+
+- [Inheritance model](#inheritance-model)
+- [Save semantics](#save-semantics)
+- [Visceral-rule caps](#visceral-rule-caps)
+- [The twelve knobs](#the-twelve-knobs)
+  - [1. `max_parallel`](#1-max_parallel)
+  - [2. `max_turns`](#2-max_turns)
+  - [3. `max_cost_usd`](#3-max_cost_usd)
+  - [4. `daily_budget_usd`](#4-daily_budget_usd)
+  - [5. `timeout_minutes`](#5-timeout_minutes)
+  - [6. `temperature`](#6-temperature)
+  - [7. `reasoning_effort`](#7-reasoning_effort)
+  - [8. `default_agent`](#8-default_agent)
+  - [9. `default_model`](#9-default_model)
+  - [10. `retry_on_failure`](#10-retry_on_failure)
+  - [11. `approval_mode`](#11-approval_mode)
+  - [12. `allowed_tools`](#12-allowed_tools)
+- [Reading values programmatically](#reading-values-programmatically)
+  - [From a coding agent (MCP)](#from-a-coding-agent-mcp)
+  - [From the dashboard (HTTP)](#from-the-dashboard-http)
+  - [Database](#database)
+- [Why this matters](#why-this-matters)
 
 ## Inheritance model
 
