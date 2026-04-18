@@ -290,8 +290,6 @@
             <span>Agent: <strong style="color:var(--text-primary)">${esc(t.agent)}</strong></span>
             <span>Branch: <strong style="color:var(--text-primary)">openpraxis/${esc(t.marker)}</strong></span>
             ${t.manifest_id ? `<span>Manifest: <span class="manifest-nav" style="cursor:pointer;color:var(--accent);text-decoration:underline;font-weight:600" data-mid="${esc(t.manifest_id)}">${esc(t.manifest_id.substring(0,12))} &#x2192;</span></span>` : '<span>standalone</span>'}
-            <span class="separator">|</span>
-            <span style="display:flex;align-items:center;gap:6px">Max turns: <input type="range" id="task-max-turns" value="${t.max_turns || 100}" min="10" max="500" step="10" style="width:100px;accent-color:var(--accent);cursor:pointer" oninput="document.getElementById('task-max-turns-val').textContent=this.value" onchange="OL.updateMaxTurns('${esc(t.id)}',this.value)" /><strong id="task-max-turns-val" style="color:var(--text-primary);min-width:28px">${t.max_turns || 100}</strong></span>
             ${t.last_run_at ? `<span class="separator">|</span><span>Last: ${new Date(t.last_run_at).toLocaleString()}</span>` : ''}
             <span>Created: ${new Date(t.created_at).toLocaleString()}</span>
           </div>
@@ -412,7 +410,8 @@
             </div>
           </div>
 
-          <!-- META INFO (now in header above) -->
+          <!-- EXECUTION CONTROLS -->
+          <div id="task-knobs-mount" style="margin-top:16px"></div>
 
           <!-- 5. LIVE OUTPUT (if running/paused) -->
           ${isRunningOrPaused ? `
@@ -451,6 +450,11 @@
           </div>
         </div>
       `;
+
+      const knobMount = document.getElementById('task-knobs-mount');
+      if (knobMount && OL.renderKnobSection) {
+        OL.renderKnobSection(knobMount, { type: 'task', id: t.id });
+      }
 
       // Manifest cross-link — fetch title + wire click
       bodyEl.querySelectorAll('.manifest-nav').forEach(el => {
@@ -789,17 +793,6 @@
     await fetch('/api/tasks/' + id + '/' + action, {method: 'POST'});
     OL.loadTaskDetail(id);
     OL.loadTasks();
-  };
-
-  // Re-run now (uses existing schedule)
-  OL.updateMaxTurns = async function(id, val) {
-    const maxTurns = parseInt(val);
-    if (!maxTurns || maxTurns < 1) return;
-    await fetch('/api/tasks/' + id, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({max_turns: maxTurns})
-    });
   };
 
   OL.taskStart = async function(id) {
