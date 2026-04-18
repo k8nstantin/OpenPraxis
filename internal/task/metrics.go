@@ -266,6 +266,32 @@ func (s *Store) GetCostTrendSummary(agent string) (*CostTrendSummary, error) {
 	return &ts, nil
 }
 
+// SumCostSince returns the total cost_usd spent across task_runs whose tasks
+// belong to the given product (via tasks.manifest_id → manifests.project_id)
+// since the supplied timestamp. Used by the runner's daily-budget pre-spawn
+// check: the runtime sums all runs on/after start-of-day UTC and refuses to
+// spawn another when a per-product daily cap has already been hit.
+//
+// An empty productID returns 0 — standalone tasks (no manifest/product) have
+// no product-level budget to enforce. This is a feature: the daily-budget
+// knob is defined at product scope and nowhere else in the catalog.
+func (s *Store) SumCostSince(productID string, since time.Time) (float64, error) {
+	if productID == "" {
+		return 0, nil
+	}
+	var total float64
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(tr.cost_usd), 0)
+		FROM task_runs tr
+		JOIN tasks t ON tr.task_id = t.id
+		JOIN manifests m ON t.manifest_id = m.id
+		WHERE m.project_id = ? AND tr.started_at >= ?`,
+		productID, since.UTC().Format(time.RFC3339)).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum cost since: %w", err)
+	}
+	return total, nil
+}
+
 // TodayCost returns the total cost and turns for today from task_runs.
 func (s *Store) TodayCost() (cost float64, turns int, taskCount int, err error) {
 	today := time.Now().UTC().Format("2006-01-02")

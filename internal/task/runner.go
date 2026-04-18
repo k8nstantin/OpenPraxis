@@ -32,17 +32,23 @@ type RunningTask struct {
 	Actions   int       `json:"actions"`
 	Lines     int       `json:"lines"`
 	LastLine  string    `json:"last_line"`
-	Output    []string  `json:"-"` // ring buffer, not serialized
-	cancel    context.CancelFunc
-	cmd       *exec.Cmd
+	// CumulativeCostUSD tracks running cost parsed from stream-json events.
+	// Updated by the reader goroutine as each event arrives so the mid-run
+	// cost cap has a live value to compare against.
+	CumulativeCostUSD float64  `json:"cumulative_cost_usd"`
+	Output            []string `json:"-"` // ring buffer, not serialized
+	cancel            context.CancelFunc
+	cmd               *exec.Cmd
 }
 
 // Runner manages task execution — spawning agents and tracking running tasks.
 //
-// The max_parallel dispatch cap is resolved per-task at Execute time via the
-// settings Resolver: it walks task → manifest → product → system so two
-// products can have different caps. Standalone tasks (no manifest/product)
-// fall through to the catalog system default.
+// Every knob that shapes a task's execution (max_parallel, max_turns, timeout,
+// model, agent, temperature, reasoning_effort, max_cost_usd, daily_budget_usd,
+// retry_on_failure, approval_mode, allowed_tools) is resolved per-task at
+// Execute time via the settings Resolver: it walks task → manifest → product
+// → system so two products can have different caps. Standalone tasks (no
+// manifest/product) fall through to the catalog system defaults.
 type Runner struct {
 	store    *Store
 	actions  *action.Store
@@ -50,10 +56,14 @@ type Runner struct {
 	running  map[string]*RunningTask
 	mu       sync.RWMutex
 	onEvent  func(event string, data map[string]string) // broadcast callback
+
+	// warnOnce guards per-Runner log-once semantics for unsupported agent
+	// flags (e.g. --temperature on Claude Code). Keyed by "<agent>:<knob>".
+	warnOnce sync.Map
 }
 
-// NewRunner creates a task runner. The resolver is required — dispatch caps
-// are looked up through it on every Execute call.
+// NewRunner creates a task runner. The resolver is required — every knob that
+// shapes task execution is looked up through it on every Execute call.
 func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, onEvent func(string, map[string]string)) *Runner {
 	return &Runner{
 		store:    store,
@@ -144,31 +154,70 @@ func resolvedInt(v interface{}) (int, error) {
 	return 0, fmt.Errorf("expected int value, got %T", v)
 }
 
-// Execute spawns an autonomous agent for a task.
-func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules string) error {
-	if r.IsRunning(t.ID) {
-		return fmt.Errorf("task already running")
+// resolvedFloat mirrors resolvedInt for float knobs (max_cost_usd,
+// daily_budget_usd, temperature). Same resolver-decode vs system-default type
+// asymmetry applies — the resolver returns float64 for explicit rows but
+// catalog defaults may be typed as int in source. Defensive coercion keeps
+// callers from panicking on a future catalog change.
+func resolvedFloat(v interface{}) (float64, error) {
+	switch n := v.(type) {
+	case float64:
+		return n, nil
+	case float32:
+		return float64(n), nil
+	case int:
+		return float64(n), nil
+	case int64:
+		return float64(n), nil
 	}
+	return 0, fmt.Errorf("expected float value, got %T", v)
+}
 
-	// Resolve per-product cap via the settings walker. Runs BEFORE we spawn
-	// so a cap breach returns an error instead of starting a process we'd
-	// immediately have to kill. A background context is fine — the lookups
-	// are cheap and the task's own context is built below.
-	scope, cap, err := r.resolveMaxParallel(context.Background(), t.ID)
-	if err != nil {
-		return err
+// resolvedStr pulls a string out of a resolver Value. Used for string/enum
+// knobs (default_agent, default_model, reasoning_effort, approval_mode).
+// Empty string is a valid value — callers distinguish "not set" from "" via
+// the Resolved.Source field, not the value itself.
+func resolvedStr(v interface{}) (string, error) {
+	if v == nil {
+		return "", nil
 	}
-	if r.RunningCountForProduct(scope.ProductID) >= cap {
-		return fmt.Errorf("max parallel tasks reached for product %s (%d)", scope.ProductID, cap)
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("expected string value, got %T", v)
 	}
+	return s, nil
+}
 
-	// Build the prompt
-	prompt := buildPrompt(t, manifestTitle, manifestContent, visceralRules)
+// resolvedStrSlice decodes a multiselect knob (currently just allowed_tools)
+// into []string. The resolver's decodeMultiselect already produces []string
+// for explicit rows, but catalog defaults are typed []string in source too —
+// accept both plus []interface{} for defensive symmetry.
+func resolvedStrSlice(v interface{}) ([]string, error) {
+	switch x := v.(type) {
+	case []string:
+		return x, nil
+	case []interface{}:
+		out := make([]string, 0, len(x))
+		for i, item := range x {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected []string at index %d, got %T", i, item)
+			}
+			out = append(out, s)
+		}
+		return out, nil
+	case nil:
+		return nil, nil
+	}
+	return nil, fmt.Errorf("expected []string value, got %T", v)
+}
 
-	// Build allowed tools list — OpenPraxis MCP tools + standard tools.
-	// settings_set is deliberately NOT allowlisted: agents should consult their
-	// own budgets via settings_get/resolve but must not mutate them mid-run.
-	allowedTools := []string{
+// defaultAllowedTools is the baseline tool allowlist used when the resolver
+// returns an empty slice. Mirrors the original hardcoded list plus the core
+// Bash/Read/Write/Edit/Glob/Grep file tools — any narrowing happens by
+// setting allowed_tools at product/manifest/task scope, not here.
+func defaultAllowedTools() []string {
+	return []string{
 		"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 		"mcp__openpraxis__memory_store",
 		"mcp__openpraxis__memory_search",
@@ -181,12 +230,268 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		"mcp__openpraxis__settings_resolve",
 		"mcp__openpraxis__settings_catalog",
 	}
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+// warnUnsupported logs a one-time warning per (agent, knob) pair when the
+// resolved value asks for a knob the agent CLI does not support. Keeps the
+// logs readable — without the guard a chatty task would spam one warning per
+// dispatch.
+func (r *Runner) warnUnsupported(agent, knob string, value interface{}) {
+	key := agent + ":" + knob
+	if _, loaded := r.warnOnce.LoadOrStore(key, struct{}{}); loaded {
+		return
+	}
+	slog.Warn("agent does not support knob, skipping",
+		"component", "runner", "agent", agent, "knob", knob, "value", value)
+}
 
+// runtimeKnobs is the decoded form of resolver.ResolveAll output used by the
+// runner. Keeping it in a struct instead of reaching into the map on every
+// line in Execute makes the flow above readable and keeps each knob's fallback
+// semantics localized in decodeRuntimeKnobs.
+type runtimeKnobs struct {
+	MaxTurns        int
+	TimeoutMinutes  int
+	DefaultAgent    string
+	DefaultModel    string
+	Temperature     float64
+	ReasoningEffort string
+	MaxCostUSD      float64
+	DailyBudget     float64
+	RetryOnFailure  int
+	ApprovalMode    string
+	AllowedTools    []string
+}
+
+// decodeRuntimeKnobs pulls the 11 execution-shaping knobs out of a
+// resolver.ResolveAll map, applying the defensive coercion helpers so any
+// catalog-or-storage type drift surfaces as a wrapped error rather than a
+// panic. max_parallel is intentionally absent — it is resolved separately by
+// resolveMaxParallel before this function runs.
+func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) {
+	var k runtimeKnobs
+	var err error
+
+	if k.MaxTurns, err = resolvedInt(all["max_turns"].Value); err != nil {
+		return k, fmt.Errorf("max_turns: %w", err)
+	}
+	if k.TimeoutMinutes, err = resolvedInt(all["timeout_minutes"].Value); err != nil {
+		return k, fmt.Errorf("timeout_minutes: %w", err)
+	}
+	if k.DefaultAgent, err = resolvedStr(all["default_agent"].Value); err != nil {
+		return k, fmt.Errorf("default_agent: %w", err)
+	}
+	if k.DefaultModel, err = resolvedStr(all["default_model"].Value); err != nil {
+		return k, fmt.Errorf("default_model: %w", err)
+	}
+	if k.Temperature, err = resolvedFloat(all["temperature"].Value); err != nil {
+		return k, fmt.Errorf("temperature: %w", err)
+	}
+	if k.ReasoningEffort, err = resolvedStr(all["reasoning_effort"].Value); err != nil {
+		return k, fmt.Errorf("reasoning_effort: %w", err)
+	}
+	if k.MaxCostUSD, err = resolvedFloat(all["max_cost_usd"].Value); err != nil {
+		return k, fmt.Errorf("max_cost_usd: %w", err)
+	}
+	if k.DailyBudget, err = resolvedFloat(all["daily_budget_usd"].Value); err != nil {
+		return k, fmt.Errorf("daily_budget_usd: %w", err)
+	}
+	if k.RetryOnFailure, err = resolvedInt(all["retry_on_failure"].Value); err != nil {
+		return k, fmt.Errorf("retry_on_failure: %w", err)
+	}
+	if k.ApprovalMode, err = resolvedStr(all["approval_mode"].Value); err != nil {
+		return k, fmt.Errorf("approval_mode: %w", err)
+	}
+	if k.AllowedTools, err = resolvedStrSlice(all["allowed_tools"].Value); err != nil {
+		return k, fmt.Errorf("allowed_tools: %w", err)
+	}
+	return k, nil
+}
+
+// retryCountKey is the settings-table key under which the runner persists the
+// number of retries already attempted for a task. Underscore prefix marks it
+// as internal runtime state (not a user-configurable knob in the catalog) —
+// the same convention used elsewhere in the repo for private keys.
+const retryCountKey = "_retry_count"
+
+// getRetryCount reads the persisted retry counter for a task from the
+// settings table. Missing rows return 0. Parse errors are logged and treated
+// as 0 — a corrupted counter should not block a retry.
+func (r *Runner) getRetryCount(ctx context.Context, taskID string) int {
+	if r.resolver == nil || r.resolver.Store() == nil {
+		return 0
+	}
+	entry, err := r.resolver.Store().Get(ctx, settings.ScopeTask, taskID, retryCountKey)
+	if err != nil {
+		return 0
+	}
+	var n int
+	if uerr := json.Unmarshal([]byte(entry.Value), &n); uerr != nil {
+		slog.Warn("decode retry count failed, treating as 0",
+			"component", "runner", "task_id", taskID, "raw", entry.Value, "error", uerr)
+		return 0
+	}
+	return n
+}
+
+// setRetryCount persists the retry counter for a task. Non-fatal — failure
+// to persist just means a restart could reset the counter, which is a minor
+// edge case the retry cap naturally bounds.
+func (r *Runner) setRetryCount(ctx context.Context, taskID string, n int) {
+	if r.resolver == nil || r.resolver.Store() == nil {
+		return
+	}
+	raw, err := json.Marshal(n)
+	if err != nil {
+		slog.Warn("encode retry count failed", "component", "runner", "task_id", taskID, "error", err)
+		return
+	}
+	if err := r.resolver.Store().Set(ctx, settings.ScopeTask, taskID, retryCountKey, string(raw), "runner"); err != nil {
+		slog.Warn("persist retry count failed", "component", "runner", "task_id", taskID, "error", err)
+	}
+}
+
+// chooseAgent picks the agent CLI to spawn. Per-task override (t.Agent) wins
+// over the resolved default so power users can pin a single task to a
+// different runtime without mutating product/manifest scope. Extracted so
+// the override rule is unit-testable without spawning a process.
+func chooseAgent(taskAgent, resolvedDefault string) string {
+	if taskAgent != "" {
+		return taskAgent
+	}
+	return resolvedDefault
+}
+
+// shouldRetry answers whether the runner should requeue a completed run.
+// Extracted from Execute's post-Wait block so all three retry-decision inputs
+// (status, reason, attempts-so-far) are testable in isolation.
+func shouldRetry(status, reason string, attempts, cap int) bool {
+	if status != "failed" {
+		return false
+	}
+	if cap <= 0 || attempts >= cap {
+		return false
+	}
+	return isTransientFailure(reason)
+}
+
+// isTransientFailure classifies a run's terminal reason. Transient failures
+// (process crash, timeout, build/test failure) are eligible for retry because
+// a rerun might succeed; non-transient ones (max_turns exhausted, deliverable
+// missing) won't improve with a rerun and would just burn cost.
+func isTransientFailure(reason string) bool {
+	switch reason {
+	case "max_turns", "deliverable_missing", "cost_cap", "daily_budget":
+		return false
+	case "timeout", "build_fail", "process_error":
+		return true
+	default:
+		// Unknown reasons: default to transient. Better to retry once than
+		// to silently swallow a failure that the user expected to auto-heal.
+		return true
+	}
+}
+
+// extractCostFromEvent pulls total_cost_usd or cost_usd from a single
+// stream-json line. Returns (cost, true) if found, (0, false) otherwise.
+// Used in the mid-run cost-tracking loop — we want to accumulate as cost is
+// reported rather than waiting for the terminal result event.
+func extractCostFromEvent(line string) (float64, bool) {
+	var event struct {
+		TotalCostUSD float64 `json:"total_cost_usd"`
+		CostUSD      float64 `json:"cost_usd"`
+	}
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return 0, false
+	}
+	if event.TotalCostUSD > 0 {
+		return event.TotalCostUSD, true
+	}
+	if event.CostUSD > 0 {
+		return event.CostUSD, true
+	}
+	return 0, false
+}
+
+// Execute spawns an autonomous agent for a task.
+func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules string) error {
+	if r.IsRunning(t.ID) {
+		return fmt.Errorf("task already running")
+	}
+
+	// Resolve per-product cap via the settings walker. Runs BEFORE we spawn
+	// so a cap breach returns an error instead of starting a process we'd
+	// immediately have to kill. A background context is fine — the lookups
+	// are cheap and the task's own context is built below.
+	bgCtx := context.Background()
+	scope, maxPar, err := r.resolveMaxParallel(bgCtx, t.ID)
+	if err != nil {
+		return err
+	}
+	if r.RunningCountForProduct(scope.ProductID) >= maxPar {
+		return fmt.Errorf("max parallel tasks reached for product %s (%d)", scope.ProductID, maxPar)
+	}
+
+	// Resolve every other knob in one DB query round-trip. Scope was already
+	// normalized by resolveMaxParallel, so ResolveAll runs three ListScope
+	// queries max regardless of catalog size.
+	all, err := r.resolver.ResolveAll(bgCtx, scope)
+	if err != nil {
+		return fmt.Errorf("resolve knobs: %w", err)
+	}
+
+	knobs, err := decodeRuntimeKnobs(all)
+	if err != nil {
+		return fmt.Errorf("decode knobs: %w", err)
+	}
+
+	// Pre-spawn daily-budget check: per-product cumulative cost since
+	// start-of-day UTC. If already over the cap, refuse to spawn at all —
+	// costs the current run zero and surfaces the block to the scheduler.
+	if knobs.DailyBudget > 0 && scope.ProductID != "" {
+		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
+		spent, sumErr := r.store.SumCostSince(scope.ProductID, startOfDay)
+		if sumErr != nil {
+			slog.Warn("daily budget lookup failed, allowing dispatch",
+				"component", "runner", "product_id", scope.ProductID, "error", sumErr)
+		} else if spent >= knobs.DailyBudget {
+			return fmt.Errorf("daily budget exceeded for product %s: $%.2f >= $%.2f", scope.ProductID, spent, knobs.DailyBudget)
+		}
+	}
+
+	// Build the prompt
+	prompt := buildPrompt(t, manifestTitle, manifestContent, visceralRules)
+
+	// Allowed tools: catalog-resolved list wins over the baseline. Empty
+	// resolution (no catalog default set) falls back to defaultAllowedTools
+	// so existing tasks keep working without an explicit multiselect row.
+	allowedTools := knobs.AllowedTools
+	if len(allowedTools) == 0 {
+		allowedTools = defaultAllowedTools()
+	}
+
+	// Wall-clock timeout now sourced from the resolver (minutes → Duration).
+	// The <=0 belt exists for defence-in-depth against a future catalog
+	// change that accidentally sets the default to 0; the v1 catalog default
+	// is 30. Clean this up in M4-T13 once all knobs have enforced positive
+	// defaults at the schema layer.
+	timeout := time.Duration(knobs.TimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(bgCtx, timeout)
+
+	// Per-task override on Agent still beats the resolved default: letting a
+	// user pin a specific task to e.g. "codex" without mutating scope config
+	// is the whole reason we keep the column.
+	agent := chooseAgent(t.Agent, knobs.DefaultAgent)
+
+	// max_turns: per-task column override wins over resolver (same rationale
+	// as agent). Once M4-T14 drops the column, this falls back to the
+	// resolved value alone.
 	maxTurns := t.MaxTurns
 	if maxTurns <= 0 {
-		maxTurns = 50
+		maxTurns = knobs.MaxTurns
 	}
 
 	args := []string{
@@ -195,6 +500,52 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		"--verbose",
 		"--max-turns", fmt.Sprintf("%d", maxTurns),
 		"--allowedTools", strings.Join(allowedTools, ","),
+	}
+
+	// Pass --model when the resolver yields a non-empty model id. Empty
+	// default leaves the agent on its own default model.
+	if knobs.DefaultModel != "" {
+		args = append(args, "--model", knobs.DefaultModel)
+	}
+
+	// max_cost_usd: Claude Code supports --max-budget-usd natively, which
+	// gives us process-side enforcement in addition to the stream-loop
+	// fallback below. Only pass when > 0 so "no cap" stays the default.
+	if knobs.MaxCostUSD > 0 && agent == "claude-code" {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", knobs.MaxCostUSD))
+	}
+
+	// reasoning_effort: map catalog values (minimal/low/medium/high) onto
+	// Claude's --effort values (low/medium/high/xhigh/max). "minimal" has
+	// no Claude equivalent and is skipped with a one-time warning.
+	if agent == "claude-code" {
+		switch knobs.ReasoningEffort {
+		case "low", "medium", "high":
+			args = append(args, "--effort", knobs.ReasoningEffort)
+		case "minimal":
+			r.warnUnsupported(agent, "reasoning_effort=minimal", knobs.ReasoningEffort)
+		case "":
+			// no-op: system default already handled by agent
+		default:
+			r.warnUnsupported(agent, "reasoning_effort", knobs.ReasoningEffort)
+		}
+	} else if knobs.ReasoningEffort != "" {
+		r.warnUnsupported(agent, "reasoning_effort", knobs.ReasoningEffort)
+	}
+
+	// temperature: Claude Code does not expose a --temperature flag. Warn
+	// once per runner instance when a non-default value is configured so
+	// operators know their knob is inert.
+	if knobs.Temperature > 0 && knobs.Temperature != 0.2 {
+		r.warnUnsupported(agent, "temperature", knobs.Temperature)
+	}
+
+	// approval_mode: Claude Code's --permission-mode has a different value
+	// space (acceptEdits/auto/bypassPermissions/default/dontAsk/plan) than
+	// the catalog (auto/manual/on-failure). "auto" preserves current
+	// behavior (no flag, runs unattended under -p); other values warn.
+	if knobs.ApprovalMode != "" && knobs.ApprovalMode != "auto" {
+		r.warnUnsupported(agent, "approval_mode", knobs.ApprovalMode)
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -250,6 +601,8 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	slog.Info("task started", "component", "runner", "marker", marker, "title", t.Title, "pid", cmd.Process.Pid)
 
 	// Read output in background
+	maxCostCap := knobs.MaxCostUSD
+	retryCap := knobs.RetryOnFailure
 	go func() {
 		defer func() {
 			r.mu.Lock()
@@ -268,6 +621,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 		// Track pending tool_use blocks to pair with tool_result
 		pendingTools := make(map[string]pendingToolCall) // keyed by tool_use ID
+
+		// costCapExceeded is set when the mid-run kill fires. The post-Wait
+		// classification uses it to pick the correct failure reason and
+		// suppress retry (cost-cap hits are non-transient).
+		var costCapExceeded bool
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -361,6 +719,25 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				}
 			}
 
+			// Live cost tracking: each stream event may carry a cost field.
+			// We accept cumulative (total_cost_usd) directly and treat per-
+			// event cost_usd as an additive delta. Either way rt tracks the
+			// max seen so the mid-run cap has a monotonic value to compare.
+			if c, ok := extractCostFromEvent(line); ok {
+				if c > rt.CumulativeCostUSD {
+					rt.CumulativeCostUSD = c
+				}
+				if maxCostCap > 0 && rt.CumulativeCostUSD > maxCostCap && !costCapExceeded {
+					costCapExceeded = true
+					slog.Warn("killing task: cost cap exceeded",
+						"component", "runner", "marker", marker,
+						"cap_usd", maxCostCap, "cost_usd", rt.CumulativeCostUSD)
+					if cmd.Process != nil {
+						_ = cmd.Process.Signal(syscall.SIGTERM)
+					}
+				}
+			}
+
 			// Broadcast progress
 			if rt.Lines%5 == 0 && r.onEvent != nil {
 				r.onEvent("task_progress", map[string]string{
@@ -377,38 +754,89 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		}
 
 		// Wait for process to finish
-		err := cmd.Wait()
+		waitErr := cmd.Wait()
 		output := allOutput.String()
 
-		status := "completed"
-		if err != nil {
-			// Check if the result JSON contains terminal_reason: "max_turns"
-			if detectMaxTurns(output) {
-				status = "completed"
-				slog.Info("task hit max turns limit", "component", "runner", "marker", marker, "actions", rt.Actions, "lines", rt.Lines)
-			} else {
-				status = "failed"
-				slog.Error("task failed", "component", "runner", "marker", marker, "error", err)
-			}
-		} else {
-			// Also check completed output — some versions don't error on max_turns
-			if detectMaxTurns(output) {
-				status = "completed"
-				slog.Info("task hit max turns limit", "component", "runner", "marker", marker, "actions", rt.Actions, "lines", rt.Lines)
-			} else {
-				slog.Info("task completed", "component", "runner", "marker", marker, "actions", rt.Actions, "lines", rt.Lines)
-			}
+		// Classify the outcome. Reason drives both the recorded run status
+		// and whether retry fires. Order matters: cost-cap overrides a
+		// max_turns/timeout detection because the kill happened first.
+		var (
+			status string
+			reason string
+		)
+		switch {
+		case costCapExceeded:
+			status = "failed"
+			reason = "cost_cap"
+			slog.Warn("task stopped by cost cap", "component", "runner", "marker", marker,
+				"actions", rt.Actions, "lines", rt.Lines, "cost_usd", rt.CumulativeCostUSD)
+		case detectMaxTurns(output):
+			status = "completed"
+			reason = "max_turns"
+			slog.Info("task hit max turns limit", "component", "runner", "marker", marker,
+				"actions", rt.Actions, "lines", rt.Lines)
+		case ctx.Err() == context.DeadlineExceeded:
+			status = "failed"
+			reason = "timeout"
+			slog.Error("task timed out", "component", "runner", "marker", marker,
+				"actions", rt.Actions, "lines", rt.Lines)
+		case waitErr != nil:
+			status = "failed"
+			reason = "process_error"
+			slog.Error("task failed", "component", "runner", "marker", marker, "error", waitErr)
+		default:
+			status = "completed"
+			reason = "success"
+			slog.Info("task completed", "component", "runner", "marker", marker,
+				"actions", rt.Actions, "lines", rt.Lines)
 		}
 
-		// Parse cost from the result event
+		// Parse final cost from the terminal result event. Prefer that over
+		// rt.CumulativeCostUSD for the run-history row because the result
+		// event includes post-turn billing adjustments the stream events
+		// may miss.
 		costUSD, numTurns := ParseCostFromOutput(output)
+		if costUSD == 0 && rt.CumulativeCostUSD > 0 {
+			costUSD = rt.CumulativeCostUSD
+		}
 
 		// Record the run with history — always use real status, not "scheduled"
 		if err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt); err != nil {
 			slog.Error("record run failed", "component", "runner", "marker", marker, "error", err)
 		}
-		if !IsOneShot(t.Schedule) {
-			// Compute next run for recurring
+
+		// Retry on transient failure. Counter persists across restarts via
+		// the settings table so a crash mid-retry does not reset progress.
+		// Watcher-driven downgrades (completed→failed via deliverable audit)
+		// are intentionally NOT retried — they run in cmd/serve.go's audit
+		// callback, which is the documented single retry decision point for
+		// those cases. This path only handles the runner's own detection.
+		retried := false
+		attempts := r.getRetryCount(bgCtx, t.ID)
+		if shouldRetry(status, reason, attempts, retryCap) {
+			r.setRetryCount(bgCtx, t.ID, attempts+1)
+			// Requeue immediately — the scheduler will pick up the row
+			// on its next tick. IsOneShot tasks are retried with the
+			// same next_run_at so they remain one-shot from the user's
+			// perspective; the retry is a runner-internal decision.
+			nextRun := time.Now().UTC()
+			if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
+				slog.Error("retry requeue failed", "component", "runner", "marker", marker, "error", err)
+			} else {
+				slog.Info("retrying task after transient failure",
+					"component", "runner", "marker", marker,
+					"reason", reason, "attempt", attempts+1, "cap", retryCap)
+				retried = true
+			}
+		} else if status == "failed" && retryCap > 0 {
+			slog.Info("retry skipped",
+				"component", "runner", "marker", marker,
+				"reason", reason, "attempts", attempts, "cap", retryCap)
+		}
+
+		// For recurring tasks that did not retry, compute the next scheduled
+		// run as normal.
+		if !retried && !IsOneShot(t.Schedule) {
 			nextRun := ComputeNextRun(t.Schedule)
 			if !nextRun.IsZero() {
 				if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
@@ -425,7 +853,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 		if r.onEvent != nil {
 			r.onEvent("task_completed", map[string]string{
-				"task_id": t.ID, "status": status,
+				"task_id": t.ID, "status": status, "reason": reason,
 			})
 		}
 	}()
