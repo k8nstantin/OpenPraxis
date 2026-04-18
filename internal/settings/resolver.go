@@ -78,6 +78,11 @@ func NewResolver(store *Store, tasks TaskLookup, manifests ManifestLookup) *Reso
 	return &Resolver{store: store, tasks: tasks, manifests: manifests}
 }
 
+// Store returns the underlying settings store. Exposed so consumers like the
+// task runner can persist runtime state (e.g. retry counters keyed by task
+// scope) through the same settings table without a second injection point.
+func (r *Resolver) Store() *Store { return r.store }
+
 // Resolve returns the effective value for one knob at the given scope.
 // Resolution order (first hit wins): task → manifest → product → system.
 //
