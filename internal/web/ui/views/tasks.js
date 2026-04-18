@@ -711,17 +711,26 @@
         schedule = 'at:' + new Date(dt).toISOString();
       }
 
-      await fetch('/api/tasks', {
+      const resp = await fetch('/api/tasks', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({manifest_id: manifestId, title, description: desc, schedule, agent})
       });
+      if (!resp.ok) {
+        bodyEl.querySelector('#tc-status').textContent = 'Error: ' + resp.status;
+        return;
+      }
+      const newTask = await resp.json();
       bodyEl.querySelector('#tc-status').textContent = 'Created!';
       OL.loadTasks();
-      setTimeout(() => {
-        titleEl.textContent = 'Select a task';
-        bodyEl.innerHTML = '<div class="empty-state">Task created. Click it in the tree to view details.</div>';
-      }, 1000);
+      if (newTask && newTask.id) {
+        setTimeout(() => OL.loadTaskDetail(newTask.id), 300);
+      } else {
+        setTimeout(() => {
+          titleEl.textContent = 'Select a task';
+          bodyEl.innerHTML = '<div class="empty-state">Task created. Click it in the tree to view details.</div>';
+        }, 1000);
+      }
     };
   };
 
