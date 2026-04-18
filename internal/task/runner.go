@@ -470,15 +470,12 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		allowedTools = defaultAllowedTools()
 	}
 
-	// Wall-clock timeout now sourced from the resolver (minutes → Duration).
-	// The <=0 belt exists for defence-in-depth against a future catalog
-	// change that accidentally sets the default to 0; the v1 catalog default
-	// is 30. Clean this up in M4-T13 once all knobs have enforced positive
-	// defaults at the schema layer.
+	// Wall-clock timeout sourced from the resolver (minutes → Duration).
+	// The catalog default (30) and type (int) are enforced at schema write
+	// time, so knobs.TimeoutMinutes is always > 0 on the resolver snapshot
+	// path. A regression to <=0 would fail decodeRuntimeKnobs before this
+	// line is reached.
 	timeout := time.Duration(knobs.TimeoutMinutes) * time.Minute
-	if timeout <= 0 {
-		timeout = 30 * time.Minute
-	}
 	ctx, cancel := context.WithTimeout(bgCtx, timeout)
 
 	// Per-task override on Agent still beats the resolved default: letting a
