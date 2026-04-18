@@ -114,25 +114,68 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 	return audit
 }
 
-// RunGitGate checks if the task branch has commits.
-func (w *Watcher) RunGitGate(taskMarker string) GitResult {
-	branch := "openpraxis/" + taskMarker
-	result := GitResult{}
-
-	// Check if branch exists
-	cmd := exec.Command("git", "branch", "--list", branch)
+// resolveTaskBranch finds the branch this task committed on. Accepts either
+// the plain openpraxis/<taskMarker> form or a suffixed openpraxis/<marker>-*
+// form. Returns the chosen branch and ok=true; ok=false if no branch
+// matches. Prefers the exact match; otherwise returns the most recently
+// updated suffixed branch (newest commit on the branch tip).
+func (w *Watcher) resolveTaskBranch(taskMarker string) (string, bool) {
+	exact := "openpraxis/" + taskMarker
+	pattern := exact + "-*"
+	// --sort=-committerdate gives newest-first; --format=%(refname:short)
+	// strips the refs/heads/ prefix.
+	cmd := exec.Command("git", "branch",
+		"--list", exact, pattern,
+		"--sort=-committerdate",
+		"--format=%(refname:short)")
 	cmd.Dir = w.repoDir
 	out, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(out)) == "" {
+	if err != nil {
+		return "", false
+	}
+	var suffixed string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if name == exact {
+			return exact, true
+		}
+		if suffixed == "" {
+			suffixed = name
+		}
+	}
+	if suffixed != "" {
+		return suffixed, true
+	}
+	return "", false
+}
+
+// RunGitGate checks if the task branch has commits.
+//
+// Branch resolution accepts both the plain marker branch
+// (openpraxis/<taskMarker>) and any suffixed variant
+// (openpraxis/<taskMarker>-*). Task descriptions sometimes direct the agent
+// to include a human-readable suffix like `-m1-t1` in the branch name, and
+// before this change the gate looked only at the exact plain form and
+// reported BranchExists=false — which flipped completed runs to failed even
+// when all the work was on disk and pushed.
+func (w *Watcher) RunGitGate(taskMarker string) GitResult {
+	result := GitResult{}
+	branch, ok := w.resolveTaskBranch(taskMarker)
+	if !ok {
 		result.BranchExists = false
-		result.Reason = fmt.Sprintf("branch %s does not exist", branch)
+		result.Branch = "openpraxis/" + taskMarker
+		result.Reason = fmt.Sprintf("no branch matching openpraxis/%s or openpraxis/%s-* found", taskMarker, taskMarker)
 		return result
 	}
 	result.BranchExists = true
+	result.Branch = branch
 
 	// Find base branch — try sandbox, then main
 	baseBranch := "sandbox"
-	cmd = exec.Command("git", "rev-parse", "--verify", baseBranch)
+	cmd := exec.Command("git", "rev-parse", "--verify", baseBranch)
 	cmd.Dir = w.repoDir
 	if err := cmd.Run(); err != nil {
 		baseBranch = "main"
@@ -141,7 +184,7 @@ func (w *Watcher) RunGitGate(taskMarker string) GitResult {
 	// Count commits unique to task branch vs base
 	cmd = exec.Command("git", "log", "--oneline", baseBranch+".."+branch)
 	cmd.Dir = w.repoDir
-	out, err = cmd.Output()
+	out, err := cmd.Output()
 	if err != nil {
 		result.CommitCount = 0
 		result.Reason = fmt.Sprintf("failed to compare %s..%s: %v", baseBranch, branch, err)

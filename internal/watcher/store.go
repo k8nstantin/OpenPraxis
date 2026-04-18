@@ -44,7 +44,12 @@ type GitResult struct {
 	Deletions        int      `json:"deletions"`
 	UncommittedFiles []string `json:"uncommitted_files"`
 	BranchExists     bool     `json:"branch_exists"`
-	Reason           string   `json:"reason"`
+	// Branch is the branch the gate actually audited. Usually
+	// openpraxis/<taskMarker>, but tasks whose descriptions append a
+	// human-readable suffix (e.g. -m1-t1) land on the longer branch, so the
+	// gate resolves the real branch via prefix match.
+	Branch string `json:"branch"`
+	Reason string `json:"reason"`
 }
 
 // BuildResult holds the output of the build verification gate.
