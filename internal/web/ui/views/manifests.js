@@ -127,11 +127,17 @@
     }).join('');
   }
 
-  // Promote idea or memory to manifest -- opens manifest detail panel with creation form pre-filled
-  OL.promoteToManifest = async function(title, description, content) {
+  // Open the "New Manifest" form in the manifest detail panel.
+  // opts: { title, description, content, productId } — all optional.
+  OL.createManifest = async function(opts) {
+    opts = opts || {};
+    const title = opts.title || '';
+    const description = opts.description || '';
+    const content = opts.content || '';
+    const preselectProductId = opts.productId || '';
+
     OL.switchView('manifests');
 
-    // Fetch products for the dropdown
     let products = [];
     try {
       const groups = await fetchJSON('/api/products/by-peer');
@@ -150,7 +156,7 @@
       titleEl.textContent = 'New Manifest';
 
       const productOptions = products.map(p =>
-        `<option value="${esc(p.id)}">${esc(p.marker)} ${esc(p.title)}</option>`
+        `<option value="${esc(p.id)}"${p.id === preselectProductId ? ' selected' : ''}>${esc(p.marker)} ${esc(p.title)}</option>`
       ).join('');
 
       bodyEl.innerHTML = `
@@ -179,7 +185,7 @@
             <div style="flex:1">
               <label class="form-label">Product</label>
               <select id="pm-product-id" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
-                <option value="">No Product</option>
+                <option value=""${preselectProductId ? '' : ' selected'}>No Product</option>
                 ${productOptions}
               </select>
             </div>
@@ -209,12 +215,18 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({title: t, description: d, content: c, status: s, project_id: pid, jira_refs: j ? j.split(',').map(s => s.trim()) : []})
         });
+        if (!resp.ok) { bodyEl.querySelector('#pm-status-msg').textContent = 'Error: ' + resp.status; return; }
         const m = await resp.json();
         bodyEl.querySelector('#pm-status-msg').textContent = 'Created!';
         OL.loadManifests();
         setTimeout(() => OL.loadManifest(m.id), 500);
       };
     }, 300);
+  };
+
+  // Promote idea or memory to manifest -- opens manifest detail panel with creation form pre-filled.
+  OL.promoteToManifest = function(title, description, content) {
+    return OL.createManifest({ title: title, description: description, content: content });
   };
 
   OL.loadManifest = async function(id) {
