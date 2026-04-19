@@ -1,6 +1,8 @@
 # CLAUDE.md — OpenPraxis
 
-Shared memory layer for coding agents. Go binary providing stdio MCP server, HTTP dashboard, peer discovery, and task scheduling.
+**Peer-to-peer workflow engine for autonomous coding agents.** One Go binary per peer (MCP stdio + HTTP dashboard + mDNS discovery + Automerge sync). Three-tier DAG (product → manifest → task) drives execution; tasks spawn LLM agent subprocesses in isolated git worktrees off fresh `origin/main`.
+
+→ **Full design doc:** [`docs/workflow-engine.md`](docs/workflow-engine.md) — states, deps, activation model, review loop, SCD principle, and the roadmap. Every PR touching those primitives must check itself against that doc.
 
 ## Session Init — Total Recall Protocol
 
