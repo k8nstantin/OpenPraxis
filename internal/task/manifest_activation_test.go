@@ -29,6 +29,40 @@ func seedWaitingBlockedByManifest(t *testing.T, s *Store, manifestID, taskTitle,
 	return task.ID
 }
 
+// TestFlipManifestBlockedTasks_AcceptsLegacyPrefix — #97 regression
+// test. Tasks seeded by the scheduler's pre-dispatch gate before
+// that PR normalized node.go:615 carry the old prefix
+// "blocked by manifest ...". The activation walker must still find
+// and flip them during the compatibility window.
+func TestFlipManifestBlockedTasks_AcceptsLegacyPrefix(t *testing.T) {
+	s := openRepoTestStore(t)
+	ctx := context.Background()
+
+	tsk, err := s.Create("mf-legacy", "legacy waiter", "", "once", "claude-code", "node", "t", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Force legacy block_reason + status directly — bypasses #77's
+	// seeding logic to simulate a row written by the old scheduler
+	// path.
+	if _, err := s.db.Exec(
+		`UPDATE tasks SET status='waiting', block_reason='blocked by manifest mf-legacy (Some Manifest)' WHERE id=?`,
+		tsk.ID); err != nil {
+		t.Fatalf("force legacy: %v", err)
+	}
+
+	n, err := s.FlipManifestBlockedTasks(ctx, "mf-legacy", StatusScheduled)
+	if err != nil {
+		t.Fatalf("FlipManifestBlockedTasks: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("flipped = %d, want 1 (legacy prefix must match)", n)
+	}
+	if got := readStatus(t, s, tsk.ID); got != "scheduled" {
+		t.Errorf("status = %q, want scheduled", got)
+	}
+}
+
 // TestFlipManifestBlockedTasks_ScheduledOnPropagation — the core
 // behavior for the close path: every waiting-blocked-by-manifest task
 // in the given manifest flips to scheduled + block_reason clears.

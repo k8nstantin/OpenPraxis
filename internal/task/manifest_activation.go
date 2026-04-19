@@ -8,12 +8,21 @@ import (
 	"time"
 )
 
-// manifestBlockPrefix is the literal prefix Store.Create writes into
-// block_reason when seeding a task as 'waiting' due to an unsatisfied
-// manifest. FlipManifestBlockedTasks filters on it so a task that ended
-// up in 'waiting' for a different reason (e.g. task-level dep not met)
-// does not get accidentally flipped by a manifest-level activation.
+// manifestBlockPrefix is the canonical prefix both Store.Create and
+// the scheduler pre-dispatch gate (after #97) write into block_reason
+// when seeding a task as 'waiting' due to an unsatisfied manifest.
+// FlipManifestBlockedTasks filters on it so a task that ended up in
+// 'waiting' for a different reason (e.g. task-level dep not met) does
+// not get accidentally flipped by a manifest-level activation.
 const manifestBlockPrefix = "manifest not satisfied"
+
+// legacyManifestBlockPrefix is the prefix the scheduler's
+// pre-dispatch gate wrote BEFORE #97 normalized it. Kept so the
+// activation filter still catches waiting tasks that were seeded
+// under the old format — rows in the wild today were written with
+// "blocked by manifest <marker> (<title>)". Removable once a DB
+// audit confirms no row still has this prefix.
+const legacyManifestBlockPrefix = "blocked by manifest"
 
 // FlipManifestBlockedTasks moves tasks in manifestID that are currently
 // 'waiting' because of a manifest-level block into `newStatus`, clearing
@@ -44,12 +53,22 @@ func (s *Store) FlipManifestBlockedTasks(ctx context.Context, manifestID string,
 	// seeded by the manifest-level gate. Tasks in 'waiting' due to a
 	// task-level depends_on carry a different block_reason ("task ...
 	// not completed") and must not be flipped here.
+	// Filter accepts both block_reason prefixes: the canonical one
+	// seeded by #77 (task.Store.Create) AND the legacy prefix the
+	// scheduler's pre-dispatch gate wrote before #97 normalized
+	// node.go:615. Without the legacy clause, tasks that went to
+	// 'waiting' via the scheduler's path stay invisible to this
+	// walker and the chain doesn't advance on manifest close. Drop
+	// the legacy clause in a follow-up once DB is known-clean.
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE tasks
 		 SET status = ?, block_reason = '', updated_at = ?
-		 WHERE manifest_id = ? AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
-		string(newStatus), now, manifestID, manifestBlockPrefix+"%")
+		 WHERE manifest_id = ? AND status = 'waiting'
+		   AND (block_reason LIKE ? OR block_reason LIKE ?)
+		   AND deleted_at = ''`,
+		string(newStatus), now, manifestID,
+		manifestBlockPrefix+"%", legacyManifestBlockPrefix+"%")
 	if err != nil {
 		return 0, fmt.Errorf("flip manifest-blocked tasks: %w", err)
 	}

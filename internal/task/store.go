@@ -222,6 +222,26 @@ func (s *Store) init() error {
 	// one seeded here so the dep history stream isn't blank on
 	// upgrade. Idempotent — the NOT EXISTS guard in the backfill
 	// makes repeat runs a no-op.
+	// Idempotent migration: rewrite legacy block_reason prefixes to
+	// the canonical form. Rows written before #97 normalized
+	// node.go:615 carry "blocked by manifest <marker> (<title>)".
+	// The activation walker's filter accepts both, but normalizing
+	// in place lets us drop the compatibility clause in a later
+	// release and keeps operator-visible text consistent.
+	//
+	// SQLite's REPLACE doesn't support prefix-rewrites directly;
+	// use a CASE expression gated on LIKE so rows without the
+	// legacy prefix aren't touched (idempotent on repeat boot).
+	if _, err := s.db.Exec(`
+		UPDATE tasks
+		SET block_reason = 'manifest not satisfied — blocked by: ' ||
+		    substr(block_reason, length('blocked by manifest ') + 1),
+		    updated_at = ?
+		WHERE block_reason LIKE 'blocked by manifest %'
+		  AND deleted_at = ''`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("normalize legacy block_reason prefixes: %w", err)
+	}
+
 	if _, err := s.BackfillTaskDepSCD(); err != nil {
 		return fmt.Errorf("backfill task dep SCD: %w", err)
 	}

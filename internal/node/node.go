@@ -612,7 +612,12 @@ func (n *Node) CheckManifestDeps(manifestID string) (bool, string) {
 			if len(depID) >= 12 {
 				marker = depID[:12]
 			}
-			return false, fmt.Sprintf("blocked by manifest %s (%s)", marker, dep.Title)
+			// Canonical format — matches the prefix FlipManifestBlockedTasks
+			// filters on in task.Store. Diverging from this means the
+			// close-propagation walker (#78) can't see the task and the
+			// dep chain won't auto-advance. Kept trailing metadata
+			// (marker + title) for operator legibility.
+			return false, fmt.Sprintf("manifest not satisfied — blocked by: %s (%s)", marker, dep.Title)
 		}
 	}
 	return true, ""
