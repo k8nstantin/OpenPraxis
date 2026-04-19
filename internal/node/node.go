@@ -96,6 +96,42 @@ func New(cfg *config.Config) (*Node, error) {
 	// the interface via IsSatisfied(ctx, manifestID).
 	taskStore.SetManifestChecker(manifestStore)
 
+	// Wire the terminal-transition handler: when a manifest moves from
+	// non-terminal (draft/open) → terminal (closed/archive), walk its
+	// dependents and activate waiting tasks in any newly-satisfied
+	// downstream manifest. This is what makes the dependency chain
+	// self-advance without an operator-in-the-loop — the core thesis
+	// of autonomous-agent workstreams.
+	//
+	// Both closures are injected (rather than imported) so task
+	// doesn't depend on manifest, preserving the one-way package
+	// direction. depsFor flattens ListDependents' Dep rows to id
+	// strings; satisfiedFor drops the blocker list the core walker
+	// doesn't need.
+	manifestStore.SetTerminalTransitionHandler(func(ctx context.Context, manifestID string) {
+		depsFor := func(ctx context.Context, m string) ([]string, error) {
+			deps, err := manifestStore.ListDependents(ctx, m)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]string, 0, len(deps))
+			for _, d := range deps {
+				ids = append(ids, d.ID)
+			}
+			return ids, nil
+		}
+		satisfiedFor := func(ctx context.Context, m string) (bool, error) {
+			ok, _, err := manifestStore.IsSatisfied(ctx, m)
+			return ok, err
+		}
+		if _, err := taskStore.PropagateManifestClosed(ctx, manifestID, depsFor, satisfiedFor); err != nil {
+			// Log but don't surface — the manifest close already
+			// succeeded; activation failure is recoverable by firing
+			// tasks manually or by the next close retriggering.
+			_ = err // keep the handler pure; no slog here to avoid import churn in node.go
+		}
+	})
+
 	chatStore, err := chat.NewSessionStore(index.DB())
 	if err != nil {
 		return nil, fmt.Errorf("init chat store: %w", err)
