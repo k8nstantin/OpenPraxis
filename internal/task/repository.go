@@ -176,11 +176,19 @@ func (s *Store) SetDependency(id, dependsOn string) error {
 	return err
 }
 
-// ActivateDependents finds tasks that depend on the given task ID and schedules them.
+// ActivateDependents finds tasks that depend on the given task ID and
+// schedules them. Historically the WHERE matched only status='waiting', but
+// the task create path sets initial status='pending' even when depends_on
+// is non-empty — so no dependent has ever auto-activated in production, and
+// the whole dependency chain had to be fired by hand. Accepting both
+// statuses fixes that without regressing any path that currently relies on
+// 'waiting' (which remains valid and is still flipped here). The
+// depends_on = ? filter guarantees we only touch direct children of the
+// completed task, so loosening the status predicate is safe.
 func (s *Store) ActivateDependents(completedTaskID string) (int, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', next_run_at = ?, updated_at = ?
-		WHERE depends_on = ? AND status = 'waiting' AND deleted_at = ''`, now, now, completedTaskID)
+		WHERE depends_on = ? AND status IN ('waiting', 'pending') AND deleted_at = ''`, now, now, completedTaskID)
 	if err != nil {
 		return 0, err
 	}
