@@ -38,6 +38,7 @@ type Node struct {
 	Watcher          *watcher.Store
 	SettingsStore    *settings.Store
 	SettingsResolver *settings.Resolver
+	Comments         *comments.Store
 	runner           *task.Runner
 	Embedder         *embedding.Engine
 	StartedAt        time.Time
@@ -256,6 +257,7 @@ func New(cfg *config.Config) (*Node, error) {
 		Watcher:          watcherStore,
 		SettingsStore:    settingsStore,
 		SettingsResolver: settingsResolver,
+		Comments:         commentsStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
