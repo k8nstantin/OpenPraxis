@@ -64,6 +64,13 @@ type Runner struct {
 	mu       sync.RWMutex
 	onEvent  func(event string, data map[string]string) // broadcast callback
 
+	// repoDir is the git repository root. Tasks execute in per-task worktrees
+	// anchored to this repo via `git worktree add`, so each task starts from
+	// a fresh checkout of origin/main and the operator's own working copy is
+	// never touched. Empty means the runner will call os.Getwd() on the first
+	// Execute — preserves old behavior for code paths that don't set it.
+	repoDir string
+
 	// warnOnce guards per-Runner log-once semantics for unsupported agent
 	// flags (e.g. --temperature on Claude Code). Keyed by "<agent>:<knob>".
 	warnOnce sync.Map
@@ -71,13 +78,16 @@ type Runner struct {
 
 // NewRunner creates a task runner. The resolver is required — every knob that
 // shapes task execution is looked up through it on every Execute call.
-func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, onEvent func(string, map[string]string)) *Runner {
+// repoDir is the git repo root tasks will clone worktrees from; pass "" to
+// default to the server's process CWD at spawn time.
+func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, repoDir string, onEvent func(string, map[string]string)) *Runner {
 	return &Runner{
 		store:    store,
 		actions:  actions,
 		resolver: resolver,
 		running:  make(map[string]*RunningTask),
 		onEvent:  onEvent,
+		repoDir:  repoDir,
 	}
 }
 
@@ -550,15 +560,31 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		r.warnUnsupported(agent, "approval_mode", knobs.ApprovalMode)
 	}
 
+	// Materialize a dedicated git worktree for this task off origin/main.
+	// The agent runs inside it, so its branch is always based on a clean,
+	// up-to-date main — no stacking on a previous task's branch, no risk
+	// of clobbering the operator's own working copy at the repo root.
+	workDir, baseSHA, err := r.prepareTaskWorkspace(t.ID)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("prepare task workspace: %w", err)
+	}
+	slog.Info("task workspace ready",
+		"component", "runner", "marker", t.ID[:min(12, len(t.ID))],
+		"workdir", workDir, "base_sha", baseSHA)
+
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Dir = workDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		r.cleanupTaskWorkspace(workDir)
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		r.cleanupTaskWorkspace(workDir)
 		return fmt.Errorf("start agent: %w", err)
 	}
 
@@ -616,6 +642,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			if err := r.store.DeleteRuntimeState(t.ID); err != nil {
 				slog.Error("delete runtime state failed", "component", "runner", "marker", marker, "error", err)
 			}
+			// Remove the per-task worktree directory. The agent's branch
+			// stays intact in the shared .git, so the PR keeps working.
+			r.cleanupTaskWorkspace(workDir)
 		}()
 
 		scanner := bufio.NewScanner(stdout)

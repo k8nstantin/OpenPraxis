@@ -81,7 +81,7 @@ func newRunnerHarness(t *testing.T) (*Runner, *settings.Store, *fakeTaskLookup, 
 		t.Fatalf("task.NewStore: %v", err)
 	}
 
-	r := NewRunner(taskStore, nil, resolver, nil)
+	r := NewRunner(taskStore, nil, resolver, "", nil)
 	return r, settingsStore, tasks, manifests
 }
 
