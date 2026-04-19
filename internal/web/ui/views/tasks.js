@@ -438,6 +438,9 @@
           <!-- EXECUTION CONTROLS -->
           <div id="task-knobs-mount" style="margin-top:16px"></div>
 
+          <!-- COMMENTS -->
+          <div id="task-comments-mount" style="margin-top:16px"></div>
+
           <!-- 5. LIVE OUTPUT (if running/paused) -->
           ${isRunningOrPaused ? `
             <div style="margin-bottom:12px;border-left:3px solid ${t.status === 'paused' ? 'var(--yellow)' : 'var(--green)'};padding-left:10px">
@@ -479,6 +482,11 @@
       const knobMount = document.getElementById('task-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'task', id: t.id });
+      }
+
+      const commentsMount = document.getElementById('task-comments-mount');
+      if (commentsMount && OL.renderCommentsSection) {
+        OL.renderCommentsSection(commentsMount, { type: 'task', id: t.id });
       }
 
       // Manifest cross-link — fetch title + wire click
