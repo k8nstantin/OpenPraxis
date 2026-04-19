@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -276,12 +277,278 @@ func (s *Store) SetBlockReason(id, reason string) error {
 	return err
 }
 
-// SetDependency sets or clears the depends_on field for a task.
+// ErrTaskDepCycle is returned when SetDependency would create a cycle in
+// the task dependency graph. Handlers translate this to HTTP 409 / an
+// MCP tool error.
+var ErrTaskDepCycle = errors.New("task dependency: cycle detected")
+
+// ErrTaskDepSelfLoop is returned when a task is asked to depend on itself.
+var ErrTaskDepSelfLoop = errors.New("task dependency: a task cannot depend on itself")
+
+// SetDependency sets or clears the depends_on field for a task, and
+// transitions the task's status + block_reason to match the new
+// dependency state. Centralizes the four invariants that previously
+// leaked into the HTTP handler at handlers_task.go:
+//
+//   1. Cycle detection. DFS from the proposed parent following the
+//      single-parent depends_on column; if we ever hit taskID, reject.
+//      Single-parent makes this O(depth), effectively O(1) for real
+//      graphs.
+//   2. Self-loop rejection with ErrTaskDepSelfLoop, so the HTTP / MCP
+//      surfaces can surface a 400 rather than raw storage error text.
+//   3. Parent-status-aware seeding. If the parent is already
+//      StatusCompleted the dep is already satisfied — status flips
+//      to Scheduled (ready to fire), not Waiting. Matches the
+//      post-#77 invariant for Create so both paths agree.
+//   4. block_reason is populated when parking in Waiting and cleared
+//      on every other transition. The #85 UI renders a "Blocked:"
+//      bar from this field; leaving it stale or empty breaks that
+//      signal.
+//
+// Clearing the dep (dependsOn=="") is symmetric: column blanked, and
+// if the task was Waiting on a task-level block, it flips to Pending
+// with block_reason cleared (Option B symmetry with manifest-dep
+// removal from #79 — operator arms explicitly).
 func (s *Store) SetDependency(id, dependsOn string) error {
+	return s.SetDependencyWithAudit(id, dependsOn, "", "")
+}
+
+// SetDependencyWithAudit writes the new dep via SCD Type 2 semantics.
+//
+//   - The currently-active row (valid_to='') in task_dependency is
+//     closed by stamping valid_to=now.
+//   - A fresh row is inserted with valid_from=now, valid_to='', the
+//     new depends_on value, changedBy + reason for attribution.
+//   - tasks.depends_on is updated as a cache of the new active value
+//     so existing queries (scanTask, the scheduler) don't need an
+//     SCD join on every read.
+//
+// Result: the dep history for a task is just the rows in
+// task_dependency ordered by valid_from. No separate audit log —
+// history and current state share one table.
+//
+// changedBy identifies the caller ("http-api", session id, operator
+// name, etc.); reason is free-form. Both are optional but worth
+// populating on every write because the table can't be purged without
+// losing the decision trail.
+//
+// Cycle / self-loop rejection happens before any write so a refused
+// change never produces an SCD row.
+func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) error {
+	// Resolve the full row so prefix inputs still work + we see the
+	// current status for the state transition.
+	var (
+		fullID, currentStatus string
+	)
+	if err := s.db.QueryRow(
+		`SELECT id, status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		id, id+"%").Scan(&fullID, &currentStatus); err != nil {
+		return err
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET depends_on = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		dependsOn, now, id, id+"%")
+
+	// Clear-path: no dep. Writes an SCD row with depends_on=''
+	// so "dep cleared" is visible in the history stream.
+	if dependsOn == "" {
+		nextStatus := currentStatus
+		if currentStatus == string(StatusWaiting) {
+			nextStatus = string(StatusPending)
+		}
+		if err := s.writeSCDDepRow(fullID, "", now, changedBy, reason); err != nil {
+			return err
+		}
+		_, err := s.db.Exec(
+			`UPDATE tasks SET depends_on = '', block_reason = '', status = ?, updated_at = ? WHERE id = ?`,
+			nextStatus, now, fullID)
+		return err
+	}
+
+	// Resolve + validate the proposed parent.
+	var parentID, parentStatus string
+	if err := s.db.QueryRow(
+		`SELECT id, status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		dependsOn, dependsOn+"%").Scan(&parentID, &parentStatus); err != nil {
+		return err
+	}
+	if parentID == fullID {
+		return ErrTaskDepSelfLoop
+	}
+	if reaches, err := s.taskDepPathExists(parentID, fullID); err != nil {
+		return fmt.Errorf("cycle check: %w", err)
+	} else if reaches {
+		return fmt.Errorf("%w: %s → %s would close a cycle",
+			ErrTaskDepCycle, shortID(fullID), shortID(parentID))
+	}
+
+	nextStatus, blockReason := deriveDepState(currentStatus, parentStatus, parentID)
+
+	if err := s.writeSCDDepRow(fullID, parentID, now, changedBy, reason); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(
+		`UPDATE tasks SET depends_on = ?, status = ?, block_reason = ?, updated_at = ? WHERE id = ?`,
+		parentID, nextStatus, blockReason, now, fullID)
 	return err
+}
+
+// writeSCDDepRow closes the currently-active row (if any) and inserts
+// a new active row. Uses two statements in sequence — SQLite
+// transactions would add correctness if the two statements could race
+// against concurrent writers for the same task_id, but SetDependency
+// is operator-initiated and per-task serialization is implicit.
+func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string) error {
+	if _, err := s.db.Exec(
+		`UPDATE task_dependency SET valid_to = ? WHERE task_id = ? AND valid_to = ''`,
+		now, taskID); err != nil {
+		return fmt.Errorf("close prior dep row: %w", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
+		 VALUES (?, ?, ?, '', ?, ?)`,
+		taskID, dependsOn, now, changedBy, reason); err != nil {
+		return fmt.Errorf("insert new dep row: %w", err)
+	}
+	return nil
+}
+
+// DepHistoryEntry is one row of the SCD Type 2 task_dependency table.
+// Rows are the full history of the task's dep relationship in
+// chronological order. The current/active row has ValidTo == "".
+type DepHistoryEntry struct {
+	ID         int    `json:"id"`
+	TaskID     string `json:"task_id"`
+	DependsOn  string `json:"depends_on"` // empty = dep cleared in this revision
+	ValidFrom  string `json:"valid_from"`
+	ValidTo    string `json:"valid_to"`   // empty = currently active
+	ChangedBy  string `json:"changed_by"`
+	Reason     string `json:"reason"`
+}
+
+// ListDepHistory returns every dep revision for a task, newest
+// valid_from first. limit<=0 defaults to 50.
+func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT id, task_id, depends_on, valid_from, valid_to, changed_by, reason
+		 FROM task_dependency WHERE task_id = ? ORDER BY valid_from DESC, id DESC LIMIT ?`,
+		taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DepHistoryEntry
+	for rows.Next() {
+		var e DepHistoryEntry
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.DependsOn,
+			&e.ValidFrom, &e.ValidTo, &e.ChangedBy, &e.Reason); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// BackfillTaskDepSCD seeds task_dependency for tasks that had a
+// non-empty tasks.depends_on cache but no SCD row yet. Runs on
+// startup; idempotent via the "already has an active row" check.
+// Legacy rows land with valid_from = the task's updated_at so the
+// history doesn't all collapse to "now".
+func (s *Store) BackfillTaskDepSCD() (int, error) {
+	rows, err := s.db.Query(`
+		SELECT t.id, t.depends_on, t.updated_at
+		FROM tasks t
+		WHERE t.depends_on != '' AND t.deleted_at = ''
+		  AND NOT EXISTS (SELECT 1 FROM task_dependency d
+		                  WHERE d.task_id = t.id AND d.valid_to = '')`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	type pair struct{ id, dep, when string }
+	var pending []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.id, &p.dep, &p.when); err != nil {
+			return 0, err
+		}
+		pending = append(pending, p)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, p := range pending {
+		if _, err := s.db.Exec(
+			`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
+			 VALUES (?, ?, ?, '', 'scd-backfill', 'seeded from legacy tasks.depends_on')`,
+			p.id, p.dep, p.when); err == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// deriveDepState picks the status + block_reason for a task whose dep is
+// being set. Extracted so tests can exercise the classification without
+// touching the DB.
+func deriveDepState(currentStatus, parentStatus, parentID string) (string, string) {
+	// If the current status is Running or Paused we leave it alone —
+	// the task is mid-flight, changing its dep shouldn't derail it.
+	// block_reason stays whatever it was.
+	if currentStatus == string(StatusRunning) || currentStatus == string(StatusPaused) ||
+		currentStatus == string(StatusCompleted) || currentStatus == string(StatusFailed) ||
+		currentStatus == string(StatusCancelled) {
+		return currentStatus, "" // block_reason cleared; dep is recorded but status stays
+	}
+	if parentStatus == string(StatusCompleted) {
+		// Parent is already done — task is armed.
+		return string(StatusScheduled), ""
+	}
+	// Parent is in some non-terminal state — task parks in Waiting
+	// with a populated block_reason that the UI surfaces.
+	return string(StatusWaiting), fmt.Sprintf("task %s not completed (is %s)",
+		shortID(parentID), parentStatus)
+}
+
+// shortID returns the first 12 chars of an ID (the marker convention).
+// Defensive for ids shorter than 12 (which shouldn't happen in prod).
+func shortID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
+}
+
+// taskDepPathExists runs a bounded DFS from src following single-parent
+// depends_on edges. Returns true if dst is reachable. O(chain depth) in
+// a well-formed graph; visited set caps work if the data contains a
+// pre-existing cycle.
+func (s *Store) taskDepPathExists(src, dst string) (bool, error) {
+	visited := map[string]bool{}
+	cur := src
+	for cur != "" {
+		if cur == dst {
+			return true, nil
+		}
+		if visited[cur] {
+			return false, nil // pre-existing cycle — treat as no-reach
+		}
+		visited[cur] = true
+		var next string
+		err := s.db.QueryRow(
+			`SELECT depends_on FROM tasks WHERE id = ? AND deleted_at = ''`, cur).Scan(&next)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		cur = next
+	}
+	return false, nil
 }
 
 // ActivateDependents finds tasks that depend on the given task ID and

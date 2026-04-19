@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -394,30 +395,33 @@ func apiTaskSetDependency(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Validate dependency target exists if setting one
-		if req.DependsOn != "" {
-			dep, err := n.Tasks.Get(req.DependsOn)
+		// Resolve the dep target to its full ID if the caller passed a
+		// marker. 404 here is a real error — the UI picker shouldn't
+		// offer something that doesn't exist, but guard defensively.
+		depID := req.DependsOn
+		if depID != "" {
+			dep, err := n.Tasks.Get(depID)
 			if err != nil || dep == nil {
-				writeError(w, "dependency task not found", 404)
+				writeError(w, "dependency task not found", http.StatusNotFound)
 				return
 			}
-			// Prevent self-dependency
-			if dep.ID == t.ID {
-				writeError(w, "task cannot depend on itself", 400)
-				return
-			}
+			depID = dep.ID
 		}
 
-		if err := n.Tasks.SetDependency(t.ID, req.DependsOn); err != nil {
-			writeError(w, err.Error(), 500)
+		// Store handles cycle detection, self-loop rejection,
+		// parent-status-aware seeding, and block_reason population.
+		// The handler just maps the typed errors to HTTP codes and
+		// returns the refreshed row.
+		if err := n.Tasks.SetDependency(t.ID, depID); err != nil {
+			switch {
+			case errors.Is(err, task.ErrTaskDepCycle):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, task.ErrTaskDepSelfLoop):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
 			return
-		}
-
-		// Auto-adjust status
-		if req.DependsOn != "" && (t.Status == "pending" || t.Status == "scheduled") {
-			n.Tasks.UpdateStatus(t.ID, "waiting")
-		} else if req.DependsOn == "" && t.Status == "waiting" {
-			n.Tasks.UpdateStatus(t.ID, "pending")
 		}
 
 		updated, _ := n.Tasks.Get(t.ID)
