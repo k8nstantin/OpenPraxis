@@ -83,7 +83,8 @@ func TestCanTransition_AllLegalMoves(t *testing.T) {
 		{StatusRunning, StatusCancelled},
 		{StatusPaused, StatusRunning},
 		{StatusPaused, StatusCancelled},
-		{StatusCompleted, StatusFailed}, // watcher downgrade — the one exception
+		{StatusCompleted, StatusFailed},    // watcher downgrade
+		{StatusCompleted, StatusScheduled}, // review rejection (#93, gated by Store.RejectCompletedTask)
 	}
 	for _, pair := range legal {
 		if !CanTransition(pair[0], pair[1]) {
@@ -110,7 +111,9 @@ func TestCanTransition_SelfLoopAlwaysTrue(t *testing.T) {
 func TestCanTransition_IllegalMovesRejected(t *testing.T) {
 	illegal := [][2]Status{
 		{StatusCompleted, StatusRunning}, // already closed, can't reopen
-		{StatusCompleted, StatusScheduled},
+		// completed → scheduled is now LEGAL via the review-rejection
+		// path gated by Store.RejectCompletedTask (#93). Moved to the
+		// legal-transitions table.
 		{StatusCompleted, StatusCancelled}, // terminal after the fact isn't how cancel works
 		{StatusFailed, StatusRunning},      // terminal, no resurrection
 		{StatusFailed, StatusCompleted},
