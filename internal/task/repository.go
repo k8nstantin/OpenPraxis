@@ -95,6 +95,28 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		}
 	}
 
+	// Product-level dep check runs only if task-level + manifest-level
+	// gates are both clear. Same precedence as the manifest check:
+	// innermost blocker is named in block_reason; outer checks re-run
+	// at activation time as inner blockers clear.
+	//
+	// productID is derived from manifests.project_id. Kept as a local
+	// SELECT rather than a dedicated cross-package store method so the
+	// task package doesn't need to import product.
+	if initialStatus == StatusPending && manifestID != "" && s.productChecker != nil {
+		var productID string
+		_ = s.db.QueryRow(`SELECT project_id FROM manifests WHERE id = ? AND deleted_at = ''`,
+			manifestID).Scan(&productID)
+		if productID != "" {
+			ok, unsatisfied, err := s.productChecker.IsSatisfied(context.Background(), productID)
+			if err == nil && !ok {
+				initialStatus = StatusWaiting
+				blockReason = fmt.Sprintf("product not satisfied — blocked by: %s",
+					joinMarkers(unsatisfied))
+			}
+		}
+	}
+
 	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, manifestID, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn, blockReason,

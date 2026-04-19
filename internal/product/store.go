@@ -1,6 +1,7 @@
 package product
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,30 @@ type Product struct {
 // Store manages product persistence.
 type Store struct {
 	db *sql.DB
+	// onTerminalTransition fires AFTER a successful Update that moved
+	// the product from a non-terminal status (draft/open) into a
+	// terminal one (closed/archive). Wired in node.go to
+	// task.Store.PropagateProductClosed so waiting tasks in downstream
+	// products' manifests auto-activate. Nil disables.
+	onTerminalTransition func(ctx context.Context, productID string)
+	// onDepRemoved fires AFTER a successful RemoveDep. Wired handler
+	// rehabs now-unblocked waiting tasks from the product's manifests
+	// into 'pending' per Option B. Nil disables.
+	onDepRemoved func(ctx context.Context, productID string)
+}
+
+// SetTerminalTransitionHandler registers the callback fired when a
+// product moves into a terminal status. Call once at startup; no mutex
+// because production wiring runs before any HTTP/MCP handler is
+// serving.
+func (s *Store) SetTerminalTransitionHandler(fn func(ctx context.Context, productID string)) {
+	s.onTerminalTransition = fn
+}
+
+// SetDepRemovedHandler registers the callback fired after RemoveDep.
+// The handler rehabs product-blocked tasks per Option B.
+func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, productID string)) {
+	s.onDepRemoved = fn
 }
 
 // NewStore creates a product store.
@@ -151,14 +176,37 @@ func (s *Store) List(status string, limit int) ([]*Product, error) {
 	return results, rows.Err()
 }
 
-// Update modifies a product.
+// Update modifies a product. Fires the terminal-transition handler
+// (if wired) when status moves from a non-terminal value (draft/open)
+// to a terminal one (closed/archive). The handler propagates the
+// close into downstream products' task queues — see
+// SetTerminalTransitionHandler.
 func (s *Store) Update(id, title, description, status string, tags []string) error {
+	// Read prior status before the UPDATE so we can detect the
+	// non-terminal → terminal edge. Missing row falls through; the
+	// UPDATE will either be a no-op or surface the real error.
+	var priorStatus, fullID string
+	_ = s.db.QueryRow(`SELECT id, status FROM products WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		id, id+"%").Scan(&fullID, &priorStatus)
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	tagsJSON, _ := json.Marshal(tags)
 	_, err := s.db.Exec(`UPDATE products SET title = ?, description = ?, status = ?, tags = ?, updated_at = ?
 		WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
 		title, description, status, string(tagsJSON), now, id, id+"%")
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Fire propagation only on the non-terminal → terminal edge.
+	// Repeat writes of an already-terminal status (closed → closed)
+	// must not re-trigger; the handler is idempotent on its own but
+	// we save the walk.
+	if s.onTerminalTransition != nil && fullID != "" &&
+		!IsTerminalStatus(priorStatus) && IsTerminalStatus(status) {
+		s.onTerminalTransition(context.Background(), fullID)
+	}
+	return nil
 }
 
 // Delete soft-deletes a product.
