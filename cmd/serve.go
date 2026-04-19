@@ -179,6 +179,7 @@ var serveCmd = &cobra.Command{
 		// Watcher — independent server-side task audit
 		cwd, _ := os.Getwd()
 		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", cfg.Node.PeerID())
+		taskWatcher.SetCommentPoster(n.Comments)
 
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
