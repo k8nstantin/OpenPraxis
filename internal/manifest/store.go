@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,15 @@ func NewStore(db *sql.DB) (*Store, error) {
 	}
 	if err := s.InitLinks(); err != nil {
 		return nil, err
+	}
+	if err := s.initDependenciesSchema(); err != nil {
+		return nil, err
+	}
+	// One-shot backfill of the legacy comma-separated depends_on column
+	// into the new join table. Idempotent via PRIMARY KEY dedup; safe to
+	// run every boot until the column is retired in a follow-up PR.
+	if _, err := s.BackfillLegacyDependsOn(context.Background()); err != nil {
+		return nil, fmt.Errorf("backfill manifest dependencies: %w", err)
 	}
 	return s, nil
 }
