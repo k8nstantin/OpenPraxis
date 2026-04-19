@@ -274,52 +274,92 @@
         if (manifestList) allManifests = manifestList;
       } catch(e) {}
 
-      // Build dependency pills from depends_on
-      const depIds = (m.depends_on || '').split(',').map(s => s.trim()).filter(Boolean);
-      const depTitles = m.depends_on_titles || [];
+      // Fetch deps + dependents from the authoritative endpoint
+      // (#81). The legacy m.depends_on comma-string is still populated
+      // for backwards compat, but we read the join-table view here so
+      // the UI sees cycle-validated edges plus the in-edges the legacy
+      // column doesn't carry. direction=both gives us everything in
+      // one round trip.
+      let depsFromApi = [];
+      let dependentsFromApi = [];
+      try {
+        const depPayload = await fetchJSON('/api/manifests/' + m.id + '/dependencies?direction=both');
+        if (depPayload) {
+          depsFromApi = depPayload.deps || [];
+          dependentsFromApi = depPayload.dependents || [];
+        }
+      } catch(e) {}
+
+      // IDs this manifest already depends on — used to filter the picker.
+      const depIds = depsFromApi.map(d => d.id);
+
       let depsHtml = '';
       {
         const statusColors = {draft:'var(--yellow)',open:'var(--green)',closed:'var(--text-muted)',archive:'var(--red)'};
-        const depPills = depIds.map((depId, idx) => {
-          const depManifest = allManifests.find(dm => dm.id === depId);
-          const depTitle = depTitles[idx] || (depManifest ? depManifest.title : depId.substring(0, 12));
-          const depMarker = depManifest ? depManifest.marker : depId.substring(0, 12);
-          const depStatus = depManifest ? depManifest.status : 'draft';
-          const borderColor = statusColors[depStatus] || 'var(--text-muted)';
-          return `<span class="dep-pill" data-dep-id="${esc(depId)}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid ${borderColor};border-radius:12px;font-size:11px;font-family:var(--font-mono);margin:2px 4px 2px 0;background:var(--bg-secondary)">` +
-            `<span class="dep-pill-nav" style="cursor:pointer;color:var(--accent)" data-dep-nav-id="${esc(depId)}">${esc(depMarker)}</span>` +
-            `<span style="color:var(--text-primary)">${esc(depTitle)}</span>` +
-            `<span style="color:${borderColor};font-size:9px;text-transform:uppercase;font-weight:600">${esc(depStatus)}</span>` +
-            `<span class="dep-remove" data-dep-rm-id="${esc(depId)}" style="cursor:pointer;color:var(--red);font-size:13px;line-height:1;margin-left:2px" title="Remove dependency">&times;</span>` +
-          `</span>`;
-        }).join('');
 
-        // Filter picker candidates: same product (or all if no product), exclude self and already-linked
+        const pillFor = (d, withRemove) => {
+          const borderColor = statusColors[d.status] || 'var(--text-muted)';
+          const removeBtn = withRemove
+            ? `<span class="dep-remove" data-dep-rm-id="${esc(d.id)}" style="cursor:pointer;color:var(--red);font-size:13px;line-height:1;margin-left:2px" title="Remove dependency">&times;</span>`
+            : '';
+          return `<span class="dep-pill" data-dep-id="${esc(d.id)}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid ${borderColor};border-radius:12px;font-size:11px;font-family:var(--font-mono);margin:2px 4px 2px 0;background:var(--bg-secondary)">` +
+            `<span class="dep-pill-nav" style="cursor:pointer;color:var(--accent)" data-dep-nav-id="${esc(d.id)}">${esc(d.marker)}</span>` +
+            `<span style="color:var(--text-primary)">${esc(d.title)}</span>` +
+            `<span style="color:${borderColor};font-size:9px;text-transform:uppercase;font-weight:600">${esc(d.status)}</span>` +
+            removeBtn +
+          `</span>`;
+        };
+
+        const outPills = depsFromApi.map(d => pillFor(d, true)).join('');
+        const inPills = dependentsFromApi.map(d => pillFor(d, false)).join('');
+
+        // Satisfied indicator: every out-edge must be terminal (closed/archive).
+        // Mirror the server's IsTerminalStatus — keep the set in sync manually
+        // until a dedicated endpoint exposes it.
+        const terminalStatuses = ['closed', 'archive'];
+        const unsatisfied = depsFromApi.filter(d => !terminalStatuses.includes(d.status));
+        const satisfiedPill = depsFromApi.length === 0
+          ? ''
+          : (unsatisfied.length === 0
+              ? `<span style="padding:1px 8px;border-radius:10px;background:rgba(0,217,126,0.15);color:var(--green);font-size:10px;font-weight:600">&#x2713; SATISFIED</span>`
+              : `<span style="padding:1px 8px;border-radius:10px;background:rgba(245,158,11,0.15);color:var(--yellow);font-size:10px;font-weight:600" title="Waiting on: ${unsatisfied.map(d => d.marker).join(', ')}">&#x23F3; WAITING ON ${unsatisfied.length}</span>`);
+
+        // Picker candidates: exclude self + already-linked; include ALL
+        // manifests (same-product filter dropped — cross-product deps
+        // are explicitly allowed per #74 design note).
         const pickerCandidates = allManifests.filter(cm =>
           cm.id !== m.id &&
           !depIds.includes(cm.id) &&
-          (m.project_id ? cm.project_id === m.project_id : true) &&
           cm.status !== 'archive'
         );
-
         const pickerOptions = pickerCandidates.map(cm =>
           `<option value="${esc(cm.id)}">${esc(cm.marker)} ${esc(cm.title)} (${esc(cm.status)})</option>`
         ).join('');
 
+        const dependentsSection = dependentsFromApi.length > 0
+          ? `<div style="margin-top:10px">
+              <div style="color:var(--text-muted);font-size:12px;font-weight:500;margin-bottom:4px">Depended on by</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;min-height:24px">${inPills}</div>
+            </div>`
+          : '';
+
         depsHtml = `<div id="manifest-deps-section" style="margin-bottom:12px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span style="color:var(--text-muted);font-size:12px;font-weight:500">Dependencies</span>
+            <span style="color:var(--text-muted);font-size:12px;font-weight:500">Depends on</span>
+            ${satisfiedPill}
             <button id="manifest-add-dep-btn" class="btn-search" style="padding:2px 10px;font-size:11px">+ Add</button>
           </div>
           <div id="manifest-dep-pills" style="display:flex;flex-wrap:wrap;align-items:center;min-height:24px">
-            ${depPills || '<span style="font-size:11px;color:var(--text-muted);font-style:italic">No dependencies</span>'}
+            ${outPills || '<span style="font-size:11px;color:var(--text-muted);font-style:italic">No dependencies</span>'}
           </div>
           <div id="manifest-dep-picker" style="display:none;margin-top:6px">
             <select id="manifest-dep-select" class="conv-filter" style="font-size:12px;padding:4px 8px;font-family:var(--font-mono);min-width:300px">
               <option value="">Select a manifest...</option>
               ${pickerOptions}
             </select>
+            <div id="manifest-dep-error" style="display:none;margin-top:4px;color:var(--red);font-size:11px"></div>
           </div>
+          ${dependentsSection}
         </div>`;
       }
 
@@ -469,50 +509,73 @@
         });
       });
 
-      // Bind dependency remove buttons
+      // Bind dependency remove buttons — single-edge DELETE via #81's
+      // endpoint so the server can fire the rehab handler (#79) that
+      // flips any waiting tasks newly-unblocked by this removal from
+      // waiting → pending (Option B).
       bodyEl.querySelectorAll('.dep-remove').forEach(el => {
         OL.onView(el, 'click', async (e) => {
           e.stopPropagation();
           const removeId = el.dataset.depRmId;
-          const newDeps = depIds.filter(d => d !== removeId).join(',');
           try {
-            await fetch('/api/manifests/' + m.id, {
-              method: 'PUT',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({depends_on: newDeps})
+            const res = await fetch('/api/manifests/' + m.id + '/dependencies/' + removeId, {
+              method: 'DELETE'
             });
+            if (!res.ok && res.status !== 204) {
+              const msg = await res.text().catch(() => '');
+              console.error('Remove dependency failed:', res.status, msg);
+              return;
+            }
             OL.loadManifest(m.id);
             OL.loadManifests();
-          } catch(e) {
-            console.error('Remove dependency failed:', e);
+          } catch(err) {
+            console.error('Remove dependency failed:', err);
           }
         });
       });
 
-      // Bind "Add Dependency" button + picker
+      // Bind "Add Dependency" button + picker — single-edge POST via
+      // #81's endpoint. The server runs cycle detection before the
+      // insert; cycles come back as 409 and self-loops as 400. We
+      // render the server error inline so the operator sees which
+      // edge was refused without opening DevTools.
       const addDepBtn = document.getElementById('manifest-add-dep-btn');
       const depPicker = document.getElementById('manifest-dep-picker');
       const depSelect = document.getElementById('manifest-dep-select');
+      const depError = document.getElementById('manifest-dep-error');
+      const showDepError = (msg) => {
+        if (!depError) return;
+        depError.textContent = msg;
+        depError.style.display = msg ? 'block' : 'none';
+      };
       if (addDepBtn && depPicker && depSelect) {
         OL.onView(addDepBtn, 'click', () => {
           const visible = depPicker.style.display !== 'none';
           depPicker.style.display = visible ? 'none' : 'block';
+          showDepError('');
           if (!visible) depSelect.focus();
         });
         OL.onView(depSelect, 'change', async () => {
           const selectedId = depSelect.value;
           if (!selectedId) return;
-          const newDeps = depIds.concat(selectedId).join(',');
+          showDepError('');
           try {
-            await fetch('/api/manifests/' + m.id, {
-              method: 'PUT',
+            const res = await fetch('/api/manifests/' + m.id + '/dependencies', {
+              method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({depends_on: newDeps})
+              body: JSON.stringify({depends_on_id: selectedId})
             });
+            if (!res.ok) {
+              // 409 = cycle, 400 = self-loop / bad body, 404 = unknown manifest
+              const body = await res.json().catch(() => ({}));
+              showDepError(body.error || ('Add failed: HTTP ' + res.status));
+              depSelect.value = '';
+              return;
+            }
             OL.loadManifest(m.id);
             OL.loadManifests();
-          } catch(e) {
-            console.error('Add dependency failed:', e);
+          } catch(err) {
+            showDepError('Add failed: ' + (err && err.message ? err.message : err));
           }
         });
       }
