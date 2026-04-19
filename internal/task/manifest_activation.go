@@ -1,0 +1,156 @@
+package task
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log/slog"
+	"time"
+)
+
+// manifestBlockPrefix is the literal prefix Store.Create writes into
+// block_reason when seeding a task as 'waiting' due to an unsatisfied
+// manifest. FlipManifestBlockedTasks filters on it so a task that ended
+// up in 'waiting' for a different reason (e.g. task-level dep not met)
+// does not get accidentally flipped by a manifest-level activation.
+const manifestBlockPrefix = "manifest not satisfied"
+
+// FlipManifestBlockedTasks moves tasks in manifestID that are currently
+// 'waiting' because of a manifest-level block into `newStatus`, clearing
+// their block_reason. Only two targets make sense:
+//
+//   - StatusScheduled — fired by the manifest-close propagation path
+//     (the dep was just satisfied; tasks should auto-run).
+//   - StatusPending — fired by the dep-removal rehab path per session
+//     Option B (operator removed the dep; tasks are unblocked but must
+//     be manually armed to avoid surprise budget burn).
+//
+// Returns the number of rows flipped. Safe to call when nothing matches
+// — it returns 0 with no error.
+//
+// Note: the caller is responsible for verifying the manifest is actually
+// satisfied before invoking this with StatusScheduled. We don't re-check
+// here because the propagation walker already has an IsSatisfied result
+// in hand and calling twice would race against concurrent writes.
+func (s *Store) FlipManifestBlockedTasks(ctx context.Context, manifestID string, newStatus Status) (int, error) {
+	if manifestID == "" {
+		return 0, fmt.Errorf("FlipManifestBlockedTasks: empty manifest id")
+	}
+	if newStatus != StatusScheduled && newStatus != StatusPending {
+		return 0, fmt.Errorf("FlipManifestBlockedTasks: newStatus must be scheduled or pending, got %q", newStatus)
+	}
+
+	// Match the block_reason prefix so we only touch tasks that were
+	// seeded by the manifest-level gate. Tasks in 'waiting' due to a
+	// task-level depends_on carry a different block_reason ("task ...
+	// not completed") and must not be flipped here.
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tasks
+		 SET status = ?, block_reason = '', updated_at = ?
+		 WHERE manifest_id = ? AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
+		string(newStatus), now, manifestID, manifestBlockPrefix+"%")
+	if err != nil {
+		return 0, fmt.Errorf("flip manifest-blocked tasks: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		slog.Info("flipped manifest-blocked tasks",
+			"component", "task", "manifest_id", manifestID,
+			"new_status", newStatus, "count", n)
+	}
+	return int(n), nil
+}
+
+// PropagateManifestClosed is the activation walker fired when a manifest
+// transitions to a terminal status. It visits every manifest that
+// depends on `closedManifestID`, and for each one that is now fully
+// satisfied, flips its waiting-blocked-by-manifest tasks to scheduled
+// so they auto-fire.
+//
+// Propagation is breadth-first with a visited set so no matter how
+// tangled the dep graph is, each manifest is only processed once per
+// closure event. The visited set guards against pre-existing cycles in
+// the graph (#76's cycle detector prevents adds from creating them, but
+// legacy/migrated data could still contain loops that would otherwise
+// spin forever).
+//
+// depsFor is the lookup function — typically wrapped around
+// manifest.Store.ListDependents. satisfiedFor wraps
+// manifest.Store.IsSatisfied. Injected instead of imported so task
+// doesn't depend on manifest, preserving the current package direction.
+func (s *Store) PropagateManifestClosed(
+	ctx context.Context,
+	closedManifestID string,
+	depsFor func(ctx context.Context, manifestID string) ([]string, error),
+	satisfiedFor func(ctx context.Context, manifestID string) (bool, error),
+) (totalActivated int, err error) {
+	if closedManifestID == "" {
+		return 0, fmt.Errorf("PropagateManifestClosed: empty manifest id")
+	}
+
+	visited := map[string]bool{closedManifestID: true}
+	queue := []string{closedManifestID}
+
+	for len(queue) > 0 {
+		head := queue[0]
+		queue = queue[1:]
+
+		dependents, derr := depsFor(ctx, head)
+		if derr != nil {
+			return totalActivated, fmt.Errorf("list dependents of %s: %w", head, derr)
+		}
+		for _, dep := range dependents {
+			if visited[dep] {
+				continue
+			}
+			visited[dep] = true
+
+			// Only activate tasks in dependents that are fully satisfied —
+			// a dependent that still has other open deps must stay blocked.
+			ok, sErr := satisfiedFor(ctx, dep)
+			if sErr != nil {
+				slog.Warn("IsSatisfied failed during propagation",
+					"component", "task", "manifest_id", dep, "error", sErr)
+				continue
+			}
+			if !ok {
+				continue
+			}
+
+			flipped, fErr := s.FlipManifestBlockedTasks(ctx, dep, StatusScheduled)
+			if fErr != nil {
+				slog.Warn("flip failed during propagation",
+					"component", "task", "manifest_id", dep, "error", fErr)
+				continue
+			}
+			totalActivated += flipped
+
+			// Enqueue dep so its own dependents can be checked in
+			// turn. This does not mean dep's status has changed — it
+			// just means tasks inside dep have been scheduled. If the
+			// operator later closes dep, that triggers its own
+			// propagation separately. But enqueueing here covers the
+			// rare case where a chain is satisfied purely by dep
+			// edges closing under soft-deletion or backfill races.
+			queue = append(queue, dep)
+		}
+	}
+	return totalActivated, nil
+}
+
+// CountManifestBlockedTasks returns how many tasks in manifestID are
+// currently 'waiting' with a manifest-level block_reason. Useful for
+// tests + dashboards that want to show "N blocked" without a separate
+// query path.
+func (s *Store) CountManifestBlockedTasks(ctx context.Context, manifestID string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE manifest_id = ? AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
+		manifestID, manifestBlockPrefix+"%").Scan(&n)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return n, err
+}
+

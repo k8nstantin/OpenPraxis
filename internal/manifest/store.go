@@ -39,6 +39,22 @@ type Manifest struct {
 // Store manages manifest persistence.
 type Store struct {
 	db *sql.DB
+	// onTerminalTransition fires AFTER a successful Update that moved
+	// the manifest from a non-terminal status (draft/open) into a
+	// terminal one (closed/archive). Wired in node.go to
+	// task.Store.PropagateManifestClosed so waiting tasks in downstream
+	// manifests auto-activate. Nil means propagation is disabled —
+	// tests that don't care about the cross-package effect leave it
+	// unset and see no hook fires.
+	onTerminalTransition func(ctx context.Context, manifestID string)
+}
+
+// SetTerminalTransitionHandler registers the callback that propagates
+// manifest-close activation to downstream waiting tasks. Safe to call
+// once at startup; there is no mutex because production wiring runs
+// before any HTTP/MCP handler is serving.
+func (s *Store) SetTerminalTransitionHandler(fn func(ctx context.Context, manifestID string)) {
+	s.onTerminalTransition = fn
 }
 
 // NewStore creates a manifest store.
@@ -133,7 +149,19 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 }
 
 // Update modifies an existing manifest and bumps version.
+//
+// Fires the terminal-transition handler (if wired) when status moves
+// from a non-terminal value (draft/open) to a terminal one
+// (closed/archive). The handler propagates the close into downstream
+// waiting tasks — see SetTerminalTransitionHandler.
 func (s *Store) Update(id, title, description, content, status, projectID, dependsOn string, jiraRefs, tags []string) error {
+	// Read prior status so we can detect the non-terminal → terminal
+	// edge. An error here (e.g. row doesn't exist) falls through and
+	// the UPDATE will either no-op or surface the real error — we
+	// don't want to double-report on a missing row.
+	var priorStatus string
+	_ = s.db.QueryRow(`SELECT status FROM manifests WHERE id = ? AND deleted_at = ''`, id).Scan(&priorStatus)
+
 	now := time.Now().UTC()
 	jiraJSON, _ := json.Marshal(jiraRefs)
 	tagsJSON, _ := json.Marshal(tags)
@@ -142,7 +170,24 @@ func (s *Store) Update(id, title, description, content, status, projectID, depen
 		version=version+1, updated_at=? WHERE id=?`,
 		title, description, content, status, projectID, dependsOn, string(jiraJSON), string(tagsJSON),
 		now.Format(time.RFC3339), id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Fire propagation ONLY on the non-terminal → terminal edge.
+	// Repeated writes of an already-terminal status (e.g. closed →
+	// closed after a no-op edit) must NOT re-trigger; the handler is
+	// idempotent on its own but we save the work.
+	if s.onTerminalTransition != nil &&
+		!IsTerminalStatus(priorStatus) && IsTerminalStatus(status) {
+		// Fire in-process. If the handler blocks, the Update returns
+		// only after propagation completes — intentional, so the
+		// operator sees "close + downstream activated" as one atomic
+		// unit from their UI's POV. Handlers that want async behavior
+		// should spawn internally.
+		s.onTerminalTransition(context.Background(), id)
+	}
+	return nil
 }
 
 // Get retrieves a manifest by ID or prefix.
