@@ -14,7 +14,13 @@ type Task struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Schedule    string    `json:"schedule"`   // "once", "5m", "1h", cron expression
-	Status      string    `json:"status"`     // pending, scheduled, running, completed, failed, cancelled
+	// Status is one of the 8 canonical lifecycle states defined in
+	// status.go: pending, waiting, scheduled, running, paused, completed,
+	// failed, cancelled. See status.go's validTransitions map for the
+	// allowed edges of the state machine. Writes go through
+	// Store.UpdateStatus, which validates transitions and rejects
+	// illegal moves.
+	Status      string    `json:"status"`
 	Agent       string    `json:"agent"`      // agent type: claude-code, cursor, etc.
 	SourceNode  string    `json:"source_node"`
 	CreatedBy   string    `json:"created_by"` // session or dashboard

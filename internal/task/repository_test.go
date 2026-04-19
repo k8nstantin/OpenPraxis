@@ -34,12 +34,11 @@ func readStatus(t *testing.T, s *Store, id string) string {
 	return st
 }
 
-// TestActivateDependents_FlipsPendingToScheduled — reproduces the production
-// bug. Create() sets status='pending' even when depends_on is non-empty, so
-// before this fix ActivateDependents matched zero rows and every dependency
-// chain had to be fired by hand. After the fix, a pending child whose
-// depends_on matches the completed parent flips to 'scheduled'.
-func TestActivateDependents_FlipsPendingToScheduled(t *testing.T) {
+// TestActivateDependents_FlipsWaitingToScheduled — in the 8-state model,
+// Create seeds dep-bearing children in 'waiting' (not 'pending'). When the
+// parent completes, ActivateDependents flips the child to 'scheduled' so
+// the scheduler's dequeue query picks it up.
+func TestActivateDependents_FlipsWaitingToScheduled(t *testing.T) {
 	s := openRepoTestStore(t)
 
 	parent, err := s.Create("", "parent", "", "once", "claude-code", "node", "test", "")
@@ -50,8 +49,8 @@ func TestActivateDependents_FlipsPendingToScheduled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create child: %v", err)
 	}
-	if got := readStatus(t, s, child.ID); got != "pending" {
-		t.Fatalf("child initial status = %q, want pending (Create contract)", got)
+	if got := readStatus(t, s, child.ID); got != "waiting" {
+		t.Fatalf("child initial status = %q, want waiting (dep-bearing Create)", got)
 	}
 
 	n, err := s.ActivateDependents(parent.ID)
@@ -66,17 +65,36 @@ func TestActivateDependents_FlipsPendingToScheduled(t *testing.T) {
 	}
 }
 
-// TestActivateDependents_StillHandlesWaiting — we loosened the status
-// predicate, we did not replace it. Any path that parks a task at 'waiting'
-// (reserved for future use; not written by Create today but referenced in
-// the UI sort order) must continue to be picked up.
-func TestActivateDependents_StillHandlesWaiting(t *testing.T) {
+// TestCreate_NoDep_IsPending — a task with no depends_on starts in
+// 'pending' and will never auto-fire. This is the state-machine
+// invariant: pending tasks wait for manual start or an attached
+// next_run_at, they do NOT participate in dependency activation.
+func TestCreate_NoDep_IsPending(t *testing.T) {
+	s := openRepoTestStore(t)
+	loose, err := s.Create("", "loose", "", "once", "claude-code", "node", "t", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if got := readStatus(t, s, loose.ID); got != "pending" {
+		t.Fatalf("no-dep initial status = %q, want pending", got)
+	}
+}
+
+// TestActivateDependents_HandlesLegacyPending — tasks created before the
+// state-machine fix may still be sitting in 'pending' with depends_on set.
+// ActivateDependents must still activate them so nothing in the existing
+// DB gets stuck. Once the code has been in production for a while and
+// legacy rows have drained, this path becomes dead — but leaving it in is
+// a cheap safety net, and #67 documents the reasoning.
+func TestActivateDependents_HandlesLegacyPending(t *testing.T) {
 	s := openRepoTestStore(t)
 
 	parent, _ := s.Create("", "p", "", "once", "claude-code", "node", "t", "")
 	child, _ := s.Create("", "c", "", "once", "claude-code", "node", "t", parent.ID)
-	if _, err := s.db.Exec(`UPDATE tasks SET status = 'waiting' WHERE id = ?`, child.ID); err != nil {
-		t.Fatalf("force waiting: %v", err)
+	// Force-write legacy 'pending' so we simulate a row that pre-dates the
+	// Create-seeds-waiting change.
+	if _, err := s.db.Exec(`UPDATE tasks SET status = 'pending' WHERE id = ?`, child.ID); err != nil {
+		t.Fatalf("force pending: %v", err)
 	}
 
 	n, err := s.ActivateDependents(parent.ID)
@@ -84,7 +102,7 @@ func TestActivateDependents_StillHandlesWaiting(t *testing.T) {
 		t.Fatalf("ActivateDependents: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("activated count = %d, want 1 for waiting child", n)
+		t.Fatalf("activated count = %d, want 1 for legacy pending child", n)
 	}
 	if got := readStatus(t, s, child.ID); got != "scheduled" {
 		t.Fatalf("status = %q, want scheduled", got)
@@ -119,8 +137,10 @@ func TestActivateDependents_LeavesUnrelatedTasksAlone(t *testing.T) {
 	if got := readStatus(t, s, loose.ID); got != "pending" {
 		t.Fatalf("loose pending sibling was modified: status = %q, want pending", got)
 	}
-	if got := readStatus(t, s, cousin.ID); got != "pending" {
-		t.Fatalf("cousin depending on another parent was modified: status = %q, want pending", got)
+	// Cousin depends on otherParent (still 'pending'), so Create seeded
+	// it in 'waiting'. ActivateDependents(parent) must not touch it.
+	if got := readStatus(t, s, cousin.ID); got != "waiting" {
+		t.Fatalf("cousin depending on another parent was modified: status = %q, want waiting", got)
 	}
 }
 
