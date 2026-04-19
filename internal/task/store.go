@@ -175,8 +175,52 @@ func (s *Store) init() error {
 		return fmt.Errorf("create task_manifests table: %w", err)
 	}
 
+	// SCD Type 2 for the task→task dependency relationship. Every
+	// SetDependency call closes the current row (sets valid_to) and
+	// inserts a fresh row (valid_from=now, valid_to=NULL). The
+	// "current" dep is whatever row has valid_to IS NULL for that
+	// task; any prior state is recoverable by querying rows ordered
+	// by valid_from. tasks.depends_on stays as a cache of the current
+	// row so existing queries keep working without the SCD join.
+	//
+	// depends_on='' represents "no dep" — a cleared dep writes a row
+	// with depends_on='' rather than leaving the table unchanged, so
+	// an operator can see that a dep was deliberately removed (vs.
+	// never set).
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_dependency (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id TEXT NOT NULL,
+		depends_on TEXT NOT NULL DEFAULT '',
+		valid_from TEXT NOT NULL,
+		valid_to TEXT NOT NULL DEFAULT '',
+		changed_by TEXT NOT NULL DEFAULT '',
+		reason TEXT NOT NULL DEFAULT ''
+	)`)
+	if err != nil {
+		return fmt.Errorf("create task_dependency table: %w", err)
+	}
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_dep_task ON task_dependency(task_id, valid_from DESC)`)
+	if err != nil {
+		return fmt.Errorf("create task_dep index: %w", err)
+	}
+	// Partial index for the current-dep lookup path. valid_to='' means
+	// "still active" in our SCD encoding (we use empty string not NULL
+	// for consistency with the rest of the schema).
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_dep_current ON task_dependency(task_id) WHERE valid_to = ''`)
+	if err != nil {
+		return fmt.Errorf("create task_dep current index: %w", err)
+	}
+
 	if err := s.initPricingSchema(); err != nil {
 		return fmt.Errorf("create model_pricing table: %w", err)
+	}
+
+	// Legacy tasks with a non-empty depends_on but no SCD row yet get
+	// one seeded here so the dep history stream isn't blank on
+	// upgrade. Idempotent — the NOT EXISTS guard in the backfill
+	// makes repeat runs a no-op.
+	if _, err := s.BackfillTaskDepSCD(); err != nil {
+		return fmt.Errorf("backfill task dep SCD: %w", err)
 	}
 
 	return nil
