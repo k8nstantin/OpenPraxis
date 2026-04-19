@@ -1291,3 +1291,51 @@ body {
   .knob-row-meta { padding-left: 0; }
   .knob-label { min-width: 0; }
 }
+
+/* === Entity Comments (M3-T6) — rendered by OL.renderCommentsSection === */
+.comment-section { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
+.comment-section-header { font-weight: 600; margin-bottom: 12px; color: var(--text-primary); font-size: 13px; }
+.comment-section-loading { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+.comment-section-error { color: var(--red); font-size: 12px; padding: 8px 0; }
+.comment-section-stream { margin-top: 8px; }
+
+.comment-add-form { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.comment-add-body { min-height: 80px; resize: vertical; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 8px; border-radius: 4px; font-size: 12px; font-family: var(--font-mono); }
+.comment-add-row { display: flex; gap: 8px; align-items: center; }
+.comment-add-type { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 8px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+.comment-add-submit { background: var(--accent); color: #fff; border: none; padding: 4px 14px; border-radius: 3px; font-size: 12px; cursor: pointer; font-weight: 600; }
+.comment-add-submit:hover { background: var(--accent-hover); }
+.comment-add-error { color: var(--red); font-size: 11px; padding: 4px 0; }
+
+.comment-filter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 11px; color: var(--text-muted); }
+.comment-filter-label { font-size: 11px; }
+.comment-filter { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); padding: 2px 6px; border-radius: 3px; font-size: 11px; font-family: var(--font-mono); }
+
+.comment-empty { color: var(--text-muted); font-size: 12px; padding: 12px 0; text-align: center; font-style: italic; }
+
+.comment-card { border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; background: var(--bg-secondary); }
+.comment-header { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 11px; }
+.comment-author { color: var(--text-primary); font-weight: 600; }
+.comment-time { color: var(--text-muted); }
+.comment-controls { margin-left: auto; display: flex; gap: 4px; }
+.comment-controls button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 3px; }
+.comment-controls button:hover { color: var(--text-primary); background: var(--bg-input); }
+.comment-type-badge { padding: 2px 8px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid currentColor; }
+.comment-type-execution_review { color: var(--accent); }
+.comment-type-user_note        { color: var(--green); }
+.comment-type-watcher_finding  { color: var(--yellow); }
+.comment-type-agent_note       { color: var(--accent); }
+.comment-type-decision         { color: var(--green); }
+.comment-type-link             { color: var(--text-muted); }
+.comment-type-review_rejection { color: var(--red); }
+.comment-type-review_approval  { color: var(--green); }
+.comment-body { font-size: 12px; line-height: 1.5; color: var(--text-primary); }
+.comment-body p { margin: 0 0 6px 0; }
+.comment-body p:last-child { margin-bottom: 0; }
+.comment-body pre, .comment-body code { background: var(--bg-primary); padding: 2px 4px; border-radius: 3px; font-family: var(--font-mono); }
+.comment-body pre { padding: 8px; overflow-x: auto; }
+.comment-body pre code { background: transparent; padding: 0; }
+.comment-body table { border-collapse: collapse; margin: 4px 0; }
+.comment-body th, .comment-body td { border: 1px solid var(--border); padding: 4px 8px; }
+.comment-body a { color: var(--accent); }
+.comment-body ul, .comment-body ol { margin: 4px 0 6px 20px; padding: 0; }
