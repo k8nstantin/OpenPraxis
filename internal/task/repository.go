@@ -25,9 +25,33 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	id := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 
+	// Initial status derives from the presence + state of depends_on.
+	//
+	//   - no dep                             → pending  (manual-only, won't auto-fire)
+	//   - dep set, parent not yet completed  → waiting  (ActivateDependents will flip to scheduled)
+	//   - dep set, parent already completed  → pending  (caller can schedule or manually start;
+	//                                                    we don't auto-schedule on create because
+	//                                                    there's no next_run_at to honor yet)
+	//
+	// This is the half of the state-machine fix that #67 couldn't reach:
+	// #67 loosened ActivateDependents to also match 'pending' children as
+	// a safety net, but the correct invariant is that dep-bearing tasks
+	// start in 'waiting' so the sort order + UI filters tell the truth.
+	initialStatus := StatusPending
+	if dependsOn != "" {
+		var parentStatus string
+		err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+			dependsOn, dependsOn+"%").Scan(&parentStatus)
+		if err == nil && parentStatus != string(StatusCompleted) {
+			initialStatus = StatusWaiting
+		}
+		// sql.ErrNoRows or any other lookup failure: keep pending, operator
+		// can correct by attaching the dep later via Edit.
+	}
+
 	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
-		id, manifestID, title, description, schedule, agent, sourceNode, createdBy, dependsOn,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, manifestID, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
@@ -36,7 +60,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	return &Task{
 		ID: id, Marker: id[:12], ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
-		Status: "pending", Agent: agent, SourceNode: sourceNode,
+		Status: string(initialStatus), Agent: agent, SourceNode: sourceNode,
 		CreatedBy: createdBy, DependsOn: dependsOn, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -127,8 +151,23 @@ func (s *Store) Update(id string, title, description *string) (*Task, error) {
 	return s.Get(id)
 }
 
-// UpdateStatus changes a task's status.
+// UpdateStatus changes a task's status, validating the transition against
+// the canonical state machine in status.go. Returns the same validation
+// error surface ValidateTransition produces when the move is illegal — the
+// caller gets the exact reason and which next states would have been
+// legal. A no-op (current == target) is silently allowed so idempotent
+// writers don't see spurious errors.
 func (s *Store) UpdateStatus(id, status string) error {
+	// Resolve the row so we can read the current status for the
+	// transition check. Marker-prefix match is preserved.
+	var current string
+	if err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
+		id, id+"%").Scan(&current); err != nil {
+		return err
+	}
+	if err := ValidateTransition(Status(current), Status(status)); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? OR id LIKE ?`, status, now, id, id+"%")
 	return err
