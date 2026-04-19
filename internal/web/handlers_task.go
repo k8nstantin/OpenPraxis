@@ -863,3 +863,103 @@ func apiTaskDelusions(n *node.Node) http.HandlerFunc {
 		writeJSON(w, events)
 	}
 }
+
+// apiTaskReject — POST /api/tasks/{id}/reject with body {reason, reviewer?}.
+//
+// Flips status completed → scheduled and appends a review_rejection comment.
+// 404 when the task doesn't exist, 409 when the task isn't currently
+// completed, 400 on empty reason. Body on success echoes the updated task.
+func apiTaskReject(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		t, err := n.Tasks.Get(id)
+		if err != nil || t == nil {
+			writeError(w, "task not found", http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Reason   string `json:"reason"`
+			Reviewer string `json:"reviewer"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if body.Reason == "" {
+			writeError(w, "reason is required", http.StatusBadRequest)
+			return
+		}
+		reviewer := body.Reviewer
+		if reviewer == "" {
+			reviewer = "http-api"
+		}
+		if err := n.Tasks.RejectCompletedTask(r.Context(), t.ID, body.Reason, reviewer); err != nil {
+			switch {
+			case errors.Is(err, task.ErrTaskNotCompleted):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, task.ErrEmptyReviewReason):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		updated, _ := n.Tasks.Get(t.ID)
+		writeJSON(w, updated)
+	}
+}
+
+// apiTaskApprove — POST /api/tasks/{id}/approve with optional body {reviewer}.
+//
+// Appends a review_approval comment. Status does NOT change; approval is a
+// signal consumed by manifest-closure warnings. 404 / 409 / 500 error map.
+func apiTaskApprove(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		t, err := n.Tasks.Get(id)
+		if err != nil || t == nil {
+			writeError(w, "task not found", http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Reviewer string `json:"reviewer"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		reviewer := body.Reviewer
+		if reviewer == "" {
+			reviewer = "http-api"
+		}
+		if err := n.Tasks.ApproveCompletedTask(r.Context(), t.ID, reviewer); err != nil {
+			switch {
+			case errors.Is(err, task.ErrTaskNotCompleted):
+				writeError(w, err.Error(), http.StatusConflict)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		writeJSON(w, map[string]string{"status": "approved", "task_id": t.ID, "reviewer": reviewer})
+	}
+}
+
+// apiTaskReviewStatus — GET /api/tasks/{id}/review.
+//
+// Returns the derived TaskReviewStatus (NeedsRework / HasApproval +
+// latest rejection/approval metadata). Drives the review badge on the
+// task detail page.
+func apiTaskReviewStatus(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		t, err := n.Tasks.Get(id)
+		if err != nil || t == nil {
+			writeError(w, "task not found", http.StatusNotFound)
+			return
+		}
+		st, err := n.Tasks.TaskReviewStatus(r.Context(), t.ID)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, st)
+	}
+}

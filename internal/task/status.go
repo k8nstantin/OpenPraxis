@@ -120,8 +120,17 @@ var validTransitions = map[Status]map[Status]bool{
 		StatusCancelled: true,
 	},
 	StatusCompleted: {
-		// Watcher audit downgrade is the only legal move out.
+		// Watcher audit downgrade is the one legacy exit.
 		StatusFailed: true,
+		// Review-rejection re-run path (#93). Gated by
+		// Store.RejectCompletedTask which writes the rejection
+		// comment atomically with the status flip — raw
+		// UpdateStatus callers can technically invoke this
+		// transition, but convention is that only the reject path
+		// does so. Tests enforce the shape of the comment/status
+		// pair rather than trying to lock the transition to a
+		// single caller.
+		StatusScheduled: true,
 	},
 	// StatusFailed and StatusCancelled have no entries — terminal.
 }

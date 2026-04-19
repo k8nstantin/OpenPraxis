@@ -61,6 +61,25 @@ func (s *Server) registerTaskTools() {
 	)
 
 	s.mcp.AddTool(
+		mcplib.NewTool("task_reject",
+			mcplib.WithDescription("Reject a completed task after review. Flips the task from completed back to scheduled for another execution pass. Attaches a review_rejection comment carrying the reason so the history is preserved and the agent picking up the rerun can see what needs fixing."),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker (must currently be status=completed)")),
+			mcplib.WithString("reason", mcplib.Required(), mcplib.Description("Why the task is being rejected — what needs to change on the next pass")),
+			mcplib.WithString("reviewer", mcplib.Description("Reviewer identifier (operator name / session id). Default: 'reviewer'")),
+		),
+		s.handleTaskReject,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("task_approve",
+			mcplib.WithDescription("Approve a completed task after review. Does NOT change the task status — approval is a durable signal attached via a review_approval comment. The manifest-closure warning counter reads the approval state."),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker (must currently be status=completed)")),
+			mcplib.WithString("reviewer", mcplib.Description("Reviewer identifier. Default: 'reviewer'")),
+		),
+		s.handleTaskApprove,
+	)
+
+	s.mcp.AddTool(
 		mcplib.NewTool("task_link_manifest",
 			mcplib.WithDescription("Link a task to an additional manifest (many-to-many). The task can already have a primary manifest — this adds a secondary link."),
 			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID or marker")),
@@ -449,4 +468,41 @@ func (s *Server) handleTaskResume(ctx context.Context, req mcplib.CallToolReques
 		return errResult("request resume: %v", err), nil
 	}
 	return textResult(fmt.Sprintf("Task [%s] resume requested: %s (serve runner will apply within 2s)", t.Marker, t.Title)), nil
+}
+
+func (s *Server) handleTaskReject(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	t, _ := s.node.Tasks.Get(argStr(a, "id"))
+	if t == nil {
+		return errResult("task not found: %s", argStr(a, "id")), nil
+	}
+	reason := argStr(a, "reason")
+	if reason == "" {
+		return errResult("reason is required"), nil
+	}
+	reviewer := argStr(a, "reviewer")
+	if reviewer == "" {
+		reviewer = s.sessionSource(ctx)
+	}
+	if err := s.node.Tasks.RejectCompletedTask(ctx, t.ID, reason, reviewer); err != nil {
+		return errResult("%v", err), nil
+	}
+	return textResult(fmt.Sprintf("Task [%s] rejected by %s. Flipped to scheduled for re-run. Reason: %s",
+		t.Marker, reviewer, reason)), nil
+}
+
+func (s *Server) handleTaskApprove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	t, _ := s.node.Tasks.Get(argStr(a, "id"))
+	if t == nil {
+		return errResult("task not found: %s", argStr(a, "id")), nil
+	}
+	reviewer := argStr(a, "reviewer")
+	if reviewer == "" {
+		reviewer = s.sessionSource(ctx)
+	}
+	if err := s.node.Tasks.ApproveCompletedTask(ctx, t.ID, reviewer); err != nil {
+		return errResult("%v", err), nil
+	}
+	return textResult(fmt.Sprintf("Task [%s] approved by %s.", t.Marker, reviewer)), nil
 }

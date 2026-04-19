@@ -103,6 +103,18 @@ func New(cfg *config.Config) (*Node, error) {
 	// propagation walker only flips its own tasks.
 	taskStore.SetProductChecker(productStore)
 
+	// Review comments wiring (#93). comments.Store is the durable
+	// home for review_rejection + review_approval comments; task.Store
+	// calls through these adapters so it doesn't take an
+	// internal/comments import. Review reads + writes flow through
+	// the same underlying store; the interface split exists for
+	// testability (stub either side independently).
+	commentsStore := comments.NewStore(index.DB())
+	taskStore.SetReviewCommentsAPI(
+		&taskReviewWriteAdapter{s: commentsStore},
+		&taskReviewReadAdapter{s: commentsStore},
+	)
+
 	// Wire the terminal-transition handler: when a manifest moves from
 	// non-terminal (draft/open) → terminal (closed/archive), walk its
 	// dependents and activate waiting tasks in any newly-satisfied
@@ -633,4 +645,45 @@ func (n *Node) ValidateArchiveManifest(manifestID string) error {
 		}
 	}
 	return nil
+}
+
+// taskReviewWriteAdapter satisfies task.ReviewWriter by delegating to
+// comments.Store.Add with the TargetType/CommentType type-conversion
+// the comments package needs. Keeps task free of an internal/comments
+// import; the type conversion lives here in the node layer where both
+// packages are already in scope.
+type taskReviewWriteAdapter struct{ s *comments.Store }
+
+func (a *taskReviewWriteAdapter) AddReviewComment(ctx context.Context, taskID, author, commentType, body string) error {
+	_, err := a.s.Add(ctx, comments.TargetTask, taskID, author, comments.CommentType(commentType), body)
+	return err
+}
+
+// taskReviewReadAdapter satisfies task.ReviewReader by listing
+// comments on the task target and filtering down to review-type rows.
+// Non-review comments (user_note, execution_review, etc.) are dropped
+// here so the caller's "latest review comment wins" logic doesn't
+// have to re-filter.
+type taskReviewReadAdapter struct{ s *comments.Store }
+
+func (a *taskReviewReadAdapter) ListReviewCommentsForTask(ctx context.Context, taskID string, limit int) ([]task.ReviewComment, error) {
+	all, err := a.s.List(ctx, comments.TargetTask, taskID, limit, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []task.ReviewComment
+	for _, c := range all {
+		t := string(c.Type)
+		if t != "review_rejection" && t != "review_approval" {
+			continue
+		}
+		out = append(out, task.ReviewComment{
+			ID:        c.ID,
+			Type:      t,
+			Author:    c.Author,
+			Body:      c.Body,
+			CreatedAt: c.CreatedAt,
+		})
+	}
+	return out, nil
 }

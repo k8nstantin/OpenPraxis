@@ -9,10 +9,21 @@ const (
 	TypeAgentNote       CommentType = "agent_note"
 	TypeDecision        CommentType = "decision"
 	TypeLink            CommentType = "link"
+	// TypeReviewRejection marks a completed task as needing rework.
+	// Only attaches to target_type=task. Drives the "completed →
+	// scheduled" re-run transition in task.Store.RejectCompletedTask
+	// and the NeedsRework computation in TaskReviewStatus.
+	TypeReviewRejection CommentType = "review_rejection"
+	// TypeReviewApproval marks a completed task as explicitly signed
+	// off. Does NOT change the task status — approval is an input to
+	// manifest closure warnings, not a task-level transition.
+	TypeReviewApproval CommentType = "review_approval"
 )
 
 // AllCommentTypes returns the canonical ordering of comment types used by
-// UI filter dropdowns in M3. Order matches the taxonomy in the M1 manifest.
+// UI filter dropdowns in M3. Order matches the taxonomy in the M1 manifest;
+// review types appended at the end so the pre-existing order stays stable
+// and operators don't see dropdown items shifting.
 func AllCommentTypes() []CommentType {
 	return []CommentType{
 		TypeExecutionReview,
@@ -21,13 +32,16 @@ func AllCommentTypes() []CommentType {
 		TypeAgentNote,
 		TypeDecision,
 		TypeLink,
+		TypeReviewRejection,
+		TypeReviewApproval,
 	}
 }
 
 func IsValidCommentType(s string) bool {
 	switch CommentType(s) {
 	case TypeExecutionReview, TypeUserNote, TypeWatcherFinding,
-		TypeAgentNote, TypeDecision, TypeLink:
+		TypeAgentNote, TypeDecision, TypeLink,
+		TypeReviewRejection, TypeReviewApproval:
 		return true
 	}
 	return false
@@ -83,6 +97,16 @@ func Registry() []CommentTypeInfo {
 			Type:        TypeLink,
 			Label:       "Link",
 			Description: "Cross-reference to another comment, PR, issue, or external doc",
+		},
+		{
+			Type:        TypeReviewRejection,
+			Label:       "Review Rejection",
+			Description: "Reviewer rejected a completed task; kicks it back to scheduled for another pass",
+		},
+		{
+			Type:        TypeReviewApproval,
+			Label:       "Review Approval",
+			Description: "Reviewer signed off a completed task; clears the needs-rework flag for manifest closure",
 		},
 	}
 }
