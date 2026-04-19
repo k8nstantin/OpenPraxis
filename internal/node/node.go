@@ -108,6 +108,21 @@ func New(cfg *config.Config) (*Node, error) {
 	// direction. depsFor flattens ListDependents' Dep rows to id
 	// strings; satisfiedFor drops the blocker list the core walker
 	// doesn't need.
+	// Dep removal: when an operator removes a manifest→manifest edge,
+	// any waiting tasks in the source manifest that were blocked by
+	// a manifest-level dep are rehabbed to 'pending' — Option B, per
+	// issue #74 design comment. Pending (not scheduled) keeps an
+	// accidental click from auto-spending; operator arms explicitly.
+	// We only flip when the manifest is now fully satisfied; if other
+	// deps still block it, waiting tasks stay put.
+	manifestStore.SetDepRemovedHandler(func(ctx context.Context, manifestID string) {
+		ok, _, err := manifestStore.IsSatisfied(ctx, manifestID)
+		if err != nil || !ok {
+			return
+		}
+		_, _ = taskStore.FlipManifestBlockedTasks(ctx, manifestID, task.StatusPending)
+	})
+
 	manifestStore.SetTerminalTransitionHandler(func(ctx context.Context, manifestID string) {
 		depsFor := func(ctx context.Context, m string) ([]string, error) {
 			deps, err := manifestStore.ListDependents(ctx, m)

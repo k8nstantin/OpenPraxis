@@ -47,6 +47,14 @@ type Store struct {
 	// tests that don't care about the cross-package effect leave it
 	// unset and see no hook fires.
 	onTerminalTransition func(ctx context.Context, manifestID string)
+
+	// onDepRemoved fires AFTER a successful RemoveDep. The wired
+	// handler rehabs any now-unblocked waiting tasks into 'pending'
+	// per Option B (issue #74 comment). Distinct from
+	// onTerminalTransition: removal is operator-initiated scope
+	// reshuffling, not the normal close-advances-work flow, so we
+	// refuse to auto-burn budget by scheduling anything. Nil disables.
+	onDepRemoved func(ctx context.Context, manifestID string)
 }
 
 // SetTerminalTransitionHandler registers the callback that propagates
@@ -55,6 +63,16 @@ type Store struct {
 // before any HTTP/MCP handler is serving.
 func (s *Store) SetTerminalTransitionHandler(fn func(ctx context.Context, manifestID string)) {
 	s.onTerminalTransition = fn
+}
+
+// SetDepRemovedHandler registers the callback that fires after a
+// successful RemoveDep. The handler is expected to rehab any waiting
+// tasks in manifestID that are no longer blocked — per the Option B
+// decision recorded in issue #74, they go to `pending` (not
+// `scheduled`), so the operator has to explicitly arm them. This keeps
+// an accidental "remove dep" click from auto-burning budget.
+func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, manifestID string)) {
+	s.onDepRemoved = fn
 }
 
 // NewStore creates a manifest store.
