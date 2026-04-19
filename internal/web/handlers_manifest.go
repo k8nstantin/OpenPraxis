@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -343,3 +344,150 @@ func enrichManifests(n *node.Node, manifests []*manifest.Manifest) []enrichedMan
 	}
 	return result
 }
+
+// resolveManifestID accepts either a 12-char marker or a full UUID and
+// returns the full UUID via Manifests.Get (which already handles prefix
+// matching). Returns "" + a 404-worthy error message when missing.
+func resolveManifestID(n *node.Node, idOrMarker string) (string, string) {
+	m, _ := n.Manifests.Get(idOrMarker)
+	if m == nil {
+		return "", "manifest not found: " + idOrMarker
+	}
+	return m.ID, ""
+}
+
+// apiManifestDepList — GET /api/manifests/{id}/dependencies?direction=out|in|both
+//
+// Default direction is "out". Response body keys are omitted when the
+// requested direction filters them out, so the UI can dispatch on which
+// key is present without reading query params.
+func apiManifestDepList(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, msg := resolveManifestID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		direction := r.URL.Query().Get("direction")
+		if direction == "" {
+			direction = "out"
+		}
+		out := map[string]any{}
+		switch direction {
+		case "out", "both":
+			deps, err := n.Manifests.ListDeps(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["deps"] = deps
+			if direction != "both" {
+				break
+			}
+			fallthrough
+		case "in":
+			dependents, err := n.Manifests.ListDependents(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["dependents"] = dependents
+		default:
+			writeError(w, "direction must be out, in, or both", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, out)
+	}
+}
+
+// apiManifestDepAdd — POST /api/manifests/{id}/dependencies
+//
+// Body: {"depends_on_id": "..."}.
+// 201 on success with the denormalized dep row echoed back.
+// 400 for self-loop / missing body fields.
+// 409 for cycle detection — the body carries the specific rejected pair.
+// 404 when either manifest doesn't exist.
+func apiManifestDepAdd(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveManifestID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		var body struct {
+			DependsOnID string `json:"depends_on_id"`
+			CreatedBy   string `json:"created_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if body.DependsOnID == "" {
+			writeError(w, "depends_on_id is required", http.StatusBadRequest)
+			return
+		}
+		dstID, msg := resolveManifestID(n, body.DependsOnID)
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		createdBy := body.CreatedBy
+		if createdBy == "" {
+			createdBy = "http-api"
+		}
+
+		if err := n.Manifests.AddDep(r.Context(), srcID, dstID, createdBy); err != nil {
+			// Map domain errors to HTTP status so UI can branch.
+			switch {
+			case errors.Is(err, manifest.ErrCycle):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, manifest.ErrSelfLoop):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Echo back the created edge so the UI doesn't need a refetch.
+		deps, _ := n.Manifests.ListDeps(r.Context(), srcID)
+		for _, d := range deps {
+			if d.ID == dstID {
+				w.WriteHeader(http.StatusCreated)
+				writeJSON(w, d)
+				return
+			}
+		}
+		// Fallback — write 201 with a minimal body if the list lookup
+		// didn't find it (shouldn't happen; defensive).
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, map[string]string{"manifest_id": srcID, "depends_on_id": dstID})
+	}
+}
+
+// apiManifestDepRemove — DELETE /api/manifests/{id}/dependencies/{depId}
+//
+// Idempotent: 204 whether or not the edge existed. The RemoveDep path
+// already fires the rehab handler (see #79) that flips any newly-
+// unblocked waiting tasks to 'pending', so callers don't need a
+// follow-up action.
+func apiManifestDepRemove(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveManifestID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		dstID, msg := resolveManifestID(n, mux.Vars(r)["depId"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		if err := n.Manifests.RemoveDep(r.Context(), srcID, dstID); err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+

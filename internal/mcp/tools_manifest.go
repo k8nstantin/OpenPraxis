@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/k8nstantin/OpenPraxis/internal/manifest"
 )
 
 func (s *Server) registerManifestTools() {
@@ -70,6 +72,33 @@ func (s *Server) registerManifestTools() {
 			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
 		),
 		s.handleManifestDelete,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("manifest_dep_add",
+			mcplib.WithDescription("Add a manifest→manifest dependency edge. Rejects self-loops and cycles; the error names the rejected pair so you can fix your graph. Triggers auto-activation downstream if the target manifest is already closed."),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest that will wait (ID or 12-char marker)")),
+			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Manifest that must close first (ID or marker)")),
+		),
+		s.handleManifestDepAdd,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("manifest_dep_remove",
+			mcplib.WithDescription("Remove a manifest→manifest dependency edge. Idempotent. If the removal makes the source manifest fully satisfied, any tasks sitting in 'waiting' due to the manifest block flip to 'pending' (Option B — operator must explicitly arm them)."),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Source manifest (ID or marker)")),
+			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Dep to remove (ID or marker)")),
+		),
+		s.handleManifestDepRemove,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("manifest_dep_list",
+			mcplib.WithDescription("List manifest dependencies. direction=out (default) returns manifests this one depends on; direction=in returns manifests that depend on this one; direction=both returns both lists."),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("direction", mcplib.Description("out | in | both (default: out)")),
+		),
+		s.handleManifestDepList,
 	)
 }
 
@@ -338,4 +367,106 @@ func (s *Server) handleManifestDelete(ctx context.Context, req mcplib.CallToolRe
 	}
 
 	return textResult(fmt.Sprintf("Manifest deleted.")), nil
+}
+
+// resolveManifestPair accepts marker-or-id inputs for a source + target
+// manifest, looks up both, and returns the full UUIDs. Centralizes the
+// same "Manifests.Get accepts prefixes, dep tables want full IDs"
+// translation that the dep-add/remove/list handlers all need.
+func (s *Server) resolveManifestPair(src, dst string) (srcID, dstID string, errMsg string) {
+	srcM, _ := s.node.Manifests.Get(src)
+	if srcM == nil {
+		return "", "", fmt.Sprintf("manifest not found: %s", src)
+	}
+	dstM, _ := s.node.Manifests.Get(dst)
+	if dstM == nil {
+		return "", "", fmt.Sprintf("dependency manifest not found: %s", dst)
+	}
+	return srcM.ID, dstM.ID, ""
+}
+
+func (s *Server) handleManifestDepAdd(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	srcID, dstID, msg := s.resolveManifestPair(argStr(a, "manifest_id"), argStr(a, "depends_on_manifest_id"))
+	if msg != "" {
+		return errResult("%s", msg), nil
+	}
+	if err := s.node.Manifests.AddDep(ctx, srcID, dstID, s.sessionSource(ctx)); err != nil {
+		// ErrCycle / ErrSelfLoop / generic failures all surface their
+		// error text directly — the whole point is the operator (or
+		// agent) seeing WHICH edge was refused.
+		return errResult("%v", err), nil
+	}
+	src, _ := s.node.Manifests.Get(srcID)
+	dst, _ := s.node.Manifests.Get(dstID)
+	return textResult(fmt.Sprintf("Dep added: [%s] %s → [%s] %s",
+		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+}
+
+func (s *Server) handleManifestDepRemove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	srcID, dstID, msg := s.resolveManifestPair(argStr(a, "manifest_id"), argStr(a, "depends_on_manifest_id"))
+	if msg != "" {
+		return errResult("%s", msg), nil
+	}
+	if err := s.node.Manifests.RemoveDep(ctx, srcID, dstID); err != nil {
+		return errResult("remove dep: %v", err), nil
+	}
+	src, _ := s.node.Manifests.Get(srcID)
+	dst, _ := s.node.Manifests.Get(dstID)
+	return textResult(fmt.Sprintf("Dep removed: [%s] %s → [%s] %s (downstream waiting tasks may have been rehabbed to 'pending').",
+		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+}
+
+func (s *Server) handleManifestDepList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	m, _ := s.node.Manifests.Get(argStr(a, "manifest_id"))
+	if m == nil {
+		return errResult("manifest not found: %s", argStr(a, "manifest_id")), nil
+	}
+	direction := argStr(a, "direction")
+	if direction == "" {
+		direction = "out"
+	}
+
+	formatDeps := func(rows []manifest.Dep) string {
+		if len(rows) == 0 {
+			return "  (none)"
+		}
+		var out []string
+		for _, d := range rows {
+			out = append(out, fmt.Sprintf("  [%s] %s — %s", d.Marker, d.Title, d.Status))
+		}
+		return strings.Join(out, "\n")
+	}
+
+	var output string
+	switch direction {
+	case "out":
+		deps, err := s.node.Manifests.ListDeps(ctx, m.ID)
+		if err != nil {
+			return errResult("list deps: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s depends on:\n%s\n", m.Marker, m.Title, formatDeps(deps))
+	case "in":
+		dependents, err := s.node.Manifests.ListDependents(ctx, m.ID)
+		if err != nil {
+			return errResult("list dependents: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s is depended on by:\n%s\n", m.Marker, m.Title, formatDeps(dependents))
+	case "both":
+		deps, err := s.node.Manifests.ListDeps(ctx, m.ID)
+		if err != nil {
+			return errResult("list deps: %v", err), nil
+		}
+		dependents, err := s.node.Manifests.ListDependents(ctx, m.ID)
+		if err != nil {
+			return errResult("list dependents: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s depends on:\n%s\n\n[%s] %s is depended on by:\n%s\n",
+			m.Marker, m.Title, formatDeps(deps), m.Marker, m.Title, formatDeps(dependents))
+	default:
+		return errResult("direction must be one of: out, in, both (got %q)", direction), nil
+	}
+	return textResult(output), nil
 }

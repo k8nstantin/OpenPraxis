@@ -83,13 +83,13 @@ OpenPraxis registers Claude Code hooks in `~/.claude/settings.json`:
 
 All hooks hit `http://127.0.0.1:8765/api/hook`.
 
-## MCP Tools (37)
+## MCP Tools (40)
 
 Memory: `memory_store`, `memory_search`, `memory_recall`, `memory_list`, `memory_forget`, `memory_status`, `memory_peers`
 Conversations: `conversation_save`, `conversation_search`, `conversation_list`, `conversation_get`
 Markers: `marker_flag`, `marker_list`, `marker_done`
 Visceral: `visceral_rules`, `visceral_confirm`, `visceral_set`, `visceral_remove`
-Manifests: `manifest_create`, `manifest_get`, `manifest_list`, `manifest_update`, `manifest_delete`, `manifest_search`
+Manifests: `manifest_create`, `manifest_get`, `manifest_list`, `manifest_update`, `manifest_delete`, `manifest_search`, `manifest_dep_add`, `manifest_dep_remove`, `manifest_dep_list`
 Tasks: `task_create`, `task_list`, `task_get`, `task_start`, `task_cancel`, `task_link_manifest`, `task_unlink_manifest`
 Ideas: `idea_add`, `idea_list`, `idea_update`
 Links: `link_idea_manifest`, `unlink_idea_manifest`
