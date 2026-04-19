@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,10 +12,47 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 )
+
+// markdownRenderer is the shared goldmark instance used to render comment
+// bodies to HTML. GFM extensions are enabled (tables, task lists, strike,
+// autolinks). Raw HTML in source is ALWAYS escaped — html.WithUnsafe() is
+// deliberately omitted. See TestPOST_Comment_XSSEscape.
+var markdownRenderer = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(
+		html.WithXHTML(),
+	),
+)
+
+// renderMarkdown converts a raw comment body to safe HTML. Returns the raw
+// body wrapped in a <p> on goldmark error so the UI always has something to
+// display.
+func renderMarkdown(src string) string {
+	var buf bytes.Buffer
+	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
+		return "<p>" + escapeHTML(src) + "</p>"
+	}
+	return buf.String()
+}
+
+// escapeHTML is a tiny helper for the renderMarkdown fallback path.
+func escapeHTML(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&#39;",
+	)
+	return r.Replace(s)
+}
 
 // M2-T5 — HTTP surface for comments. Thin wrapper over comments.Store;
 // mirrors the MCP surface in parallel task M2-T4. Error codes match the
@@ -35,6 +73,7 @@ type commentView struct {
 	Author        string  `json:"author"`
 	Type          string  `json:"type"`
 	Body          string  `json:"body"`
+	BodyHTML      string  `json:"body_html"`
 	CreatedAt     int64   `json:"created_at"`
 	CreatedAtISO  string  `json:"created_at_iso"`
 	UpdatedAt     *int64  `json:"updated_at,omitempty"`
@@ -50,6 +89,7 @@ func toCommentView(c comments.Comment) commentView {
 		Author:       c.Author,
 		Type:         string(c.Type),
 		Body:         c.Body,
+		BodyHTML:     renderMarkdown(c.Body),
 		CreatedAt:    c.CreatedAt.Unix(),
 		CreatedAtISO: c.CreatedAt.UTC().Format(time.RFC3339),
 		ParentID:     c.ParentID,
@@ -293,6 +333,15 @@ func deleteComment(store *comments.Store) http.HandlerFunc {
 	}
 }
 
+// listCommentTypes serves GET /api/comments/types — the canonical Registry()
+// order from internal/comments. M3 UI consumes this to populate the filter
+// dropdown + add form type select so new types appear automatically.
+func listCommentTypes() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, comments.Registry())
+	}
+}
+
 // commentScopeRoutes pairs a URL-plural segment with its TargetType so the
 // registration loop stays declarative.
 var commentScopeRoutes = []struct {
@@ -311,6 +360,7 @@ func registerCommentsRoutes(api *mux.Router, store *comments.Store) {
 		api.HandleFunc(path, listComments(store, s.target)).Methods("GET")
 		api.HandleFunc(path, addComment(store, s.target)).Methods("POST")
 	}
+	api.HandleFunc("/comments/types", listCommentTypes()).Methods("GET")
 	api.HandleFunc("/comments/{id}", editComment(store)).Methods("PATCH")
 	api.HandleFunc("/comments/{id}", deleteComment(store)).Methods("DELETE")
 }

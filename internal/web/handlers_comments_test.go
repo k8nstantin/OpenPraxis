@@ -382,6 +382,116 @@ func TestPOST_BodyTooLarge(t *testing.T) {
 	}
 }
 
+// ---- body_html (M3-T6) ------------------------------------------------------
+
+func TestPOST_Comment_BodyHTMLParagraph(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
+		Author: "alice", Type: string(comments.TypeUserNote), Body: "hello **world**",
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	c := decodeComment(t, body)
+	if !strings.Contains(c.BodyHTML, "<p>") || !strings.Contains(c.BodyHTML, "<strong>world</strong>") {
+		t.Fatalf("body_html missing markdown rendering: %q", c.BodyHTML)
+	}
+}
+
+func TestPOST_Comment_BodyHTMLCodeBlock(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	src := "```\nfmt.Println(\"hi\")\n```"
+	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
+		Author: "a", Type: string(comments.TypeUserNote), Body: src,
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	c := decodeComment(t, body)
+	if !strings.Contains(c.BodyHTML, "<pre>") || !strings.Contains(c.BodyHTML, "<code>") {
+		t.Fatalf("code block not rendered: %q", c.BodyHTML)
+	}
+}
+
+func TestPOST_Comment_BodyHTMLGFMTable(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	src := "| a | b |\n| - | - |\n| 1 | 2 |"
+	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
+		Author: "a", Type: string(comments.TypeUserNote), Body: src,
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	c := decodeComment(t, body)
+	if !strings.Contains(c.BodyHTML, "<table>") {
+		t.Fatalf("GFM table not rendered: %q", c.BodyHTML)
+	}
+}
+
+// TestPOST_Comment_XSSEscape is the acceptance-criteria XSS test: raw
+// <script> in body must be escaped in body_html.
+func TestPOST_Comment_XSSEscape(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
+		Author: "a", Type: string(comments.TypeUserNote),
+		Body: "<script>alert(1)</script>",
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	c := decodeComment(t, body)
+	// goldmark with WithUnsafe() OFF drops raw HTML entirely (replaces with
+	// an "<!-- raw HTML omitted -->" comment). The security property we
+	// enforce: no executable <script> tag survives into body_html.
+	if strings.Contains(c.BodyHTML, "<script>") {
+		t.Fatalf("raw <script> tag leaked into body_html: %q", c.BodyHTML)
+	}
+	if strings.Contains(c.BodyHTML, "alert(1)") {
+		t.Fatalf("script payload leaked into body_html: %q", c.BodyHTML)
+	}
+}
+
+// TestPOST_Comment_EscapedAngleBrackets verifies that when angle brackets
+// appear in prose (outside an HTML-looking tag), goldmark escapes them so
+// the UI renders them as text rather than HTML.
+func TestPOST_Comment_EscapedAngleBrackets(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
+		Author: "a", Type: string(comments.TypeUserNote),
+		Body: "use the `<T>` type param",
+	})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	c := decodeComment(t, body)
+	if !strings.Contains(c.BodyHTML, "&lt;T&gt;") {
+		t.Fatalf("expected escaped brackets in body_html: %q", c.BodyHTML)
+	}
+}
+
+// ---- /api/comments/types (M3-T6) --------------------------------------------
+
+func TestGET_CommentsTypes(t *testing.T) {
+	env := newCommentsTestEnv(t)
+	resp, body := env.do(t, "GET", "/api/comments/types", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
+	}
+	var got []comments.CommentTypeInfo
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v body=%s", err, body)
+	}
+	want := comments.Registry()
+	if len(got) != len(want) {
+		t.Fatalf("len: got %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].Type != want[i].Type || got[i].Label != want[i].Label {
+			t.Fatalf("entry %d: got %+v want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 // ---- route wiring -----------------------------------------------------------
 
 // TestRoutes_AllCommentEndpointsRegistered enforces that the registration
@@ -400,6 +510,7 @@ func TestRoutes_AllCommentEndpointsRegistered(t *testing.T) {
 		"POST /api/tasks/{id}/comments":     "",
 		"PATCH /api/comments/{id}":          "",
 		"DELETE /api/comments/{id}":         "",
+		"GET /api/comments/types":           "",
 	}
 	if err := r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		pathTmpl, err := route.GetPathTemplate()
