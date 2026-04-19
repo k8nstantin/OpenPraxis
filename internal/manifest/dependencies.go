@@ -197,6 +197,13 @@ func (s *Store) AddDep(ctx context.Context, manifestID, dependsOnID, createdBy s
 // RemoveDep is idempotent — removing an edge that doesn't exist returns
 // nil, not an error. The legacy column is re-synced from the join table
 // after the delete so the comma-separated list stays canonical-ish.
+//
+// Fires the onDepRemoved handler (if wired) after a successful delete +
+// legacy sync. The handler rehabs any now-unblocked waiting tasks per
+// Option B — see SetDepRemovedHandler. Firing unconditionally (not only
+// when the edge actually existed) keeps the contract simple: "after
+// this call, the edge is gone and any rehab that should have happened
+// has happened." A no-op delete followed by a no-op rehab is fine.
 func (s *Store) RemoveDep(ctx context.Context, manifestID, dependsOnID string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM manifest_dependencies WHERE manifest_id = ? AND depends_on_manifest_id = ?`,
@@ -206,6 +213,9 @@ func (s *Store) RemoveDep(ctx context.Context, manifestID, dependsOnID string) e
 	if err := s.syncLegacyDependsOn(ctx, manifestID); err != nil {
 		slog.Warn("sync legacy depends_on failed", "component", "manifest",
 			"manifest_id", manifestID, "error", err)
+	}
+	if s.onDepRemoved != nil {
+		s.onDepRemoved(ctx, manifestID)
 	}
 	return nil
 }
