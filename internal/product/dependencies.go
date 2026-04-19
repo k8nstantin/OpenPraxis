@@ -118,11 +118,20 @@ func (s *Store) AddDep(ctx context.Context, productID, dependsOnID, createdBy st
 // RemoveDep is idempotent — removing an edge that doesn't exist
 // returns nil. Matches the #79 pattern at the manifest tier so the
 // operator-surface semantics are consistent across tiers.
+//
+// Fires the onDepRemoved handler (if wired) after a successful
+// delete. The handler rehabs now-unblocked waiting tasks per Option B.
+// Firing unconditionally (not just when the edge actually existed)
+// keeps the contract simple: "after this call, the edge is gone and
+// any rehab that should have happened has happened."
 func (s *Store) RemoveDep(ctx context.Context, productID, dependsOnID string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM product_dependencies WHERE product_id = ? AND depends_on_product_id = ?`,
 		productID, dependsOnID); err != nil {
 		return fmt.Errorf("delete product dep: %w", err)
+	}
+	if s.onDepRemoved != nil {
+		s.onDepRemoved(ctx, productID)
 	}
 	return nil
 }

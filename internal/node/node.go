@@ -95,6 +95,13 @@ func New(cfg *config.Config) (*Node, error) {
 	// Typed as task.ManifestReadinessChecker — manifest.Store satisfies
 	// the interface via IsSatisfied(ctx, manifestID).
 	taskStore.SetManifestChecker(manifestStore)
+	// Product-tier readiness check. product.Store satisfies
+	// task.ProductReadinessChecker via IsSatisfied. A task whose
+	// containing manifest belongs to a product with open product-level
+	// deps gets seeded in 'waiting' with a product-prefix block_reason,
+	// distinct from manifest- and task-level blockers so each tier's
+	// propagation walker only flips its own tasks.
+	taskStore.SetProductChecker(productStore)
 
 	// Wire the terminal-transition handler: when a manifest moves from
 	// non-terminal (draft/open) → terminal (closed/archive), walk its
@@ -144,6 +151,44 @@ func New(cfg *config.Config) (*Node, error) {
 			// succeeded; activation failure is recoverable by firing
 			// tasks manually or by the next close retriggering.
 			_ = err // keep the handler pure; no slog here to avoid import churn in node.go
+		}
+	})
+
+	// Product-tier dep removal rehab (symmetric to manifest above).
+	// When an operator removes a product dep, if the product is now
+	// satisfied, flip its product-blocked tasks from waiting → pending
+	// (Option B — operator arms manually so an accidental click
+	// doesn't auto-spend).
+	productStore.SetDepRemovedHandler(func(ctx context.Context, productID string) {
+		ok, _, err := productStore.IsSatisfied(ctx, productID)
+		if err != nil || !ok {
+			return
+		}
+		_, _ = taskStore.FlipProductBlockedTasks(ctx, productID, task.StatusPending)
+	})
+
+	// Product close propagation. Closing a product walks its
+	// dependents; for each newly-satisfied dependent product, flip
+	// its product-blocked tasks to scheduled so the chain self-
+	// advances.
+	productStore.SetTerminalTransitionHandler(func(ctx context.Context, productID string) {
+		depsFor := func(ctx context.Context, pid string) ([]string, error) {
+			deps, err := productStore.ListDependents(ctx, pid)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]string, 0, len(deps))
+			for _, d := range deps {
+				ids = append(ids, d.ID)
+			}
+			return ids, nil
+		}
+		satisfiedFor := func(ctx context.Context, pid string) (bool, error) {
+			ok, _, err := productStore.IsSatisfied(ctx, pid)
+			return ok, err
+		}
+		if _, err := taskStore.PropagateProductClosed(ctx, productID, depsFor, satisfiedFor); err != nil {
+			_ = err
 		}
 	})
 

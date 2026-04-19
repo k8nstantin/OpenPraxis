@@ -57,6 +57,7 @@ type TaskRun struct {
 type Store struct {
 	db              *sql.DB
 	manifestChecker ManifestReadinessChecker // nil = skip manifest-level satisfaction check
+	productChecker  ProductReadinessChecker  // nil = skip product-level satisfaction check
 }
 
 // NewStore creates a task store.
