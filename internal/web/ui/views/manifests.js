@@ -463,6 +463,7 @@
           ${linkedIdeasHtml}
           ${linkedTasksHtml}
           <div id="manifest-knobs-mount" style="margin-top:16px"></div>
+          <div id="manifest-comments-mount" style="margin-top:16px"></div>
           ${jira ? `<div style="margin-bottom:12px">Jira: ${jira}</div>` : ''}
           ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
@@ -487,6 +488,11 @@
       const knobMount = document.getElementById('manifest-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'manifest', id: m.id });
+      }
+
+      const commentsMount = document.getElementById('manifest-comments-mount');
+      if (commentsMount && OL.renderCommentsSection) {
+        OL.renderCommentsSection(commentsMount, { type: 'manifest', id: m.id });
       }
 
       // Bind idea navigation links

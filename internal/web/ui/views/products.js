@@ -348,12 +348,18 @@
           </div>
           ${manifestsHtml}
           <div id="product-knobs-mount" style="margin-top:16px"></div>
+          <div id="product-comments-mount" style="margin-top:16px"></div>
           ${ideasHtml}
         </div>`;
 
       const knobMount = document.getElementById('product-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'product', id: p.id });
+      }
+
+      const commentsMount = document.getElementById('product-comments-mount');
+      if (commentsMount && OL.renderCommentsSection) {
+        OL.renderCommentsSection(commentsMount, { type: 'product', id: p.id });
       }
 
       // Wire dep pill nav: click a marker → open that product.
