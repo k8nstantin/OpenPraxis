@@ -879,6 +879,19 @@ body {
 .amnesia-item.confirmed { border-left-color: var(--red); }
 .amnesia-item.dismissed { border-left-color: var(--text-muted); opacity: 0.6; }
 
+/* Per-task-status border-left colors so each of the 8 canonical statuses
+ * is visually distinct at a glance in the task list. Matches the color
+ * map in /task-status.js. Keep these in sync. */
+.amnesia-item.status-pending   { border-left-color: var(--text-muted); }
+.amnesia-item.status-waiting   { border-left-color: var(--accent); }
+.amnesia-item.status-scheduled { border-left-color: var(--yellow); }
+.amnesia-item.status-running   { border-left-color: var(--green); }
+.amnesia-item.status-paused    { border-left-color: var(--yellow); }
+.amnesia-item.status-completed { border-left-color: var(--green); opacity: 0.8; }
+.amnesia-item.status-failed    { border-left-color: var(--red); }
+.amnesia-item.status-cancelled { border-left-color: var(--text-muted); opacity: 0.5; text-decoration: line-through; }
+.amnesia-item.status-unknown   { border-left-color: var(--text-muted); opacity: 0.7; }
+
 .amnesia-header {
   display: flex;
   align-items: center;
