@@ -382,8 +382,9 @@
           const statusCounts = {};
           for (const t of linkedTasks) { statusCounts[t.status] = (statusCounts[t.status] || 0) + 1; }
           const summary = Object.entries(statusCounts).map(([s,c]) => `${c} ${s}`).join(', ');
-          const statusColors = {running:'var(--green)',paused:'var(--yellow)',scheduled:'var(--yellow)',waiting:'var(--accent)',pending:'var(--text-muted)',completed:'var(--green)',failed:'var(--red)',cancelled:'var(--text-muted)'};
-          const statusIcons = {running:'&#x25CF;',paused:'&#x23F8;',scheduled:'&#x23F0;',waiting:'&#x23F3;',pending:'&#x25CB;',completed:'&#x2713;',failed:'&#x2717;',cancelled:'&#x2015;'};
+          // Shared status styling — see internal/web/ui/task-status.js.
+          const statusColors = OL.TASK_STATUS_COLORS;
+          const statusIcons = OL.TASK_STATUS_ICONS;
           const taskRows = linkedTasks.map(t => {
             const color = statusColors[t.status] || 'var(--text-muted)';
             const icon = statusIcons[t.status] || '&#x25CB;';

@@ -78,7 +78,8 @@
     }
     if (panel) panel.style.display = '';
 
-    var statusColors = {running:'var(--green)',paused:'var(--yellow)',scheduled:'var(--yellow)',waiting:'var(--accent)',pending:'var(--text-muted)',completed:'var(--green)',max_turns:'var(--yellow)',failed:'var(--red)',cancelled:'var(--text-muted)'};
+    // Shared status styling — see internal/web/ui/task-status.js.
+    var statusColors = OL.TASK_STATUS_COLORS;
 
     var totalCost = topTasks.reduce(function(s, t) { return s + t.cost; }, 0);
     var html = '<div style="max-height:300px;overflow-y:auto"><table class="top-tasks-table" style="width:100%">' +
@@ -121,7 +122,8 @@
     } else {
       if (pendingPanel) pendingPanel.style.display = '';
       var pendingStatusColors = {scheduled:'var(--yellow)',waiting:'var(--accent)',pending:'var(--text-muted)'};
-      var statusIcons = {scheduled:'&#x23F0;',waiting:'&#x23F3;',pending:'&#x25CB;'};
+      // Shared status icons — see internal/web/ui/task-status.js.
+      var statusIcons = OL.TASK_STATUS_ICONS;
       var phtml = '';
       for (var pi = 0; pi < pending.length; pi++) {
         var pt = pending[pi];

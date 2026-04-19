@@ -62,6 +62,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	r.Path("/api.js").HandlerFunc(serveJS)
 	r.Path("/tree.js").HandlerFunc(serveJS)
 	r.Path("/lifecycle.js").HandlerFunc(serveJS)
+	r.Path("/task-status.js").HandlerFunc(serveJS)
 
 	// WebSocket
 	r.HandleFunc("/ws", hub.HandleWS)

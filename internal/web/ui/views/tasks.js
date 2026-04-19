@@ -75,7 +75,9 @@
 
     newBtn.onclick = () => OL.showTaskCreateForm();
 
-    var statusColors = {running:'green',paused:'yellow',scheduled:'yellow',waiting:'yellow',pending:'',completed:'green',max_turns:'yellow',failed:'red',cancelled:''};
+    // Status styling comes from OL.getStatusRender (task-status.js).
+    // Never add an inline map here — adding a status in status.go
+    // should update exactly one place: task-status.js.
 
     try {
       var peerGroups = await fetchJSON('/api/tasks/by-peer');
@@ -104,34 +106,51 @@
             count: function(mg) { return mg.tasks.length; },
             children: function(mg) { return mg.tasks; },
             dotColor: function(mg) {
-              var hasRunning = mg.tasks.some(function(t) { return t.status === 'running'; });
+              // Aggregate color for the manifest group: red if any
+              // task is failed, green if any is running, yellow if any
+              // is armed (scheduled or waiting), grey otherwise.
               var hasFailed = mg.tasks.some(function(t) { return t.status === 'failed'; });
-              var hasScheduled = mg.tasks.some(function(t) { return t.status === 'scheduled' || t.status === 'waiting'; });
-              return hasRunning ? 'green' : hasFailed ? 'red' : hasScheduled ? 'yellow' : 'green';
+              if (hasFailed) return 'red';
+              var hasRunning = mg.tasks.some(function(t) { return t.status === 'running'; });
+              if (hasRunning) return 'green';
+              var hasArmed = mg.tasks.some(function(t) { return t.status === 'scheduled' || t.status === 'waiting' || t.status === 'paused'; });
+              if (hasArmed) return 'yellow';
+              return 'green';
             },
             expanded: false,
           }
         ],
         renderLeaf: function(t) {
-          var sColor = statusColors[t.status] || '';
-          var statusClass = t.status === 'completed' ? 'confirmed' : t.status === 'failed' ? 'flagged' : t.status === 'running' ? 'confirmed' : 'dismissed';
+          var render = OL.getStatusRender(t.status);
           var metaParts = [];
           if (t.run_count > 0) metaParts.push(t.run_count + ' runs');
           if (t.total_turns > 0) metaParts.push(t.total_turns + ' turns');
           if (t.total_cost > 0) metaParts.push('$' + t.total_cost.toFixed(2));
           metaParts.push(t.schedule);
 
-          return '<div class="amnesia-item ' + statusClass + ' clickable tree-leaf tree-indent" data-id="' + esc(t.id) + '">' +
+          // block_reason surfaces the manifest/task that's holding this
+          // task in waiting. Clickable in the detail view; here it's
+          // a tooltip + short inline hint so the row stays compact.
+          var blockHint = '';
+          if (t.status === 'waiting' && t.block_reason) {
+            blockHint = ' &middot; <span style="color:var(--accent)" title="' + esc(t.block_reason) + '">blocked</span>';
+          }
+
+          var pulseClass = render.pulse ? ' status-pulse' : '';
+
+          return '<div class="amnesia-item ' + render.cssClass + ' clickable tree-leaf tree-indent" data-id="' + esc(t.id) + '">' +
             '<div class="amnesia-header">' +
-              (t.status === 'running' ? '<span class="status-dot green status-pulse"></span>' : '<span class="status-dot ' + sColor + '"></span>') +
-              '<span class="amnesia-status-label">' + esc(t.status) + '</span>' +
+              '<span class="status-dot" style="background:' + render.color + ';' + (render.pulse ? 'animation:pulse 1s infinite' : '') + '"></span>' +
+              '<span class="amnesia-status-label" style="color:' + render.color + ';font-weight:600" title="' + esc(render.label) + '">' +
+                render.icon + ' ' + esc(t.status) +
+              '</span>' +
               '<span class="session-uuid">' + esc(t.marker) + '</span>' +
               '<span class="badge type">' + esc(t.schedule) + '</span>' +
               (t.depends_on ? '<span class="badge scope">dep</span>' : '') +
               '<span class="meta-time">' + formatTime(t.updated_at || t.created_at) + '</span>' +
             '</div>' +
             '<div class="amnesia-rule">' + esc(t.title) + '</div>' +
-            '<div class="amnesia-action">' + metaParts.join(' &middot; ') + '</div>' +
+            '<div class="amnesia-action">' + metaParts.join(' &middot; ') + blockHint + '</div>' +
           '</div>';
         },
         leafSelector: '.tree-leaf',
@@ -153,7 +172,8 @@
       const titleEl = document.getElementById('task-detail-title');
       const bodyEl = document.getElementById('task-detail');
 
-      const statusColor = t.status === 'running' ? 'var(--green)' : t.status === 'paused' ? 'var(--yellow)' : t.status === 'scheduled' ? 'var(--yellow)' : t.status === 'failed' ? 'var(--red)' : 'var(--text-muted)';
+      const statusRender = OL.getStatusRender(t.status);
+      const statusColor = statusRender.color;
 
       // Fetch manifest + product for breadcrumb
       let taskManifest = null, taskProduct = null;
@@ -278,8 +298,13 @@
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span class="session-uuid" style="font-size:14px">${esc(t.marker)}</span>
             <span style="flex:1;font-size:15px;font-weight:600;color:var(--text-primary)">${esc(t.title)}</span>
-            <span style="color:${statusColor};font-weight:700;font-size:13px;text-transform:uppercase;padding:3px 10px;border:2px solid ${statusColor};border-radius:4px">${esc(t.status)}</span>
+            <span style="color:${statusColor};font-weight:700;font-size:13px;text-transform:uppercase;padding:3px 10px;border:2px solid ${statusColor};border-radius:4px" title="${esc(statusRender.label)}">${statusRender.icon} ${esc(t.status)}</span>
           </div>
+          ${t.block_reason ? `
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:6px 10px;background:rgba(59,130,246,0.08);border-left:3px solid var(--accent);border-radius:4px;font-size:12px;color:var(--text-primary)">
+            <span style="color:var(--accent);font-weight:600">Blocked:</span>
+            <span>${esc(t.block_reason)}</span>
+          </div>` : ''}
 
           <!-- METADATA — runs, turns, cost, agent, manifest, branch -->
           <div style="display:flex;gap:12px;font-size:12px;color:var(--text-muted);margin-bottom:16px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-family:var(--font-mono)">
