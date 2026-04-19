@@ -8,6 +8,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
 	"github.com/k8nstantin/OpenPraxis/internal/embedding"
@@ -102,6 +103,10 @@ func New(cfg *config.Config) (*Node, error) {
 
 	if err := settings.InitSchema(index.DB()); err != nil {
 		return nil, fmt.Errorf("init settings schema: %w", err)
+	}
+
+	if err := comments.InitSchema(index.DB()); err != nil {
+		return nil, fmt.Errorf("comments.InitSchema: %w", err)
 	}
 
 	settingsStore := settings.NewStore(index.DB())
