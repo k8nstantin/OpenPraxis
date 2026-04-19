@@ -158,7 +158,10 @@ func New(cfg *config.Config) (*Node, error) {
 // The Runner reads its max_parallel cap per task via n.SettingsResolver —
 // there is no process-wide cap argument because caps are now per-product.
 func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner {
-	n.runner = task.NewRunner(n.Tasks, n.Actions, n.SettingsResolver, onEvent)
+	// Empty repoDir → Runner falls back to process CWD at spawn time.
+	// cmd/serve.go passes an explicit dir via a follow-up SetRepoDir if it
+	// runs from outside the repo root.
+	n.runner = task.NewRunner(n.Tasks, n.Actions, n.SettingsResolver, "", onEvent)
 	return n.runner
 }
 

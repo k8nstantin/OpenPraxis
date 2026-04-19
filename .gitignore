@@ -33,3 +33,6 @@ vendor/
 .mcp.json
 agent-memory
 mobile/package-lock.json
+
+# Per-task worktrees created by the runner
+.openpraxis-work/
