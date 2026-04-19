@@ -41,6 +41,10 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := s.init(); err != nil {
 		return nil, err
 	}
+	if err := s.initDependenciesSchema(); err != nil {
+		return nil, err
+	}
+	s.logSchemaReady()
 	return s, nil
 }
 
