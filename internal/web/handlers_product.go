@@ -2,10 +2,12 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/product"
 
 	"github.com/gorilla/mux"
 )
@@ -290,5 +292,140 @@ func apiProductIdeas(n *node.Node) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, ideas)
+	}
+}
+
+// resolveProductID accepts a marker or full UUID and returns the full
+// UUID via Products.Get (which handles prefix matching). Empty return
+// + error message means 404-worthy.
+func resolveProductID(n *node.Node, idOrMarker string) (string, string) {
+	p, _ := n.Products.Get(idOrMarker)
+	if p == nil {
+		return "", "product not found: " + idOrMarker
+	}
+	return p.ID, ""
+}
+
+// apiProductDepList — GET /api/products/{id}/dependencies?direction=out|in|both
+//
+// Default direction is 'out'. Response body omits keys that the
+// direction filter excluded so the UI can dispatch on key presence.
+func apiProductDepList(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, msg := resolveProductID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		direction := r.URL.Query().Get("direction")
+		if direction == "" {
+			direction = "out"
+		}
+		out := map[string]any{}
+		switch direction {
+		case "out", "both":
+			deps, err := n.Products.ListDeps(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["deps"] = deps
+			if direction != "both" {
+				break
+			}
+			fallthrough
+		case "in":
+			dependents, err := n.Products.ListDependents(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["dependents"] = dependents
+		default:
+			writeError(w, "direction must be out, in, or both", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, out)
+	}
+}
+
+// apiProductDepAdd — POST /api/products/{id}/dependencies
+//
+// Body: {"depends_on_id": "..."}.
+// 201 with the added edge on success, 409 on cycle, 400 on
+// self-loop or bad body, 404 on missing product.
+func apiProductDepAdd(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveProductID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		var body struct {
+			DependsOnID string `json:"depends_on_id"`
+			CreatedBy   string `json:"created_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if body.DependsOnID == "" {
+			writeError(w, "depends_on_id is required", http.StatusBadRequest)
+			return
+		}
+		dstID, msg := resolveProductID(n, body.DependsOnID)
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		createdBy := body.CreatedBy
+		if createdBy == "" {
+			createdBy = "http-api"
+		}
+		if err := n.Products.AddDep(r.Context(), srcID, dstID, createdBy); err != nil {
+			switch {
+			case errors.Is(err, product.ErrCycle):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, product.ErrSelfLoop):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		// Echo the added edge back — the UI won't need a refetch.
+		deps, _ := n.Products.ListDeps(r.Context(), srcID)
+		for _, d := range deps {
+			if d.ID == dstID {
+				w.WriteHeader(http.StatusCreated)
+				writeJSON(w, d)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, map[string]string{"product_id": srcID, "depends_on_id": dstID})
+	}
+}
+
+// apiProductDepRemove — DELETE /api/products/{id}/dependencies/{depId}
+//
+// Idempotent: 204 whether the edge existed or not.
+func apiProductDepRemove(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveProductID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		dstID, msg := resolveProductID(n, mux.Vars(r)["depId"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		if err := n.Products.RemoveDep(r.Context(), srcID, dstID); err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/k8nstantin/OpenPraxis/internal/product"
 )
 
 func (s *Server) registerProductTools() {
@@ -56,6 +58,131 @@ func (s *Server) registerProductTools() {
 		),
 		s.handleProductDelete,
 	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("product_dep_add",
+			mcplib.WithDescription("Add a product→product dependency edge. Rejects self-loops and cycles (including transitive — the graph can go arbitrarily deep). The error names the rejected pair so you can fix your graph."),
+			mcplib.WithString("product_id", mcplib.Required(), mcplib.Description("Product that will wait (ID or 12-char marker)")),
+			mcplib.WithString("depends_on_product_id", mcplib.Required(), mcplib.Description("Product that must close first (ID or marker)")),
+		),
+		s.handleProductDepAdd,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("product_dep_remove",
+			mcplib.WithDescription("Remove a product→product dependency edge. Idempotent."),
+			mcplib.WithString("product_id", mcplib.Required(), mcplib.Description("Source product (ID or marker)")),
+			mcplib.WithString("depends_on_product_id", mcplib.Required(), mcplib.Description("Dep to remove (ID or marker)")),
+		),
+		s.handleProductDepRemove,
+	)
+
+	s.mcp.AddTool(
+		mcplib.NewTool("product_dep_list",
+			mcplib.WithDescription("List product dependencies. direction=out (default) returns products this one depends on; direction=in returns products that depend on this one; direction=both returns both."),
+			mcplib.WithString("product_id", mcplib.Required(), mcplib.Description("Product ID or marker")),
+			mcplib.WithString("direction", mcplib.Description("out | in | both (default: out)")),
+		),
+		s.handleProductDepList,
+	)
+}
+
+// resolveProductPair accepts marker-or-id inputs for a source + target
+// product and returns the full UUIDs. Mirrors the manifest resolver
+// pattern so the tool-handler layer is consistent across tiers.
+func (s *Server) resolveProductPair(src, dst string) (srcID, dstID, errMsg string) {
+	srcP, _ := s.node.Products.Get(src)
+	if srcP == nil {
+		return "", "", fmt.Sprintf("product not found: %s", src)
+	}
+	dstP, _ := s.node.Products.Get(dst)
+	if dstP == nil {
+		return "", "", fmt.Sprintf("dependency product not found: %s", dst)
+	}
+	return srcP.ID, dstP.ID, ""
+}
+
+func (s *Server) handleProductDepAdd(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	srcID, dstID, msg := s.resolveProductPair(argStr(a, "product_id"), argStr(a, "depends_on_product_id"))
+	if msg != "" {
+		return errResult("%s", msg), nil
+	}
+	if err := s.node.Products.AddDep(ctx, srcID, dstID, s.sessionSource(ctx)); err != nil {
+		return errResult("%v", err), nil
+	}
+	src, _ := s.node.Products.Get(srcID)
+	dst, _ := s.node.Products.Get(dstID)
+	return textResult(fmt.Sprintf("Dep added: [%s] %s → [%s] %s",
+		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+}
+
+func (s *Server) handleProductDepRemove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	srcID, dstID, msg := s.resolveProductPair(argStr(a, "product_id"), argStr(a, "depends_on_product_id"))
+	if msg != "" {
+		return errResult("%s", msg), nil
+	}
+	if err := s.node.Products.RemoveDep(ctx, srcID, dstID); err != nil {
+		return errResult("remove dep: %v", err), nil
+	}
+	src, _ := s.node.Products.Get(srcID)
+	dst, _ := s.node.Products.Get(dstID)
+	return textResult(fmt.Sprintf("Dep removed: [%s] %s → [%s] %s",
+		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+}
+
+func (s *Server) handleProductDepList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	p, _ := s.node.Products.Get(argStr(a, "product_id"))
+	if p == nil {
+		return errResult("product not found: %s", argStr(a, "product_id")), nil
+	}
+	direction := argStr(a, "direction")
+	if direction == "" {
+		direction = "out"
+	}
+
+	formatDeps := func(rows []product.Dep) string {
+		if len(rows) == 0 {
+			return "  (none)"
+		}
+		var out []string
+		for _, d := range rows {
+			out = append(out, fmt.Sprintf("  [%s] %s — %s", d.Marker, d.Title, d.Status))
+		}
+		return strings.Join(out, "\n")
+	}
+
+	var output string
+	switch direction {
+	case "out":
+		deps, err := s.node.Products.ListDeps(ctx, p.ID)
+		if err != nil {
+			return errResult("list deps: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s depends on:\n%s\n", p.Marker, p.Title, formatDeps(deps))
+	case "in":
+		dependents, err := s.node.Products.ListDependents(ctx, p.ID)
+		if err != nil {
+			return errResult("list dependents: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s is depended on by:\n%s\n", p.Marker, p.Title, formatDeps(dependents))
+	case "both":
+		deps, err := s.node.Products.ListDeps(ctx, p.ID)
+		if err != nil {
+			return errResult("list deps: %v", err), nil
+		}
+		dependents, err := s.node.Products.ListDependents(ctx, p.ID)
+		if err != nil {
+			return errResult("list dependents: %v", err), nil
+		}
+		output = fmt.Sprintf("[%s] %s depends on:\n%s\n\n[%s] %s is depended on by:\n%s\n",
+			p.Marker, p.Title, formatDeps(deps), p.Marker, p.Title, formatDeps(dependents))
+	default:
+		return errResult("direction must be one of: out, in, both (got %q)", direction), nil
+	}
+	return textResult(output), nil
 }
 
 func (s *Server) handleProductCreate(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
