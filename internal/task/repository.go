@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,27 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ManifestReadinessChecker is the hook task.Store consults to decide
+// whether a new task's manifest is currently satisfied (i.e. every one
+// of its manifest-level dependencies is in a terminal status). If a
+// manifest is unsatisfied, tasks created against it are seeded in
+// 'waiting' with a populated block_reason so the operator sees which
+// manifest is blocking them.
+//
+// Implemented by manifest.Store; wired via an adapter in node.go.
+// Optional — a nil checker skips the check, which preserves pre-fix
+// behavior and keeps unit tests standalone.
+type ManifestReadinessChecker interface {
+	IsSatisfied(ctx context.Context, manifestID string) (ok bool, unsatisfied []string, err error)
+}
+
+// SetManifestChecker wires a readiness checker. Safe to call once at
+// startup; there's no lock because the setter runs before any Create
+// call from the HTTP/MCP surfaces.
+func (s *Store) SetManifestChecker(c ManifestReadinessChecker) {
+	s.manifestChecker = c
+}
 
 // Create stores a new task. Per-task max_turns is set via the settings
 // resolver (PUT /api/tasks/:id/settings) after creation — the legacy
@@ -38,20 +60,43 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	// a safety net, but the correct invariant is that dep-bearing tasks
 	// start in 'waiting' so the sort order + UI filters tell the truth.
 	initialStatus := StatusPending
+	blockReason := ""
+
+	// Task-level dep wins as the first blocker: if the parent task isn't
+	// completed, the task is waiting regardless of manifest state.
 	if dependsOn != "" {
 		var parentStatus string
 		err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
 			dependsOn, dependsOn+"%").Scan(&parentStatus)
 		if err == nil && parentStatus != string(StatusCompleted) {
 			initialStatus = StatusWaiting
+			blockReason = fmt.Sprintf("task %s not completed", firstN(dependsOn, 12))
 		}
 		// sql.ErrNoRows or any other lookup failure: keep pending, operator
 		// can correct by attaching the dep later via Edit.
 	}
 
-	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, manifestID, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn,
+	// Manifest-level dep check only runs when the task-level gate is
+	// already clear. Reason: if both blockers apply, the operator cares
+	// about the closer one (task dep) first — once that clears, the
+	// manifest-level check re-runs at activation time.
+	if initialStatus == StatusPending && manifestID != "" && s.manifestChecker != nil {
+		ok, unsatisfied, err := s.manifestChecker.IsSatisfied(context.Background(), manifestID)
+		if err != nil {
+			// Lookup failure shouldn't block task creation. Log via the
+			// caller's slog (we don't have one here) by returning the
+			// task normally; operator can re-trigger activation later.
+			// Keep pending.
+		} else if !ok {
+			initialStatus = StatusWaiting
+			blockReason = fmt.Sprintf("manifest not satisfied — blocked by: %s",
+				joinMarkers(unsatisfied))
+		}
+	}
+
+	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, manifestID, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn, blockReason,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
@@ -61,8 +106,32 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		ID: id, Marker: id[:12], ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
 		Status: string(initialStatus), Agent: agent, SourceNode: sourceNode,
-		CreatedBy: createdBy, DependsOn: dependsOn, CreatedAt: now, UpdatedAt: now,
+		CreatedBy: createdBy, DependsOn: dependsOn, BlockReason: blockReason,
+		CreatedAt: now, UpdatedAt: now,
 	}, nil
+}
+
+// firstN returns the first n chars of s. Used for logging task/manifest
+// markers in block_reason strings without pulling the whole UUID.
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// joinMarkers formats a list of manifest ids as comma-separated markers
+// for inclusion in a block_reason. Empty input → "(unknown)" so the
+// reason is never ambiguous-looking to the operator.
+func joinMarkers(ids []string) string {
+	if len(ids) == 0 {
+		return "(unknown)"
+	}
+	markers := make([]string, 0, len(ids))
+	for _, id := range ids {
+		markers = append(markers, firstN(id, 12))
+	}
+	return strings.Join(markers, ", ")
 }
 
 // Get retrieves a task by ID or prefix.

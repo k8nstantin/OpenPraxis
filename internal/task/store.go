@@ -55,7 +55,8 @@ type TaskRun struct {
 
 // Store manages task persistence.
 type Store struct {
-	db *sql.DB
+	db              *sql.DB
+	manifestChecker ManifestReadinessChecker // nil = skip manifest-level satisfaction check
 }
 
 // NewStore creates a task store.

@@ -90,6 +90,11 @@ func New(cfg *config.Config) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
+	// Wire the manifest store as the readiness checker so task.Create
+	// seeds tasks in 'waiting' when their manifest has unsatisfied deps.
+	// Typed as task.ManifestReadinessChecker — manifest.Store satisfies
+	// the interface via IsSatisfied(ctx, manifestID).
+	taskStore.SetManifestChecker(manifestStore)
 
 	chatStore, err := chat.NewSessionStore(index.DB())
 	if err != nil {
