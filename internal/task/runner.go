@@ -74,6 +74,79 @@ type Runner struct {
 	// warnOnce guards per-Runner log-once semantics for unsupported agent
 	// flags (e.g. --temperature on Claude Code). Keyed by "<agent>:<knob>".
 	warnOnce sync.Map
+
+	// execReview is the optional post-completion checker for
+	// execution_review comments. When wired, tasks that finish with
+	// status=completed/reason=success are inspected — if no agent-authored
+	// execution_review comment exists on the task, an amnesia flag is
+	// recorded so the gap is visible on the dashboard. Leaving it nil
+	// disables the check (existing behavior).
+	execReview ExecutionReviewChecker
+
+	// sourceNode is the originating node UUID used when recording amnesia
+	// flags from the post-completion path. Empty is fine — amnesia.task_id
+	// is what the task detail pulls on.
+	sourceNode string
+}
+
+// ExecutionReviewChecker answers whether a task has at least one
+// execution_review comment authored by the agent. Wired via
+// SetExecutionReviewChecker; node.go adapts internal/comments.Store to
+// this shape so the task package stays free of a comments import.
+type ExecutionReviewChecker interface {
+	HasAgentExecutionReview(ctx context.Context, taskID string) (bool, error)
+}
+
+// SetExecutionReviewChecker wires the post-completion execution_review
+// gate. Nil disables it.
+func (r *Runner) SetExecutionReviewChecker(c ExecutionReviewChecker) {
+	r.execReview = c
+}
+
+// SetSourceNode records the node UUID used when the runner writes amnesia
+// flags from its own code path (e.g. missing execution_review).
+func (r *Runner) SetSourceNode(id string) { r.sourceNode = id }
+
+// enforceExecutionReview runs the M4-T10 post-completion gate. Only fires
+// for status=completed/reason=success; skips entirely when the checker is
+// not wired. Extracted from Execute so it can be tested directly.
+func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, marker, status, reason string) {
+	if r.execReview == nil {
+		return
+	}
+	if status != "completed" || reason != "success" {
+		return
+	}
+	checkCtx, checkCancel := context.WithTimeout(bgCtx, 5*time.Second)
+	has, checkErr := r.execReview.HasAgentExecutionReview(checkCtx, taskID)
+	checkCancel()
+	switch {
+	case checkErr != nil:
+		slog.Warn("execution review lookup failed",
+			"component", "runner", "marker", marker, "task_id", taskID, "error", checkErr)
+	case !has:
+		slog.Warn("task completed but no execution_review comment — agent forgot the closing call",
+			"component", "runner", "marker", marker, "task_id", taskID)
+		if r.actions != nil {
+			if amnErr := r.actions.RecordAmnesia(
+				"",            // sessionID
+				r.sourceNode,  // sourceNode
+				"",            // actionID
+				taskID,        // taskID
+				"exec-review", // ruleID (synthetic)
+				"exec-review", // ruleMarker
+				"Every completed task must post an execution_review comment via comment_add before finishing",
+				"",  // toolName
+				"",  // toolInput
+				1.0, // score (max — the call was definitely missing)
+				"rule",
+				"missing_execution_review",
+			); amnErr != nil {
+				slog.Warn("record exec-review amnesia failed",
+					"component", "runner", "marker", marker, "error", amnErr)
+			}
+		}
+	}
 }
 
 // NewRunner creates a task runner. The resolver is required — every knob that
@@ -884,6 +957,13 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			slog.Error("record run failed", "component", "runner", "marker", marker, "error", err)
 		}
 
+		// Post-completion execution-review gate. Successful completions must
+		// carry at least one agent-authored execution_review comment on the
+		// task. When missing, log and record an amnesia flag so the gap
+		// surfaces on the dashboard. Non-blocking — the watcher still has
+		// final say on the completion status.
+		r.enforceExecutionReview(bgCtx, t.ID, marker, status, reason)
+
 		// Retry on transient failure. Counter persists across restarts via
 		// the settings table so a crash mid-retry does not reset progress.
 		// Watcher-driven downgrades (completed→failed via deliverable audit)
@@ -1208,6 +1288,20 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string) 
 	b.WriteString("5. Create a pull request using: gh pr create --title \"<title>\" --body \"<summary>\"\n")
 	b.WriteString("6. Include the PR URL in your final output.\n")
 	b.WriteString("NEVER work on an existing branch. NEVER push to main. Each task gets its own branch and PR.\n\n")
+
+	b.WriteString("## Closing the task — MANDATORY\n")
+	b.WriteString("Before your final commit+push, call the MCP tool:\n\n")
+	b.WriteString("    mcp__openpraxis__comment_add\n")
+	b.WriteString(fmt.Sprintf("      target_type = \"task\"\n      target_id   = \"%s\"\n", t.ID))
+	b.WriteString("      type        = \"execution_review\"\n")
+	b.WriteString("      author      = \"agent\"\n")
+	b.WriteString("      body        = <markdown summary>\n\n")
+	b.WriteString("The body should include:\n")
+	b.WriteString("- **What shipped** — files created/edited, key APIs, what's testable\n")
+	b.WriteString("- **Gates self-check** — which acceptance-criteria bullets you verified locally (git gate: commits exist; build gate: go build passes; manifest gate: deliverables addressed)\n")
+	b.WriteString("- **What the next task should expect** — APIs, error codes, file layout\n")
+	b.WriteString("- **Anything surprising** — bugs found, decisions taken, followups to file\n\n")
+	b.WriteString("This comment is your execution review. It becomes the canonical per-task home — no parallel memory note required unless you want a structured cross-session memory as well. The runner will record an amnesia flag if this call is missing.\n\n")
 
 	b.WriteString("Report completion when done.\n")
 

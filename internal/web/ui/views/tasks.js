@@ -186,15 +186,27 @@
         } catch(e) {}
       }
 
-      // Fetch linked actions, amnesia, delusions, and run history in parallel
+      // Fetch linked actions, amnesia, delusions, run history, and
+      // execution_review comments in parallel. The exec-review payload drives
+      // the "No execution review" badge (M4-T10) in the header.
       let actionsHtml = '', amnesiaHtml = '', delusionsHtml = '', runsHtml = '';
+      let needsExecReview = false;
       try {
-        const [actions, amnesia, delusions, runs] = await Promise.all([
+        const [actions, amnesia, delusions, runs, execReviewRes] = await Promise.all([
           fetchJSON('/api/tasks/' + t.id + '/actions'),
           fetchJSON('/api/tasks/' + t.id + '/amnesia'),
           fetchJSON('/api/tasks/' + t.id + '/delusions'),
           fetchJSON('/api/tasks/' + t.id + '/runs'),
+          fetchJSON('/api/tasks/' + t.id + '/comments?type=execution_review'),
         ]);
+        // Badge condition: task is completed AND no agent-authored
+        // execution_review comment exists. execReviewRes shape:
+        // { comments: [{ author, type, ... }, ...] }.
+        if (t.status === 'completed') {
+          const rows = (execReviewRes && execReviewRes.comments) || [];
+          const hasAgent = rows.some(c => c && c.author === 'agent');
+          needsExecReview = !hasAgent;
+        }
         if (actions && actions.length) {
           actionsHtml = `<div style="margin-bottom:12px">
             <div class="section-label">Actions (${actions.length})</div>
@@ -299,6 +311,7 @@
             <span class="session-uuid" style="font-size:14px">${esc(t.marker)}</span>
             <span style="flex:1;font-size:15px;font-weight:600;color:var(--text-primary)">${esc(t.title)}</span>
             <span style="color:${statusColor};font-weight:700;font-size:13px;text-transform:uppercase;padding:3px 10px;border:2px solid ${statusColor};border-radius:4px" title="${esc(statusRender.label)}">${statusRender.icon} ${esc(t.status)}</span>
+            ${needsExecReview ? `<a href="#task-comments-mount" onclick="var el=document.getElementById('task-comments-mount');if(el)el.scrollIntoView({behavior:'smooth'});return false;" style="color:var(--yellow);font-weight:700;font-size:11px;text-transform:uppercase;padding:3px 8px;border:2px solid var(--yellow);border-radius:4px;text-decoration:none;cursor:pointer" title="Task completed but no agent-authored execution_review comment was posted. Click to jump to the comments section.">&#9888; No execution review</a>` : ''}
           </div>
           ${t.block_reason ? `
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:6px 10px;background:rgba(59,130,246,0.08);border-left:3px solid var(--accent);border-radius:4px;font-size:12px;color:var(--text-primary)">

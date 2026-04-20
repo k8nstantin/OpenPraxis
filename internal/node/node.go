@@ -277,6 +277,11 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// cmd/serve.go passes an explicit dir via a follow-up SetRepoDir if it
 	// runs from outside the repo root.
 	n.runner = task.NewRunner(n.Tasks, n.Actions, n.SettingsResolver, "", onEvent)
+	// Wire the post-completion execution_review gate (M4-T10). Non-fatal
+	// if Comments is nil — the runner treats nil as "feature off".
+	if n.Comments != nil {
+		n.runner.SetExecutionReviewChecker(&executionReviewCheckerAdapter{s: n.Comments})
+	}
 	return n.runner
 }
 
@@ -672,6 +677,26 @@ func (a *taskReviewWriteAdapter) AddReviewComment(ctx context.Context, taskID, a
 // here so the caller's "latest review comment wins" logic doesn't
 // have to re-filter.
 type taskReviewReadAdapter struct{ s *comments.Store }
+
+// executionReviewCheckerAdapter satisfies task.ExecutionReviewChecker by
+// asking the comments store whether the given task carries at least one
+// execution_review comment authored by "agent". Used by the runner's
+// post-completion amnesia gate (M4-T10).
+type executionReviewCheckerAdapter struct{ s *comments.Store }
+
+func (a *executionReviewCheckerAdapter) HasAgentExecutionReview(ctx context.Context, taskID string) (bool, error) {
+	t := comments.TypeExecutionReview
+	rows, err := a.s.List(ctx, comments.TargetTask, taskID, 50, &t)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range rows {
+		if c.Author == "agent" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 func (a *taskReviewReadAdapter) ListReviewCommentsForTask(ctx context.Context, taskID string, limit int) ([]task.ReviewComment, error) {
 	all, err := a.s.List(ctx, comments.TargetTask, taskID, limit, nil)
