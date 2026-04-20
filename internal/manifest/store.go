@@ -276,15 +276,23 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 	return results, rows.Err()
 }
 
-// Search finds manifests by keyword in title, description, or content.
+// Search finds manifests matching a query. Supports id-exact, id-prefix
+// (marker or UUID prefix), id-substring, and keyword substring in
+// title/description/content/jira_refs/tags. Previously this only
+// matched content fields, so typing a marker returned zero results —
+// see manifest 019daafb-b5e M6 for the root-cause write-up.
 func (s *Store) Search(query string, limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	pattern := "%" + query + "%"
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, nil
+	}
+	pattern := "%" + q + "%"
 	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
-		FROM manifests WHERE deleted_at = '' AND (title LIKE ? OR description LIKE ? OR content LIKE ? OR jira_refs LIKE ? OR tags LIKE ?)
-		ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, pattern, pattern, pattern, pattern, pattern, limit)
+		FROM manifests WHERE deleted_at = '' AND (id LIKE ? OR title LIKE ? OR description LIKE ? OR content LIKE ? OR jira_refs LIKE ? OR tags LIKE ?)
+		ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, pattern, pattern, pattern, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
 	}
