@@ -616,8 +616,15 @@
             if (data && data.running) {
               OL.viewTimeout(pollOutput, 2000);
             } else {
-              // Task finished — reload full detail
-              OL.loadTaskDetail(t.id);
+              // Task finished — DO NOT full-reload the detail. That used
+              // to cause flicker: the tasks.status column lags the
+              // /output endpoint's running flag, so loadTaskDetail
+              // re-rendered with isRunningOrPaused=true, which restarted
+              // pollOutput, which saw running=false again, and the
+              // whole detail panel flickered at poll cadence. Instead
+              // we just stop polling and refresh the task list so the
+              // row's status updates naturally; a manual click into
+              // the task brings in the freshly-completed detail.
               OL.loadTasks();
             }
           } catch (e) {}
