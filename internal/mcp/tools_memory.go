@@ -115,7 +115,7 @@ func (s *Server) handleRecall(ctx context.Context, req mcplib.CallToolRequest) (
 		return formatRecallHit(s, *mem, tier), nil
 	}
 
-	mem, ambiguous, err := s.resolveByID(ctx, id)
+	mem, ambiguous, err := s.resolveByID(id)
 	if err != nil {
 		return errResult("recall failed: %v", err), nil
 	}
@@ -131,10 +131,8 @@ func (s *Server) handleRecall(ctx context.Context, req mcplib.CallToolRequest) (
 		if pm, _ := s.node.Index.GetByPath(id); pm != nil {
 			return formatRecallHit(s, *pm, tier), nil
 		}
-		if memory.IsPathPrefix(id) || strings.Contains(id, "/") {
-			if mems, _ := s.node.Index.ListByPrefix(id, 10); len(mems) > 0 {
-				return textResult(formatCandidates(id, mems, false)), nil
-			}
+		if mems, _ := s.node.Index.ListByPrefix(id, 10); len(mems) > 0 {
+			return textResult(formatCandidates(id, mems, false)), nil
 		}
 	}
 
@@ -154,7 +152,7 @@ func (s *Server) handleRecall(ctx context.Context, req mcplib.CallToolRequest) (
 
 // resolveByID walks rungs 1-3 (exact id, id prefix, id substring). Returns a
 // single match, or a candidate list when ambiguous. Both nil means no hit.
-func (s *Server) resolveByID(ctx context.Context, id string) (*memory.Memory, []*memory.Memory, error) {
+func (s *Server) resolveByID(id string) (*memory.Memory, []*memory.Memory, error) {
 	// Rung 1: exact ID.
 	if mem, err := s.node.Index.GetByID(id); err != nil {
 		return nil, nil, err
