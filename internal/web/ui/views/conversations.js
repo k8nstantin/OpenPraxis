@@ -2,14 +2,26 @@
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime, formatModel = OL.formatModel;
   function setupConvSearch() {
-    var input = document.getElementById('conv-search-input');
-    var btn = document.getElementById('conv-search-btn');
-    if (btn) {
-      OL.onView(btn, 'click', function() { searchConversations(input.value); });
-      OL.onView(input, 'keypress', function(e) {
-        if (e.key === 'Enter') searchConversations(input.value);
-      });
-    }
+    var mount = document.getElementById('conv-search-mount');
+    if (!mount || !OL.mountSearchInput) return;
+    OL.mountSearchInput(mount, {
+      placeholder: 'Search conversations by id, marker, or keyword...',
+      onSearch: async function(q) {
+        var resp = await fetch('/api/conversations/search?q=' + encodeURIComponent(q));
+        var results = await resp.json();
+        var convos = (results || []).map(function(r) {
+          return {
+            id: r.conversation.id,
+            title: r.conversation.title + (typeof r.score === 'number' ? ' (' + r.score.toFixed(2) + ')' : ''),
+            agent: r.conversation.agent,
+            turn_count: r.conversation.turn_count
+          };
+        });
+        renderConversationSearchResults(convos);
+        return convos.length;
+      },
+      onClear: function() { OL.loadConversations(); }
+    });
   }
 
   OL.loadConversations = async function() {
@@ -182,32 +194,5 @@
     });
   };
 
-  async function searchConversations(query) {
-    if (!query.trim()) {
-      OL.loadConversations();
-      return;
-    }
-    try {
-      var resp = await fetch('/api/conversations/search', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query: query, limit: 20})
-      });
-      var results = await resp.json();
-      var convos = (results || []).map(function(r) {
-        return {
-          id: r.conversation.id,
-          title: r.conversation.title + ' (' + r.score.toFixed(2) + ')',
-          agent: r.conversation.agent,
-          turn_count: r.conversation.turn_count
-        };
-      });
-      renderConversationSearchResults(convos);
-    } catch (e) {
-      console.error('Search conversations failed:', e);
-    }
-  }
-
-  OL.searchConversations = searchConversations;
   OL.renderConversationSearchResults = renderConversationSearchResults;
 })(window.OL);

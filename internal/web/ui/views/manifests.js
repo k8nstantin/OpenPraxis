@@ -4,13 +4,22 @@
 
   OL.loadManifests = async function() {
     const el = document.getElementById('manifest-list');
-    const searchInput = document.getElementById('manifest-search-input');
-    const searchBtn = document.getElementById('manifest-search-btn');
     const newBtn = document.getElementById('manifest-new-btn');
 
-    searchBtn.onclick = () => searchManifests(searchInput.value);
-    searchInput.onkeypress = (e) => { if (e.key === 'Enter') searchManifests(searchInput.value); };
     if (newBtn) newBtn.onclick = () => OL.createManifest();
+
+    const mount = document.getElementById('manifest-search-mount');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search manifests by id, marker, Jira ref, tag, or keyword...',
+        onSearch: async function(q) {
+          const results = await fetchJSON('/api/manifests/search?q=' + encodeURIComponent(q));
+          renderManifestList(el, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadManifests(); }
+      });
+    }
 
     try {
       var results = await Promise.all([
@@ -90,22 +99,6 @@
       console.error('Load manifests failed:', e);
     }
   };
-
-  async function searchManifests(query) {
-    if (!query.trim()) { OL.loadManifests(); return; }
-    const el = document.getElementById('manifest-list');
-    try {
-      const resp = await fetch('/api/manifests/search', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query})
-      });
-      const manifests = await resp.json();
-      renderManifestList(el, manifests || []);
-    } catch (e) {
-      console.error('Search manifests failed:', e);
-    }
-  }
 
   function renderManifestList(el, manifests) {
     if (!manifests || !manifests.length) {

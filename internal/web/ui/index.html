@@ -234,6 +234,7 @@
 
       <div id="view-memories" class="view">
         <div class="tab-hint">Memories grouped by peer node, then by session. Click a memory to see its full content. Click <span class="btn-copy-inline">&#x2398;</span> to copy a reference you can paste into Claude.</div>
+        <div id="memories-search-mount"></div>
         <div class="memories-layout">
           <div class="memory-tree-panel">
             <div class="panel-header">Peers &amp; Memories</div>
@@ -252,6 +253,7 @@
 
       <div id="view-products" class="view">
         <div class="tab-hint">Products group related manifests under one initiative. Click a product to see its linked manifests, total cost, and tasks.</div>
+        <div id="products-search-mount"></div>
         <div class="manifests-layout">
           <div class="manifest-list-panel">
             <div class="panel-header">Peers &amp; Products</div>
@@ -270,9 +272,8 @@
 
       <div id="view-manifests" class="view">
         <div class="tab-hint">Manifests grouped by peer node. Shared across all peers and sessions. Tell Claude: <em>"create a manifest for the auth module, reference ENG-1234"</em></div>
-        <div style="display:flex;gap:8px;margin-bottom:16px">
-          <input type="text" id="manifest-search-input" class="conv-search" placeholder="Search manifests by keyword, Jira ref, or tag..." style="flex:1" />
-          <button id="manifest-search-btn" class="btn-search">Search</button>
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-start">
+          <div id="manifest-search-mount" style="flex:1"></div>
           <button id="manifest-new-btn" class="btn-search btn-action">+ New Manifest</button>
         </div>
         <div class="manifests-layout">
@@ -293,6 +294,7 @@
 
       <div id="view-ideas" class="view">
         <div class="tab-hint">Ideas grouped by peer node. Add ideas from the dashboard or tell Claude: <em>"save idea: separate the serve and mcp binaries so restarts don't kill sessions"</em></div>
+        <div id="ideas-search-mount"></div>
         <div class="manifests-layout">
           <div class="manifest-list-panel">
             <div class="panel-header">Peers &amp; Ideas</div>
@@ -323,6 +325,7 @@
 
       <div id="view-tasks" class="view">
         <div class="tab-hint">Scheduled tasks execute against manifests on a timer. Create a task, point it at a manifest, set the schedule, and start it.</div>
+        <div id="tasks-search-mount"></div>
         <div class="panel" id="tasks-running-panel" style="display:none;margin-bottom:16px;border-left:3px solid var(--green)">
           <div class="panel-header" style="background:rgba(0,217,126,0.05)">
             Running Now
@@ -527,10 +530,7 @@
 
       <div id="view-conversations" class="view">
         <div class="tab-hint">Conversations grouped by peer node. Click a conversation to see all turns. Click <span class="btn-copy-inline">&#x2398;</span> on any turn to copy a reference &mdash; paste it into Claude and it will review that exact exchange.</div>
-        <div class="conv-header">
-          <input type="text" id="conv-search-input" class="conv-search" placeholder="Search conversations by topic..." />
-          <button id="conv-search-btn" class="btn-search">Search</button>
-        </div>
+        <div id="conv-search-mount"></div>
         <div class="conv-layout">
           <div class="conv-list-panel">
             <div class="panel-header">Peers &amp; Conversations</div>
@@ -549,6 +549,7 @@
 
       <div id="view-actions" class="view">
         <div class="tab-hint">Complete audit log of every tool call, grouped by peer node and session. Every file read, edit, bash command, and their results.</div>
+        <div id="actions-search-mount"></div>
         <div class="conv-layout">
           <div class="conv-list-panel">
             <div class="panel-header">Peers &amp; Actions</div>
@@ -740,6 +741,7 @@
   <script src="/lifecycle.js"></script>
   <script src="/components/knobs.js"></script>
   <script src="/components/comments.js"></script>
+  <script src="/views/search.js"></script>
   <script src="/views/overview.js"></script>
   <script src="/views/memories.js"></script>
   <script src="/views/conversations.js"></script>

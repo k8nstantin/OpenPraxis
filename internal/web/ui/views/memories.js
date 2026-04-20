@@ -2,7 +2,40 @@
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime;
 
+  function renderMemorySearchList(el, results) {
+    if (!results || !results.length) {
+      el.innerHTML = '<div class="empty-state">No memories found</div>';
+      return;
+    }
+    el.innerHTML = results.map(function(r) {
+      var m = r.memory || r;
+      var score = (typeof r.score === 'number') ? r.score : null;
+      var preview = (m.l0 || m.l1 || '').substring(0, 80);
+      return '<div class="tree-node peer-leaf clickable" data-memory-id="' + esc(m.id) + '" ' +
+        'role="button" tabindex="0" ' +
+        'onclick="OL.loadMemoryPeerDetail(\'' + esc(m.id) + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+        '<span class="session-uuid">' + esc(m.marker || (m.id ? m.id.substring(0,12) : '')) + '</span>' +
+        (score != null ? '<span class="badge badge-sm" style="color:var(--accent)">' + score.toFixed(2) + '</span>' : '') +
+        '<span style="font-size:12px;color:var(--text-primary);flex:1">' + esc(preview) + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
   OL.loadMemoryPeerTree = async function() {
+    var mount = document.getElementById('memories-search-mount');
+    var tree = document.getElementById('memory-peer-tree');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search memories by id, marker, path, or keyword...',
+        onSearch: async function(q) {
+          var results = await fetchJSON('/api/memories/search?q=' + encodeURIComponent(q));
+          renderMemorySearchList(tree, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadMemoryPeerTree(); }
+      });
+    }
     try {
       var peerGroups = await fetchJSON('/api/memories/by-peer');
       var el = document.getElementById('memory-peer-tree');
