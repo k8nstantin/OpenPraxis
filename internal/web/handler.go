@@ -77,8 +77,17 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	// Dashboard REST API
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/status", apiStatus(n, mcpServer, peerRegistry)).Methods("GET")
+	// Per-tab scoped search (M2). Registered before /{id} routes because
+	// gorilla/mux matches in registration order — otherwise "search" would
+	// be swallowed by /products/{id}, /ideas/{id}, /actions/{id}.
+	api.HandleFunc("/tasks/search", apiTasksSearch(n)).Methods("GET")
+	api.HandleFunc("/products/search", apiProductsSearch(n)).Methods("GET")
+	api.HandleFunc("/ideas/search", apiIdeasSearch(n)).Methods("GET")
+	api.HandleFunc("/actions/search", apiActionsSearch(n)).Methods("GET")
+	api.HandleFunc("/manifests/search", apiManifestsSearchGET(n)).Methods("GET")
 	api.HandleFunc("/memories", apiMemories(n)).Methods("GET")
 	api.HandleFunc("/memories/search", apiSearch(n)).Methods("POST")
+	api.HandleFunc("/memories/search", apiMemoriesSearchGET(n)).Methods("GET")
 	api.HandleFunc("/memories/tree", apiTree(n)).Methods("GET")
 	api.HandleFunc("/memories/by-session", apiMemoriesBySession(n)).Methods("GET")
 	api.HandleFunc("/memories/by-peer", apiMemoriesByPeer(n)).Methods("GET")
@@ -91,6 +100,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/conversations", apiConversations(n)).Methods("GET")
 	api.HandleFunc("/conversations/by-peer", apiConversationsByPeer(n)).Methods("GET")
 	api.HandleFunc("/conversations/search", apiConversationSearch(n)).Methods("POST")
+	api.HandleFunc("/conversations/search", apiConversationsSearchGET(n)).Methods("GET")
 	api.HandleFunc("/conversations/{id}/actions", apiConversationActions(n)).Methods("GET")
 	api.HandleFunc("/conversations/{id}", apiConversation(n)).Methods("GET")
 	api.HandleFunc("/markers", apiMarkers(n)).Methods("GET")
