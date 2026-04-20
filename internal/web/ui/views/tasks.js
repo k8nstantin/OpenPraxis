@@ -69,11 +69,53 @@
   };
 
   // --- Tasks ---
+  function renderTaskSearchList(el, tasks) {
+    if (!tasks || !tasks.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:16px">No tasks found</div>';
+      return;
+    }
+    el.innerHTML = tasks.map(function(t) {
+      var render = OL.getStatusRender(t.status);
+      var meta = [];
+      if (t.run_count > 0) meta.push(t.run_count + ' runs');
+      if (t.total_turns > 0) meta.push(t.total_turns + ' turns');
+      if (t.total_cost > 0) meta.push('$' + t.total_cost.toFixed(2));
+      if (t.schedule) meta.push(esc(t.schedule));
+      return '<div class="amnesia-item ' + render.cssClass + ' clickable" data-id="' + esc(t.id) + '" ' +
+        'role="button" tabindex="0" ' +
+        'onclick="OL.loadTaskDetail(\'' + esc(t.id) + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+        '<div class="amnesia-header">' +
+          '<span class="status-dot" style="background:' + render.color + '"></span>' +
+          '<span class="amnesia-status-label" style="color:' + render.color + ';font-weight:600">' +
+            render.icon + ' ' + esc(t.status) +
+          '</span>' +
+          '<span class="session-uuid">' + esc(t.marker) + '</span>' +
+        '</div>' +
+        '<div class="amnesia-rule">' + esc(t.title) + '</div>' +
+        (meta.length ? '<div class="amnesia-action">' + meta.join(' &middot; ') + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
   OL.loadTasks = async function() {
     const el = document.getElementById('tasks-list');
     const newBtn = document.getElementById('task-new-btn');
 
     newBtn.onclick = () => OL.showTaskCreateForm();
+
+    const mount = document.getElementById('tasks-search-mount');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search tasks by id, marker, title, or keyword...',
+        onSearch: async function(q) {
+          const results = await fetchJSON('/api/tasks/search?q=' + encodeURIComponent(q));
+          renderTaskSearchList(el, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadTasks(); }
+      });
+    }
 
     // Status styling comes from OL.getStatusRender (task-status.js).
     // Never add an inline map here — adding a status in status.go

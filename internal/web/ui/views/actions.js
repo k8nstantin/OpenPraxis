@@ -2,8 +2,39 @@
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime;
 
+  function renderActionSearchList(el, actions) {
+    if (!actions || !actions.length) {
+      el.innerHTML = '<div class="empty-state">No actions found</div>';
+      return;
+    }
+    el.innerHTML = actions.map(function(a) {
+      var input = a.tool_input ? (a.tool_input.length > 60 ? a.tool_input.substring(0, 60) + '...' : a.tool_input) : '';
+      return '<div class="tree-node peer-leaf clickable" data-action-id="' + esc(a.id) + '" role="button" tabindex="0" ' +
+        'onclick="OL.loadActionDetail(\'' + esc(a.id) + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+        '<span class="badge type badge-sm">' + esc(a.tool_name) + '</span>' +
+        '<span style="font-size:11px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(input) + '</span>' +
+        '<span style="color:var(--text-muted);font-size:10px">' + formatTime(a.created_at) + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
   OL.loadActions = async function() {
     const el = document.getElementById('actions-tree');
+
+    const mount = document.getElementById('actions-search-mount');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search actions by id, tool name, or keyword...',
+        onSearch: async function(q) {
+          const results = await fetchJSON('/api/actions/search?q=' + encodeURIComponent(q));
+          renderActionSearchList(el, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadActions(); }
+      });
+    }
+
     try {
       const peerGroups = await fetchJSON('/api/actions/by-peer');
       if (!peerGroups || !peerGroups.length) {

@@ -2,8 +2,49 @@
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime;
 
+  function renderProductSearchList(el, products) {
+    if (!products || !products.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:16px">No products found</div>';
+      return;
+    }
+    el.innerHTML = products.map(function(p) {
+      var statusColors = {open:'var(--green)',closed:'var(--text-muted)',draft:'var(--yellow)',archive:'var(--red)'};
+      var color = statusColors[p.status] || 'var(--text-muted)';
+      var meta = [];
+      if (p.total_manifests > 0) meta.push(p.total_manifests + ' manifests');
+      if (p.total_tasks > 0) meta.push(p.total_tasks + ' tasks');
+      if (p.total_cost > 0) meta.push('$' + p.total_cost.toFixed(2));
+      return '<div class="manifest-item clickable" data-product-id="' + esc(p.id) + '" role="button" tabindex="0" ' +
+        'onclick="OL.loadProductDetail(\'' + esc(p.id) + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+          '<span class="status-dot" style="background:' + color + '"></span>' +
+          '<span class="session-uuid">' + esc(p.marker) + '</span>' +
+          '<span class="badge" style="color:' + color + '">' + esc(p.status) + '</span>' +
+        '</div>' +
+        '<div class="manifest-item-title">' + esc(p.title) + '</div>' +
+        (p.description ? '<div style="font-size:12px;color:var(--text-secondary)">' + esc(p.description) + '</div>' : '') +
+        (meta.length ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">' + meta.join(' &middot; ') + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
   OL.loadProducts = async function() {
     var el = document.getElementById('products-list');
+
+    var mount = document.getElementById('products-search-mount');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search products by id, marker, tag, or keyword...',
+        onSearch: async function(q) {
+          var results = await fetchJSON('/api/products/search?q=' + encodeURIComponent(q));
+          renderProductSearchList(el, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadProducts(); }
+      });
+    }
+
     try {
       var peerGroups = await fetchJSON('/api/products/by-peer');
 

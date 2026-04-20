@@ -3,11 +3,46 @@
   var fetchJSON = OL.fetchJSON, esc = OL.esc;
   var _pendingIdeaId = null;
 
+  function renderIdeaSearchList(el, ideas) {
+    if (!ideas || !ideas.length) {
+      el.innerHTML = '<div class="empty-state" style="padding:16px">No ideas found</div>';
+      return;
+    }
+    el.innerHTML = ideas.map(function(i) {
+      var prioClass = i.priority === 'critical' || i.priority === 'high' ? 'high' :
+        i.priority === 'low' ? 'low' : 'medium';
+      return '<div class="manifest-item clickable" data-id="' + esc(i.id) + '" role="button" tabindex="0" ' +
+        'onclick="OL.loadIdea(\'' + esc(i.id) + '\')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
+          '<span class="amnesia-score ' + prioClass + ' badge-sm">' + esc(i.priority) + '</span>' +
+          '<span class="session-uuid">' + esc(i.marker) + '</span>' +
+          '<span class="badge">' + esc(i.status) + '</span>' +
+        '</div>' +
+        '<div class="manifest-item-title">' + esc(i.title) + '</div>' +
+        (i.description ? '<div style="font-size:12px;color:var(--text-secondary)">' + esc(i.description) + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
   OL.loadIdeas = async function() {
     var el = document.getElementById('ideas-list');
     var btn = document.getElementById('idea-add-btn');
     var titleInput = document.getElementById('idea-title');
     var prioritySelect = document.getElementById('idea-priority');
+
+    var mount = document.getElementById('ideas-search-mount');
+    if (mount && OL.mountSearchInput) {
+      OL.mountSearchInput(mount, {
+        placeholder: 'Search ideas by id, marker, or keyword...',
+        onSearch: async function(q) {
+          var results = await fetchJSON('/api/ideas/search?q=' + encodeURIComponent(q));
+          renderIdeaSearchList(el, results || []);
+          return (results || []).length;
+        },
+        onClear: function() { OL.loadIdeas(); }
+      });
+    }
 
     btn.onclick = async function() {
       var title = titleInput.value.trim();
