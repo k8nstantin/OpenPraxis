@@ -319,6 +319,9 @@ func defaultAllowedTools() []string {
 		"mcp__openpraxis__settings_get",
 		"mcp__openpraxis__settings_resolve",
 		"mcp__openpraxis__settings_catalog",
+		// comment_add is referenced in the runner's mandatory closing
+		// prompt — every task must be able to post its execution_review.
+		"mcp__openpraxis__comment_add",
 	}
 }
 
