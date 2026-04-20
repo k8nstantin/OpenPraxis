@@ -318,6 +318,20 @@ func (s *Server) registerTools() {
 		),
 		s.handleMarkerDone,
 	)
+
+	// --- Comment tools ---
+
+	s.mcp.AddTool(
+		mcplib.NewTool("comment_add",
+			mcplib.WithDescription("Post a comment on a product, manifest, or task. Mirrors POST /api/{products|manifests|tasks}/{id}/comments. The runner's closing step uses this to record the execution_review."),
+			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("'product', 'manifest', or 'task'")),
+			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("ID of the entity to comment on")),
+			mcplib.WithString("author", mcplib.Required(), mcplib.Description("Author name — e.g. 'agent', 'claude-code', 'operator'")),
+			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Comment type: 'execution_review', 'user_note', 'watcher_finding', 'agent_note', 'decision', 'link', 'review_rejection', 'review_approval'")),
+			mcplib.WithString("body", mcplib.Required(), mcplib.Description("Markdown comment body")),
+		),
+		s.handleCommentAdd,
+	)
 }
 
 func textResult(text string) *mcplib.CallToolResult {
