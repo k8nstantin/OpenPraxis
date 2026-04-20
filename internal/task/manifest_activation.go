@@ -61,13 +61,27 @@ func (s *Store) FlipManifestBlockedTasks(ctx context.Context, manifestID string,
 	// walker and the chain doesn't advance on manifest close. Drop
 	// the legacy clause in a follow-up once DB is known-clean.
 	now := time.Now().UTC().Format(time.RFC3339)
+	// next_run_at must be set when flipping to scheduled — the
+	// scheduler's dequeue query requires next_run_at != ''. Bug #114:
+	// without this, tasks flipped by the propagation walker land
+	// scheduled-but-uncallable, which presented as #103 ("manifest-
+	// close propagation doesn't activate downstream tasks"). The
+	// propagation DID fire; the flipped rows were just invisible to
+	// the scheduler because next_run_at was empty.
+	//
+	// For the rehab path (newStatus=pending) next_run_at stays empty —
+	// pending tasks never auto-fire by design.
+	nextRunAt := ""
+	if newStatus == StatusScheduled {
+		nextRunAt = now
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE tasks
-		 SET status = ?, block_reason = '', updated_at = ?
+		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
 		 WHERE manifest_id = ? AND status = 'waiting'
 		   AND (block_reason LIKE ? OR block_reason LIKE ?)
 		   AND deleted_at = ''`,
-		string(newStatus), now, manifestID,
+		string(newStatus), nextRunAt, now, manifestID,
 		manifestBlockPrefix+"%", legacyManifestBlockPrefix+"%")
 	if err != nil {
 		return 0, fmt.Errorf("flip manifest-blocked tasks: %w", err)
