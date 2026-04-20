@@ -228,6 +228,50 @@ func (idx *Index) GetByIDPrefix(prefix string) (*Memory, error) {
 	return scanMemoryRow(row)
 }
 
+// GetByIDPrefixAll returns all memories whose id starts with prefix, up to limit.
+// Used to detect ambiguous short markers and surface candidate lists.
+func (idx *Index) GetByIDPrefixAll(prefix string, limit int) ([]*Memory, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := idx.db.Query(`SELECT id, path, l0, l1, l2, type, tags, source_agent, source_node, scope, project, domain, created_at, updated_at, accessed_at, access_count FROM memories WHERE id LIKE ? AND deleted_at = '' ORDER BY id LIMIT ?`, prefix+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []*Memory
+	for rows.Next() {
+		mem, err := scanMemoryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, mem)
+	}
+	return results, rows.Err()
+}
+
+// FindByIDSubstring returns memories whose id contains sub anywhere (covers
+// dash-mangled pastes where a dash falls inside the provided fragment).
+func (idx *Index) FindByIDSubstring(sub string, limit int) ([]*Memory, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := idx.db.Query(`SELECT id, path, l0, l1, l2, type, tags, source_agent, source_node, scope, project, domain, created_at, updated_at, accessed_at, access_count FROM memories WHERE id LIKE ? AND deleted_at = '' ORDER BY id LIMIT ?`, "%"+sub+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []*Memory
+	for rows.Next() {
+		mem, err := scanMemoryRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, mem)
+	}
+	return results, rows.Err()
+}
+
 // ListByType returns all memories of a given type.
 func (idx *Index) ListByType(memType string, limit int) ([]*Memory, error) {
 	if limit <= 0 {
