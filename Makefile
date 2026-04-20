@@ -1,11 +1,11 @@
 .PHONY: build clean run test help
 
-VERSION ?= 2.0.0
+VERSION ?= 0.3.0
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS = -ldflags "-X openpraxis/cmd.Version=$(VERSION) \
-	-X openpraxis/cmd.GitCommit=$(GIT_COMMIT) \
-	-X openpraxis/cmd.BuildDate=$(BUILD_DATE)"
+LDFLAGS = -ldflags "-X github.com/k8nstantin/OpenPraxis/cmd.Version=$(VERSION) \
+	-X github.com/k8nstantin/OpenPraxis/cmd.GitCommit=$(GIT_COMMIT) \
+	-X github.com/k8nstantin/OpenPraxis/cmd.BuildDate=$(BUILD_DATE)"
 
 build:
 	go mod tidy
