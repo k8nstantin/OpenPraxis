@@ -8,7 +8,7 @@
       return;
     }
     el.innerHTML = results.map(function(r) {
-      var m = r.memory || r;
+      var m = r;
       var score = (typeof r.score === 'number') ? r.score : null;
       var preview = (m.l0 || m.l1 || '').substring(0, 80);
       return '<div class="tree-node peer-leaf clickable" data-memory-id="' + esc(m.id) + '" ' +

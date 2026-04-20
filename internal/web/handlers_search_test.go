@@ -190,6 +190,81 @@ func TestActionsSearch_Keyword(t *testing.T) {
 	}
 }
 
+// The following tests enforce the response-shape contract from manifest
+// 019dac18-638: every GET /api/<type>/search returns a flat JSON array and
+// never `null` on empty. They use raw-bytes comparison because nil slices
+// marshal to "null" while empty slices marshal to "[]" — and the frontend
+// can't distinguish those without guarding every caller.
+
+func TestTasksSearch_EmptyResultIsArrayNotNull(t *testing.T) {
+	n := newSearchNode(t)
+	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=zzz_no_such_task")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
+		t.Fatalf("want `[]`, got %q", body)
+	}
+}
+
+func TestProductsSearch_EmptyResultIsArrayNotNull(t *testing.T) {
+	n := newSearchNode(t)
+	rec := doGET(t, apiProductsSearch(n), "/api/products/search?q=zzz_no_such_product")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
+		t.Fatalf("want `[]`, got %q", body)
+	}
+}
+
+func TestIdeasSearch_EmptyResultIsArrayNotNull(t *testing.T) {
+	n := newSearchNode(t)
+	rec := doGET(t, apiIdeasSearch(n), "/api/ideas/search?q=zzz_no_such_idea")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
+		t.Fatalf("want `[]`, got %q", body)
+	}
+}
+
+func TestActionsSearch_EmptyResultIsArrayNotNull(t *testing.T) {
+	n := newSearchNode(t)
+	rec := doGET(t, apiActionsSearch(n), "/api/actions/search?q=zzz_no_such_action")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
+		t.Fatalf("want `[]`, got %q", body)
+	}
+}
+
+// TestTasksSearch_ShapeMatchesListEndpoint asserts that a successful task
+// search returns entities flat (no outer {task: ...} wrapper), so that the
+// frontend can render `r.id`/`r.title` directly.
+func TestTasksSearch_ShapeMatchesListEndpoint(t *testing.T) {
+	n := newSearchNode(t)
+	a, _ := n.Tasks.Create("", "shape-alpha", "desc", "once", "claude-code", n.PeerID(), "test", "")
+	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=shape-alpha")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if len(raw) != 1 {
+		t.Fatalf("want 1 result, got %d", len(raw))
+	}
+	if _, wrapped := raw[0]["task"]; wrapped {
+		t.Fatalf("search result is wrapped under 'task' key; want flat: %+v", raw[0])
+	}
+	if id, _ := raw[0]["id"].(string); id != a.ID {
+		t.Fatalf("want id=%s, got %+v", a.ID, raw[0])
+	}
+}
+
 func TestParseSearchParams_LimitAndAlias(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/x/search?query=hello&limit=7", nil)
 	q, lim := parseSearchParams(req)
