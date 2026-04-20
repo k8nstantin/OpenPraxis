@@ -102,6 +102,7 @@ func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
 		// Create the watcher and run audit
 		cwd, _ := os.Getwd()
 		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", n.PeerID())
+		taskWatcher.SetCommentPoster(n.Comments)
 		audit := taskWatcher.AuditTask(
 			t.ID, t.Marker, t.Title,
 			t.ManifestID, manifestTitle, manifestContent,

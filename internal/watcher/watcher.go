@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -9,7 +10,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 )
+
+// CommentPoster is the minimal subset of *comments.Store the watcher calls to
+// auto-post watcher_finding comments on gate decisions. Declared as an
+// interface so tests can inject a broken implementation and verify the audit
+// path does not fail on comment-write errors.
+type CommentPoster interface {
+	Add(ctx context.Context, target comments.TargetType, targetID, author string,
+		cType comments.CommentType, body string) (comments.Comment, error)
+}
 
 // Watcher is the independent server-side task execution auditor.
 // It runs OUTSIDE the agent session — the agent cannot access, override, or skip it.
@@ -18,6 +30,7 @@ type Watcher struct {
 	repoDir    string // git repo root
 	buildCmd   string // build command (e.g. "go build ./...")
 	sourceNode string
+	comments   CommentPoster
 }
 
 // New creates a watcher.
@@ -32,6 +45,11 @@ func New(store *Store, repoDir, buildCmd, sourceNode string) *Watcher {
 		sourceNode: sourceNode,
 	}
 }
+
+// SetCommentPoster wires a comments store so gate-failure decisions auto-post
+// watcher_finding comments on the audited task. A nil poster disables the
+// feature (existing behavior).
+func (w *Watcher) SetCommentPoster(p CommentPoster) { w.comments = p }
 
 // AuditTask runs all three gates on a completed task.
 // This is called by the task runner AFTER the agent claims completion.
@@ -111,7 +129,106 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 		slog.Error("failed to store audit", "component", "watcher", "error", err)
 	}
 
+	// Post watcher_finding comments on gate failures. All-pass posts nothing
+	// (the green status badge on the task card already communicates). Comment
+	// write errors are logged and swallowed — an audit never fails because a
+	// comment failed to write.
+	w.postFindings(taskID, audit)
+
 	return audit
+}
+
+// postFindings writes one watcher_finding comment per failed gate. Safe to
+// call with a nil comment poster (feature disabled).
+func (w *Watcher) postFindings(taskID string, audit *Audit) {
+	if w.comments == nil || taskID == "" {
+		return
+	}
+
+	var bodies []string
+	if !audit.GitPassed {
+		bodies = append(bodies, gitFailureBody(audit.GitDetails))
+	}
+	if !audit.BuildPassed {
+		bodies = append(bodies, buildFailureBody(audit.BuildDetails))
+	}
+	if !audit.ManifestPassed {
+		bodies = append(bodies, manifestFailureBody(audit.ManifestDetails))
+	}
+
+	for _, body := range bodies {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := w.comments.Add(ctx, comments.TargetTask, taskID, "watcher", comments.TypeWatcherFinding, body)
+		cancel()
+		if err != nil {
+			slog.Warn("watcher failed to post finding comment",
+				"component", "watcher", "task", taskID, "error", err)
+		}
+	}
+}
+
+func gitFailureBody(g GitResult) string {
+	branch := g.Branch
+	if branch == "" {
+		branch = "(unresolved)"
+	}
+	return fmt.Sprintf("### Git gate failed\n"+
+		"No commits on branch %s. Watcher cannot verify work. Task auto-downgraded to failed.\n\n"+
+		"**Branch:** %s\n"+
+		"**Expected commits:** ≥1\n"+
+		"**Actual:** %d",
+		branch, branch, g.CommitCount)
+}
+
+func buildFailureBody(b BuildResult) string {
+	return fmt.Sprintf("### Build gate failed\n\n```\n%s\n```", lastNLines(b.Output, 40))
+}
+
+func manifestFailureBody(m ManifestResult) string {
+	var missing, found []string
+	for _, d := range m.Deliverables {
+		switch d.Status {
+		case "missing":
+			missing = append(missing, d.Item)
+		case "done", "partial":
+			found = append(found, d.Item)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("### Manifest gate failed\n\n")
+	if len(missing) == 0 {
+		sb.WriteString("Deliverables missing: (none identified individually)\n")
+	} else {
+		sb.WriteString("Deliverables missing:\n")
+		for _, item := range missing {
+			sb.WriteString("- ")
+			sb.WriteString(item)
+			sb.WriteString("\n")
+		}
+	}
+	if len(found) > 0 {
+		sb.WriteString("\nDeliverables found in diff:\n")
+		for _, item := range found {
+			sb.WriteString("- ")
+			sb.WriteString(item)
+			sb.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// lastNLines returns the trailing n non-empty-trimmed lines of s, preserving
+// original order. If s has fewer than n lines, all of s is returned.
+func lastNLines(s string, n int) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // resolveTaskBranch finds the branch this task committed on. Accepts either
