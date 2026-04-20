@@ -53,9 +53,16 @@ func (s *Store) FlipProductBlockedTasks(ctx context.Context, productID string, n
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	// next_run_at must be set when flipping to scheduled; see #114 +
+	// the matching fix in FlipManifestBlockedTasks. Pending path
+	// keeps it empty (pending tasks never auto-fire).
+	nextRunAt := ""
+	if newStatus == StatusScheduled {
+		nextRunAt = now
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE tasks
-		 SET status = ?, block_reason = '', updated_at = ?
+		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
 		 WHERE id IN (
 		   SELECT t.id FROM tasks t
 		   JOIN manifests m ON m.id = t.manifest_id
@@ -65,7 +72,7 @@ func (s *Store) FlipProductBlockedTasks(ctx context.Context, productID string, n
 		     AND t.deleted_at = ''
 		     AND m.deleted_at = ''
 		 )`,
-		string(newStatus), now, productID, productBlockPrefix+"%")
+		string(newStatus), nextRunAt, now, productID, productBlockPrefix+"%")
 	if err != nil {
 		return 0, fmt.Errorf("flip product-blocked tasks: %w", err)
 	}

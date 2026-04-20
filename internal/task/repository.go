@@ -408,9 +408,18 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 	if err := s.writeSCDDepRow(fullID, parentID, now, changedBy, reason); err != nil {
 		return err
 	}
+	// When deriveDepState returns StatusScheduled (parent already
+	// completed), set next_run_at too — the scheduler's dequeue query
+	// requires next_run_at != ''. Bug #114: previously this UPDATE
+	// wrote only the status column, leaving the task armed-but-
+	// uncallable ("scheduled but never picked up").
+	nextRunAt := ""
+	if nextStatus == string(StatusScheduled) {
+		nextRunAt = now
+	}
 	_, err := s.db.Exec(
-		`UPDATE tasks SET depends_on = ?, status = ?, block_reason = ?, updated_at = ? WHERE id = ?`,
-		parentID, nextStatus, blockReason, now, fullID)
+		`UPDATE tasks SET depends_on = ?, status = ?, block_reason = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
+		parentID, nextStatus, blockReason, nextRunAt, now, fullID)
 	return err
 }
 
