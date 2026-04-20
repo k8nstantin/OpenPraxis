@@ -9,12 +9,12 @@
       onSearch: async function(q) {
         var resp = await fetch('/api/conversations/search?q=' + encodeURIComponent(q));
         var results = await resp.json();
-        var convos = (results || []).map(function(r) {
+        var convos = (results || []).map(function(c) {
           return {
-            id: r.conversation.id,
-            title: r.conversation.title + (typeof r.score === 'number' ? ' (' + r.score.toFixed(2) + ')' : ''),
-            agent: r.conversation.agent,
-            turn_count: r.conversation.turn_count
+            id: c.id,
+            title: c.title,
+            agent: c.agent,
+            turn_count: c.turn_count
           };
         });
         renderConversationSearchResults(convos);
