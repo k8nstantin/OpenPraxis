@@ -256,11 +256,25 @@
     };
   }
 
+  // Debounced refresh — collapse bursts of WebSocket events into one fetch
+  // cascade. A running agent can fire 20-50 events in quick succession (each
+  // tool call + hook + cost record); pre-debounce every event triggered 10
+  // sequential fetchJSON calls in refreshAll(), drowning the browser. 500ms
+  // trailing-edge is imperceptible to the user and caps refresh rate at 2Hz.
+  var refreshDebounceTimer = null;
+  function refreshAllDebounced() {
+    if (refreshDebounceTimer) return;
+    refreshDebounceTimer = setTimeout(function() {
+      refreshDebounceTimer = null;
+      refreshAll();
+    }, 500);
+  }
+
   function handleEvent(event) {
     if (event.event === 'stats_update') {
       OL.updateMetrics(event.data);
     } else {
-      refreshAll();
+      refreshAllDebounced();
     }
   }
 
