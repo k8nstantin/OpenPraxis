@@ -193,50 +193,188 @@
     });
   }
 
-  // --- Search ---
+  // --- Global jump-by-id bar (manifest 019daafb-b5e M4) ---
+  // The top-nav #search-input is NOT a catch-all fulltext bar. It's a
+  // jump-by-id bar: accepts a UUID or 8–12 char marker, fans out to
+  // /api/<type>/search across every entity type, picks the first exact-id
+  // hit, and navigates to that entity's detail view. On ambiguous or
+  // keyword input, a candidate dropdown is rendered inside the existing
+  // #search-results overlay.
+  var JUMP_TYPES = [
+    { view: 'memories',      endpoint: '/api/memories/search' },
+    { view: 'manifests',     endpoint: '/api/manifests/search' },
+    { view: 'tasks',         endpoint: '/api/tasks/search' },
+    { view: 'products',      endpoint: '/api/products/search' },
+    { view: 'ideas',         endpoint: '/api/ideas/search' },
+    { view: 'conversations', endpoint: '/api/conversations/search' }
+  ];
+  var JUMP_DEBOUNCE_MS = 250;
+
+  // Accept UUID, UUID prefix, or 8–12 char hex-with-dashes marker.
+  function looksLikeId(s) {
+    if (!s) return false;
+    return /^[0-9a-f]{8,}(?:-[0-9a-f-]*)?$/i.test(s) && s.length >= 8 && s.length <= 36;
+  }
+
+  function candidateFromEntity(view, e) {
+    if (!e || typeof e !== 'object') return null;
+    var id = e.id || e.ID || '';
+    if (!id) return null;
+    var marker = e.marker || (id.length >= 12 ? id.slice(0, 12) : id.slice(0, 8));
+    var title = e.title || e.Title || e.path || e.summary || e.content || e.l1 || e.tool_name || '';
+    return { view: view, id: id, marker: marker, title: String(title).slice(0, 80) };
+  }
+
+  // Does a search result contain an exact id/marker match for the query?
+  function findExactIdHit(view, results, q) {
+    if (!Array.isArray(results)) return null;
+    var lq = q.toLowerCase();
+    for (var i = 0; i < results.length; i++) {
+      var e = results[i];
+      var id = (e.id || e.ID || '').toLowerCase();
+      var marker = (e.marker || '').toLowerCase();
+      if (id === lq || marker === lq || (id && id.indexOf(lq) === 0 && lq.length >= 8)) {
+        return candidateFromEntity(view, e);
+      }
+    }
+    return null;
+  }
+
   function setupSearch() {
     var input = document.getElementById('search-input');
     var btn = document.getElementById('search-btn');
     var close = document.getElementById('search-close');
+    var timer = null;
+    var lastQ = '';
 
-    btn.addEventListener('click', function() { doSearch(input.value); });
-    input.addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') doSearch(input.value);
+    function trigger() {
+      var q = input.value.trim();
+      if (!q) {
+        hideResults();
+        return;
+      }
+      lastQ = q;
+      doJump(q);
+    }
+
+    input.addEventListener('input', function() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      var q = input.value.trim();
+      if (!q) { hideResults(); return; }
+      timer = setTimeout(function() { timer = null; trigger(); }, JUMP_DEBOUNCE_MS);
     });
-    close.addEventListener('click', function() {
-      document.getElementById('search-results').classList.add('hidden');
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (timer) { clearTimeout(timer); timer = null; }
+        trigger();
+      } else if (e.key === 'Escape') {
+        input.value = '';
+        hideResults();
+      }
     });
+    btn.addEventListener('click', function() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      trigger();
+    });
+    close.addEventListener('click', hideResults);
+
+    // Expose for diagnostics
+    OL._jumpCurrentQuery = function() { return lastQ; };
   }
 
-  async function doSearch(query) {
-    if (!query.trim()) return;
-    try {
-      var resp = await fetch('/api/memories/search', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query: query, limit: 10})
+  function hideResults() {
+    document.getElementById('search-results').classList.add('hidden');
+  }
+
+  async function doJump(query) {
+    var isId = looksLikeId(query);
+    var url = '?q=' + encodeURIComponent(query) + '&limit=10';
+    var fetches = JUMP_TYPES.map(function(t) {
+      return fetch(t.endpoint + url).then(function(r) {
+        return r.ok ? r.json() : [];
+      }).then(function(list) {
+        return { view: t.view, results: Array.isArray(list) ? list : (list && list.items) || [] };
+      }).catch(function() {
+        return { view: t.view, results: [] };
       });
-      var results = await resp.json();
-      renderSearchResults(results || []);
+    });
+
+    var all;
+    try {
+      all = await Promise.all(fetches);
     } catch (e) {
-      console.error('Search failed:', e);
+      console.error('Jump failed:', e);
+      return;
     }
+    // Stale check — user kept typing past this fetch.
+    if (query !== document.getElementById('search-input').value.trim()) return;
+
+    // 1. Look for exact id/marker hit across all types.
+    if (isId) {
+      for (var i = 0; i < all.length; i++) {
+        var hit = findExactIdHit(all[i].view, all[i].results, query);
+        if (hit) {
+          jumpTo(hit);
+          return;
+        }
+      }
+    }
+
+    // 2. Build candidate list (up to 5 per type).
+    var candidates = [];
+    all.forEach(function(bucket) {
+      (bucket.results || []).slice(0, 5).forEach(function(e) {
+        var c = candidateFromEntity(bucket.view, e);
+        if (c) candidates.push(c);
+      });
+    });
+
+    if (!candidates.length) {
+      renderNoMatch(query);
+      return;
+    }
+    renderCandidates(query, candidates, !isId);
   }
 
-  function renderSearchResults(results) {
+  function jumpTo(cand) {
+    var input = document.getElementById('search-input');
+    input.value = '';
+    hideResults();
+    location.hash = '#view-' + cand.view + '/' + encodeURIComponent(cand.id);
+  }
+
+  function renderNoMatch(q) {
     var body = document.getElementById('search-results-body');
-    if (!results.length) {
-      body.innerHTML = '<div class="empty-state">No results found</div>';
-    } else {
-      body.innerHTML = results.map(function(r) {
-        return '<div class="search-result-item">' +
-          '<span class="search-result-path">' + esc(r.memory.path) + '</span>' +
-          '<span class="search-result-score">' + r.score.toFixed(3) + '</span>' +
-          '<div class="search-result-content">' + esc(r.memory.l1) + '</div>' +
-        '</div>';
-      }).join('');
-    }
+    body.innerHTML = '<div class="empty-state">No match for ' +
+      '<code style="font-family:var(--font-mono)">' + esc(q) + '</code></div>';
     document.getElementById('search-results').classList.remove('hidden');
+  }
+
+  function renderCandidates(q, candidates, isKeyword) {
+    var body = document.getElementById('search-results-body');
+    var hint = isKeyword
+      ? '<div class="empty-state" style="padding-bottom:8px">' +
+        'No exact id match. For full-text search use the tab\'s search bar.</div>'
+      : '';
+    var rows = candidates.map(function(c, idx) {
+      return '<div class="search-result-item jump-candidate" data-idx="' + idx + '" ' +
+        'style="cursor:pointer;display:flex;gap:10px;align-items:baseline">' +
+        '<span class="search-result-score" style="text-transform:uppercase;min-width:80px">' +
+          esc(c.view) + '</span>' +
+        '<span class="search-result-path">' + esc(c.marker) + '</span>' +
+        '<span class="search-result-content" style="flex:1">' + esc(c.title || '(untitled)') + '</span>' +
+      '</div>';
+    }).join('');
+    body.innerHTML = hint + rows;
+    document.getElementById('search-results').classList.remove('hidden');
+
+    body.querySelectorAll('.jump-candidate').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var idx = parseInt(el.dataset.idx, 10);
+        if (!isNaN(idx) && candidates[idx]) jumpTo(candidates[idx]);
+      });
+    });
   }
 
   // --- WebSocket ---
