@@ -61,3 +61,46 @@ GCS path: `gs://mysqldump_migration/int-clonecm01/2026-04-21_16-34-18/`.
 
 All acceptance criteria met. `review_approval` posted on main task 019db0cb-487.
 Self-cancel deferred to operator per visceral rule #12.
+
+## Third kickoff & final verdict @ 2026-04-21T22:45Z — SUCCESS
+
+A third backup was kicked off on the clone at **2026-04-21T22:12:25Z** (log
+`~/backup-20260421-221225.log`), finished at **2026-04-21T22:24:44Z** — script
+reported duration **12m 8s**.
+
+This verify-task run activated after operator fired the kickoff, polled the
+clone at 22:45Z, confirmed the script had already hit the SUCCESS sentinel,
+and verified the GCS object set.
+
+### Timeline (UTC)
+| Event | Time | Elapsed |
+|---|---|---|
+| Script start (T0) | 2026-04-21T22:12:25Z | 0m |
+| Schema dump done | 2026-04-21T22:12:43Z | +7s |
+| cr_debug done | 2026-04-21T22:12:44Z | +8s |
+| mq_services done | 2026-04-21T22:12:45Z | +9s |
+| core_manager done | 2026-04-21T22:14:34Z | +1m 58s |
+| gdx_services done | 2026-04-21T22:15:41Z | +3m 5s |
+| coreint_cpe done | 2026-04-21T22:19:05Z | +6m 29s |
+| GCS upload done | 2026-04-21T22:24:44Z | +12m 8s |
+
+### Final sizes — from GCS listing
+| Object | Bytes | Human |
+|---|---:|---:|
+| `all_schema.sql`        | 17,605,276     | 16.79 MiB |
+| `data/core_manager.sql` | 5,039,350,905  | 4.69 GiB |
+| `data/coreint_cpe.sql`  | 20,452,641,719 | 19.05 GiB |
+| `data/cr_debug.sql`     | 174,637        | 170 KiB |
+| `data/gdx_services.sql` | 8,298,435,240  | 7.73 GiB |
+| `data/mq_services.sql`  | 17,355,130     | 16.55 MiB |
+| `dump_...log`           | 2,348          | — |
+| **Data total (5 files)**| **33,807,957,631** | **31.49 GiB** |
+
+Byte totals identical to the 16:34Z run — same dataset, deterministic dump.
+
+GCS path: `gs://mysqldump_migration/int-clonecm01/2026-04-21_18-12-36/`.
+
+All acceptance criteria met (screen ended, no mysqldump procs, success
+sentinel in log, `all_schema.sql` > 0, all 5 `data/*.sql` objects present).
+`review_approval` posted on main task 019db0cb-487. Verify task self-cancelled
+via `POST /api/tasks/019db0cb-dbe/cancel`.
