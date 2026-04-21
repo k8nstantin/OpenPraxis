@@ -852,7 +852,8 @@ body {
   color: var(--text-primary);
 }
 
-.manifest-editable:hover {
+.manifest-editable:hover,
+.task-editable:hover {
   background: var(--bg-secondary);
   outline: 1px dashed var(--border);
 }

@@ -351,7 +351,7 @@
           <!-- 1. HEADER BAR -->
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span class="session-uuid" style="font-size:14px">${esc(t.marker)}</span>
-            <span style="flex:1;font-size:15px;font-weight:600;color:var(--text-primary)">${esc(t.title)}</span>
+            <span id="task-edit-title" class="task-editable" style="flex:1;font-size:15px;font-weight:600;color:var(--text-primary);cursor:pointer;border-radius:4px;padding:2px 4px" title="Click to edit title">${esc(t.title)}</span>
             <span style="color:${statusColor};font-weight:700;font-size:13px;text-transform:uppercase;padding:3px 10px;border:2px solid ${statusColor};border-radius:4px" title="${esc(statusRender.label)}">${statusRender.icon} ${esc(t.status)}</span>
             ${needsExecReview ? `<a href="#task-comments-mount" onclick="var el=document.getElementById('task-comments-mount');if(el)el.scrollIntoView({behavior:'smooth'});return false;" style="color:var(--yellow);font-weight:700;font-size:11px;text-transform:uppercase;padding:3px 8px;border:2px solid var(--yellow);border-radius:4px;text-decoration:none;cursor:pointer" title="Task completed but no agent-authored execution_review comment was posted. Click to jump to the comments section.">&#9888; No execution review</a>` : ''}
           </div>
@@ -559,6 +559,52 @@
           setTimeout(() => OL.loadManifest(mid), 300);
         });
       });
+
+      // Inline edit: Task title (click to edit). Mirrors the manifest title
+      // pattern — click swaps the span for an <input>, Enter commits via
+      // PATCH /api/tasks/:id, Esc cancels. commit() is idempotent so the
+      // blur fired when the input is removed from the DOM after save
+      // doesn't trigger a second PATCH.
+      const taskTitleSpan = document.getElementById('task-edit-title');
+      if (taskTitleSpan) {
+        OL.onView(taskTitleSpan, 'click', () => {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = t.title;
+          input.className = 'conv-search';
+          input.style.cssText = 'flex:1;font-size:15px;font-weight:600;padding:2px 4px';
+          taskTitleSpan.replaceWith(input);
+          input.focus();
+          input.select();
+          let committed = false;
+          const commit = async (cancel) => {
+            if (committed) return;
+            committed = true;
+            const val = input.value.trim();
+            if (!cancel && val && val !== t.title) {
+              try {
+                const res = await fetch('/api/tasks/' + t.id, {
+                  method: 'PATCH',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({title: val})
+                });
+                if (!res.ok) {
+                  console.error('Task title PATCH failed:', res.status, await res.text().catch(() => ''));
+                }
+                if (OL.loadTasks) OL.loadTasks();
+              } catch (err) {
+                console.error('Task title save failed:', err);
+              }
+            }
+            OL.loadTaskDetail(t.id);
+          };
+          OL.onView(input, 'blur', () => commit(false));
+          OL.onView(input, 'keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(false); }
+            else if (e.key === 'Escape') { e.preventDefault(); commit(true); }
+          });
+        });
+      }
 
       // Action cross-links
       bodyEl.querySelectorAll('.action-link').forEach(el => {

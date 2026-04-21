@@ -53,6 +53,16 @@ func (s *Server) registerTaskTools() {
 	)
 
 	s.mcp.AddTool(
+		mcplib.NewTool("task_update",
+			mcplib.WithDescription("Update a task's title and/or description. At least one of title or description must be provided. Accepts marker or full UUID."),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or 8-char marker")),
+			mcplib.WithString("title", mcplib.Description("New title (optional)")),
+			mcplib.WithString("description", mcplib.Description("New description (optional)")),
+		),
+		s.handleTaskUpdate,
+	)
+
+	s.mcp.AddTool(
 		mcplib.NewTool("task_cancel",
 			mcplib.WithDescription("Cancel a scheduled or running task."),
 			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
@@ -341,6 +351,50 @@ func (s *Server) handleTaskStart(ctx context.Context, req mcplib.CallToolRequest
 	}
 
 	return textResult(fmt.Sprintf("Task [%s] scheduled: %s (schedule: %s)", t.Marker, t.Title, schedule)), nil
+}
+
+func (s *Server) handleTaskUpdate(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	id := argStr(a, "id")
+	if id == "" {
+		return errResult("id is required"), nil
+	}
+
+	t, err := s.node.Tasks.Get(id)
+	if err != nil {
+		return errResult("get task: %v", err), nil
+	}
+	if t == nil {
+		return errResult("task not found: %s", id), nil
+	}
+
+	// Map-presence check distinguishes "not provided" from "empty string".
+	// The store's Update takes *string so callers can explicitly clear a
+	// field — but the MCP surface only allows updates, not clears, and
+	// requires at least one of title/description.
+	var titlePtr, descPtr *string
+	if _, ok := a["title"]; ok {
+		v := argStr(a, "title")
+		titlePtr = &v
+	}
+	if _, ok := a["description"]; ok {
+		v := argStr(a, "description")
+		descPtr = &v
+	}
+	if titlePtr == nil && descPtr == nil {
+		return errResult("at least one of title or description is required"), nil
+	}
+
+	updated, err := s.node.Tasks.Update(t.ID, titlePtr, descPtr)
+	if err != nil {
+		return errResult("update task: %v", err), nil
+	}
+	if updated == nil {
+		return errResult("task not found after update: %s", id), nil
+	}
+
+	return textResult(fmt.Sprintf("Task [%s] updated: %s\nDescription: %s",
+		updated.Marker, updated.Title, updated.Description)), nil
 }
 
 func (s *Server) handleTaskCancel(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

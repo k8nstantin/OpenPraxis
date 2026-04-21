@@ -599,7 +599,10 @@
         });
       });
 
-      // Inline edit: Title (click to edit)
+      // Inline edit: Title (click to edit).
+      // commitEdit dedupes blur+Enter double-fires (browser fires blur when
+      // the input is removed from the DOM after save, which would otherwise
+      // trigger a second PUT with stale data).
       const titleSpan = document.getElementById('manifest-edit-title');
       if (titleSpan) {
         OL.onView(titleSpan, 'click', () => {
@@ -611,24 +614,37 @@
           titleSpan.replaceWith(input);
           input.focus();
           input.select();
-          const save = async () => {
+          let committed = false;
+          const commit = async (cancel) => {
+            if (committed) return;
+            committed = true;
             const val = input.value.trim();
-            if (val && val !== m.title) {
-              await fetch('/api/manifests/' + m.id, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({title: val})
-              });
-              OL.loadManifests();
+            if (!cancel && val && val !== m.title) {
+              try {
+                const res = await fetch('/api/manifests/' + m.id, {
+                  method: 'PUT',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({title: val})
+                });
+                if (!res.ok) {
+                  console.error('Manifest title PUT failed:', res.status, await res.text().catch(() => ''));
+                }
+                OL.loadManifests();
+              } catch (err) {
+                console.error('Manifest title save failed:', err);
+              }
             }
             OL.loadManifest(m.id);
           };
-          OL.onView(input, 'blur', save);
-          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') OL.loadManifest(m.id); });
+          OL.onView(input, 'blur', () => commit(false));
+          OL.onView(input, 'keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(false); }
+            else if (e.key === 'Escape') { e.preventDefault(); commit(true); }
+          });
         });
       }
 
-      // Inline edit: Description (click to edit)
+      // Inline edit: Description (click to edit). Same dedupe guard as title.
       const descEl = document.getElementById('manifest-edit-desc');
       if (descEl) {
         OL.onView(descEl, 'click', () => {
@@ -640,20 +656,33 @@
           input.placeholder = 'Enter description...';
           descEl.replaceWith(input);
           input.focus();
-          const save = async () => {
+          let committed = false;
+          const commit = async (cancel) => {
+            if (committed) return;
+            committed = true;
             const val = input.value.trim();
-            if (val !== (m.description || '')) {
-              await fetch('/api/manifests/' + m.id, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: val})
-              });
-              OL.loadManifests();
+            if (!cancel && val !== (m.description || '')) {
+              try {
+                const res = await fetch('/api/manifests/' + m.id, {
+                  method: 'PUT',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({description: val})
+                });
+                if (!res.ok) {
+                  console.error('Manifest desc PUT failed:', res.status, await res.text().catch(() => ''));
+                }
+                OL.loadManifests();
+              } catch (err) {
+                console.error('Manifest desc save failed:', err);
+              }
             }
             OL.loadManifest(m.id);
           };
-          OL.onView(input, 'blur', save);
-          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') OL.loadManifest(m.id); });
+          OL.onView(input, 'blur', () => commit(false));
+          OL.onView(input, 'keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(false); }
+            else if (e.key === 'Escape') { e.preventDefault(); commit(true); }
+          });
         });
       }
 
@@ -705,12 +734,19 @@
         });
         OL.onView(document.getElementById('manifest-content-save'), 'click', async () => {
           const val = document.getElementById('manifest-content-textarea').value;
-          await fetch('/api/manifests/' + m.id, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({content: val})
-          });
-          OL.loadManifests();
+          try {
+            const res = await fetch('/api/manifests/' + m.id, {
+              method: 'PUT',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({content: val})
+            });
+            if (!res.ok) {
+              console.error('Manifest content PUT failed:', res.status, await res.text().catch(() => ''));
+            }
+            OL.loadManifests();
+          } catch (err) {
+            console.error('Manifest content save failed:', err);
+          }
           OL.loadManifest(m.id);
         });
       }
