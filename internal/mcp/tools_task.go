@@ -268,7 +268,11 @@ func (s *Server) handleTaskGet(ctx context.Context, req mcplib.CallToolRequest) 
 		output += fmt.Sprintf("Description: %s\n", t.Description)
 	}
 	if t.DependsOn != "" {
-		output += fmt.Sprintf("Depends on: %s\n", t.DependsOn[:min(8, len(t.DependsOn))])
+		// Show 14 chars, not 8 — UUIDv7 tasks created in the same millisecond
+		// share an 8-char time prefix, so truncating to 8 made every chained
+		// review look like it pointed at the same parent. 14 chars extends past
+		// the collision window and keeps the output unambiguous.
+		output += fmt.Sprintf("Depends on: %s\n", t.DependsOn[:min(14, len(t.DependsOn))])
 	}
 	output += fmt.Sprintf("Runs: %d\n", t.RunCount)
 	output += fmt.Sprintf("Created: %s | Updated: %s\n", t.CreatedAt.Format("2006-01-02 15:04"), t.UpdatedAt.Format("2006-01-02 15:04"))
