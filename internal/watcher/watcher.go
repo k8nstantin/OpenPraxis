@@ -172,8 +172,10 @@ func gitFailureBody(g GitResult) string {
 	if branch == "" {
 		branch = "(unresolved)"
 	}
-	return fmt.Sprintf("### Git gate failed\n"+
-		"No commits on branch %s. Watcher cannot verify work. Task auto-downgraded to failed.\n\n"+
+	return fmt.Sprintf("### Git gate observation\n"+
+		"No commits on branch %s. Watcher cannot verify code-change work against git. "+
+		"This is informational only — task state and downstream activation are unaffected; "+
+		"the paired review task decides the outcome.\n\n"+
 		"**Branch:** %s\n"+
 		"**Expected commits:** ≥1\n"+
 		"**Actual:** %d",
@@ -181,7 +183,7 @@ func gitFailureBody(g GitResult) string {
 }
 
 func buildFailureBody(b BuildResult) string {
-	return fmt.Sprintf("### Build gate failed\n\n```\n%s\n```", lastNLines(b.Output, 40))
+	return fmt.Sprintf("### Build gate observation\n\nBuild check failed — informational only; paired review task decides outcome.\n\n```\n%s\n```", lastNLines(b.Output, 40))
 }
 
 func manifestFailureBody(m ManifestResult) string {
@@ -196,7 +198,7 @@ func manifestFailureBody(m ManifestResult) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("### Manifest gate failed\n\n")
+	sb.WriteString("### Manifest gate observation\n\nManifest deliverable check failed — informational only; paired review task decides outcome.\n\n")
 	if len(missing) == 0 {
 		sb.WriteString("Deliverables missing: (none identified individually)\n")
 	} else {

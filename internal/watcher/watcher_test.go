@@ -217,8 +217,8 @@ func TestWatcher_Gate1_Fail_PostsComment(t *testing.T) {
 		t.Fatalf("expected GitPassed=false, got true (reason=%s)", audit.GitDetails.Reason)
 	}
 	c := assertOneWatcherFinding(t, store, "task-gate1")
-	if !strings.Contains(c.Body, "Git gate failed") {
-		t.Fatalf("body missing 'Git gate failed':\n%s", c.Body)
+	if !strings.Contains(c.Body, "Git gate observation") {
+		t.Fatalf("body missing 'Git gate observation':\n%s", c.Body)
 	}
 	if !strings.Contains(c.Body, "openpraxis/gate1fail") {
 		t.Fatalf("body missing branch name:\n%s", c.Body)
@@ -240,8 +240,8 @@ func TestWatcher_Gate2_Fail_PostsComment(t *testing.T) {
 		t.Fatalf("expected BuildPassed=false, got true")
 	}
 	c := assertOneWatcherFinding(t, store, "task-gate2")
-	if !strings.Contains(c.Body, "Build gate failed") {
-		t.Fatalf("body missing 'Build gate failed':\n%s", c.Body)
+	if !strings.Contains(c.Body, "Build gate observation") {
+		t.Fatalf("body missing 'Build gate observation':\n%s", c.Body)
 	}
 	if !strings.Contains(c.Body, "```") {
 		t.Fatalf("body missing fenced code block:\n%s", c.Body)
@@ -268,8 +268,8 @@ func TestWatcher_Gate3_Fail_PostsComment(t *testing.T) {
 			audit.ManifestScore, audit.ManifestDetails.Reason)
 	}
 	c := assertOneWatcherFinding(t, store, "task-gate3")
-	if !strings.Contains(c.Body, "Manifest gate failed") {
-		t.Fatalf("body missing 'Manifest gate failed':\n%s", c.Body)
+	if !strings.Contains(c.Body, "Manifest gate observation") {
+		t.Fatalf("body missing 'Manifest gate observation':\n%s", c.Body)
 	}
 	if !strings.Contains(c.Body, "internal/missing/thing.go") {
 		t.Fatalf("body missing missing-deliverable bullet:\n%s", c.Body)
