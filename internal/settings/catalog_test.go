@@ -150,13 +150,20 @@ func TestValidateValue_FloatKnob_AcceptsAny(t *testing.T) {
 	}
 }
 
-func TestValidateValue_StringKnob_AcceptsString(t *testing.T) {
-	warnings, err := ValidateValue("default_model", `"gpt-5"`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestValidateValue_ModelKnob_AcceptsKnownModel(t *testing.T) {
+	// default_model moved from KnobString to KnobEnum so the UI can render a
+	// dropdown of the Claude family. Empty string remains valid ("agent default").
+	for _, v := range []string{`""`, `"claude-opus-4-7"`, `"claude-sonnet-4-6"`, `"claude-haiku-4-5"`} {
+		if _, err := ValidateValue("default_model", v); err != nil {
+			t.Errorf("unexpected error for %s: %v", v, err)
+		}
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
+}
+
+func TestValidateValue_ModelKnob_RejectsUnknown(t *testing.T) {
+	_, err := ValidateValue("default_model", `"gpt-5"`)
+	if err == nil {
+		t.Fatalf("expected enum rejection for unknown model, got nil")
 	}
 }
 
