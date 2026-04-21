@@ -65,3 +65,15 @@ Acceptance criteria (manifest `019db0c2-61d`):
 - [x] `data/*.sql` — 7 files (one per database in BACKUP SUMMARY)
 - [x] Every progress comment used `agent_note` (never `watcher_finding`) with size / expected / % / rate / ETA
 - [x] Terminal verdict posted as `review_approval` on main task
+
+## Run #5 — 2026-04-21T21:10Z — no-op (already terminal)
+
+SSH to `clone-iiaflmysql01 --zone=us-central1-a` (note: manifest spec says `us-central1-c` but actual zone is `us-central1-a` — worth fixing in manifest 019db0c2-61d).
+
+Re-verified state:
+- `screen -ls` → no `mysql-backup` session
+- `pgrep mysqldump` → none
+- `~/backup-*.log` → cleaned up / absent on host
+- GCS `gs://mysqldump_migration/int-clonemysql01/2026-04-21_12-25-21/` still intact: `all_schema.sql` 22.97 MiB + 7 `data/*.sql` files totalling 211.02 GiB — unchanged since run #4.
+
+Decision: backup remains SUCCESS and already `review_approval`-ed in run #4 (`019db137-386e`). No new comment on main task — would be noise. This recurring verify task has nothing more to do; operator should cancel task `019db0cb-f44` to stop the 30m wake-ups. Per visceral rule #12 (confirm before cancelling), agent still not self-cancelling.
