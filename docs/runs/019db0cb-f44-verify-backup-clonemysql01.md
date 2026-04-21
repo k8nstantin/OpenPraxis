@@ -33,3 +33,35 @@ Note: run #2 occurred at 17:00Z (comment `019db0fc-1068` on main task) but was n
 
 Next fire: +30 min.
 
+## Run #4 — 2026-04-21T18:00Z — TERMINAL ✅
+
+SSH: same args.
+
+State: backup **fully complete**. Script ran 84m 56s (T0 12:25:17 → finish 13:50:18).
+
+- `screen -ls` → no `mysql-backup` session
+- `pgrep mysqldump` → no processes
+- Log sentinel: `Status: SUCCESS`
+
+GCS final inventory at `gs://mysqldump_migration/int-clonemysql01/2026-04-21_12-25-21/`:
+
+| Object | Bytes | ~GiB |
+|---|---:|---:|
+| all_schema.sql | 24,082,972 | 0.022 |
+| dump_2026-04-21_12-25-21.log | 2,651 | — |
+| data/coreint_Charter.sql | 90,764,807,959 | 84.5 |
+| data/coreint_TMobile.sql | 37,935,165,757 | 35.3 |
+| data/core_gdxws.sql | 35,430,781,343 | 33.0 |
+| data/coreint_gdx.sql | 21,486,235,141 | 20.0 |
+| data/coreint_gm.sql | 21,372,150,905 | 19.9 |
+| data/coreint_spr01.sql | 19,592,077,381 | 18.2 |
+| data/cr_debug.sql | 16,979 | ~0 |
+| **data/ total** | **226,581,235,465** | **211.02** |
+
+Decision: **SUCCESS** → `review_approval` posted on main task `019db0cb-5cf` (comment `019db137-386e`). Self-cancel requested; `task_cancel` permission denied by harness — operator may need to cancel manually.
+
+Acceptance criteria (manifest `019db0c2-61d`):
+- [x] `all_schema.sql` present, size > 0
+- [x] `data/*.sql` — 7 files (one per database in BACKUP SUMMARY)
+- [x] Every progress comment used `agent_note` (never `watcher_finding`) with size / expected / % / rate / ETA
+- [x] Terminal verdict posted as `review_approval` on main task
