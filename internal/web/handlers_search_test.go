@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
@@ -183,10 +184,23 @@ func TestActionsSearch_Keyword(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status %d body=%s", rec.Code, rec.Body.String())
 	}
-	var got []action.Action
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].ToolName != "zebra_tool" {
-		t.Fatalf("keyword: want zebra_tool, got %+v", got)
+	// Envelope shape per pagination + snippet support: { items, total, offset, limit, has_more }.
+	var env struct {
+		Items []struct {
+			action.Action
+			SnippetHTML string `json:"snippet_html"`
+		} `json:"items"`
+		Total   int  `json:"total"`
+		HasMore bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, rec.Body.String())
+	}
+	if env.Total != 1 || len(env.Items) != 1 || env.Items[0].ToolName != "zebra_tool" {
+		t.Fatalf("keyword: want zebra_tool, got total=%d items=%+v", env.Total, env.Items)
+	}
+	if !strings.Contains(env.Items[0].SnippetHTML, "<mark>") {
+		t.Fatalf("expected <mark>-wrapped snippet, got %q", env.Items[0].SnippetHTML)
 	}
 }
 
@@ -229,14 +243,28 @@ func TestIdeasSearch_EmptyResultIsArrayNotNull(t *testing.T) {
 	}
 }
 
-func TestActionsSearch_EmptyResultIsArrayNotNull(t *testing.T) {
+func TestActionsSearch_EmptyResultIsEnvelope(t *testing.T) {
+	// Actions search moved to the paginated envelope shape so the UI can
+	// drive infinite scroll. Empty result is still well-formed: items=[]
+	// rather than a bare JSON array.
 	n := newSearchNode(t)
 	rec := doGET(t, apiActionsSearch(n), "/api/actions/search?q=zzz_no_such_action")
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)
 	}
-	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
-		t.Fatalf("want `[]`, got %q", body)
+	var env struct {
+		Items   []any `json:"items"`
+		Total   int   `json:"total"`
+		HasMore bool  `json:"has_more"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, rec.Body.String())
+	}
+	if env.Total != 0 || len(env.Items) != 0 || env.HasMore {
+		t.Fatalf("want empty envelope, got %+v", env)
+	}
+	if env.Items == nil {
+		t.Fatalf("items must be [] not null")
 	}
 }
 
