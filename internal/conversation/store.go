@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -297,6 +298,60 @@ func (s *Store) Count() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM conversations`).Scan(&count)
 	return count, err
+}
+
+// SearchKeyword performs a literal (LIKE) keyword search across title,
+// summary, and the raw turns blob. Returns the paged slice plus the total
+// match count so the caller can drive infinite-scroll pagination without a
+// second COUNT query round-trip. Empty query returns (nil, 0, nil).
+//
+// This complements Search (semantic) — both are run in parallel by the
+// /api/conversations/search handler, with keyword hits surfaced first and
+// semantic hits appended as a "related by meaning" tail only on page 0.
+func (s *Store) SearchKeyword(query string, limit, offset int) ([]*Conversation, int, error) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil, 0, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	pattern := "%" + q + "%"
+
+	var total int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM conversations WHERE title LIKE ? OR summary LIKE ? OR turns LIKE ?`,
+		pattern, pattern, pattern,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("keyword count: %w", err)
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, title, summary, agent, project, tags, turns, turn_count, source_node,
+		        created_at, updated_at, accessed_at, access_count
+		   FROM conversations
+		  WHERE title LIKE ? OR summary LIKE ? OR turns LIKE ?
+		  ORDER BY updated_at DESC
+		  LIMIT ? OFFSET ?`,
+		pattern, pattern, pattern, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("keyword query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*Conversation
+	for rows.Next() {
+		c, err := scanConversationRows(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, c)
+	}
+	return out, total, rows.Err()
 }
 
 // TouchAccess updates accessed_at and increments access_count.

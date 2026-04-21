@@ -2,21 +2,103 @@
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime;
 
-  function renderActionSearchList(el, actions) {
-    if (!actions || !actions.length) {
-      el.innerHTML = '<div class="empty-state">No actions found</div>';
-      return;
-    }
-    el.innerHTML = actions.map(function(a) {
-      var input = a.tool_input ? (a.tool_input.length > 60 ? a.tool_input.substring(0, 60) + '...' : a.tool_input) : '';
-      return '<div class="tree-node peer-leaf clickable" data-action-id="' + esc(a.id) + '" role="button" tabindex="0" ' +
-        'onclick="OL.loadActionDetail(\'' + esc(a.id) + '\')" ' +
-        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
-        '<span class="badge type badge-sm">' + esc(a.tool_name) + '</span>' +
-        '<span style="font-size:11px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(input) + '</span>' +
-        '<span style="color:var(--text-muted);font-size:10px">' + formatTime(a.created_at) + '</span>' +
+  // Infinite-scroll state for the actions search. Reset on every new query.
+  var actSearch = {
+    query: '',
+    offset: 0,
+    limit: 50,
+    total: 0,
+    hasMore: false,
+    loading: false,
+    scrollHandler: null
+  };
+
+  function renderActionSearchRow(a) {
+    var snippet = a.snippet_html ? '<div class="conv-item-snippet" style="margin-top:4px">' + a.snippet_html + '</div>' : '';
+    return '<div class="tree-node peer-leaf clickable" data-action-id="' + esc(a.id) + '" role="button" tabindex="0" ' +
+      'onclick="OL.loadActionDetail(\'' + esc(a.id) + '\')" ' +
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}">' +
+      '<div style="flex:1;overflow:hidden">' +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+          '<span class="badge type badge-sm">' + esc(a.tool_name) + '</span>' +
+          '<span style="color:var(--text-muted);font-size:10px">' + formatTime(a.created_at) + '</span>' +
+        '</div>' +
+        snippet +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderActionSearchEnvelope(env, append) {
+    var el = document.getElementById('actions-tree');
+    if (!el) return;
+    var items = env.items || [];
+    var total = env.total || 0;
+
+    if (!append) {
+      if (!items.length) {
+        el.innerHTML = '<div class="empty-state">No actions found</div>';
+        return;
+      }
+      var html = '<div class="search-header" style="padding:6px 8px;font-size:11px;color:var(--text-muted)">' +
+        esc(String(items.length)) + ' of ' + esc(String(total)) + ' match' + (total === 1 ? '' : 'es') +
       '</div>';
-    }).join('');
+      html += '<div class="actions-search-list">' + items.map(renderActionSearchRow).join('') + '</div>';
+      el.innerHTML = html;
+    } else {
+      var list = el.querySelector('.actions-search-list');
+      if (list && items.length) {
+        list.insertAdjacentHTML('beforeend', items.map(renderActionSearchRow).join(''));
+      }
+      var header = el.querySelector('.search-header');
+      if (header) {
+        var rendered = el.querySelectorAll('.actions-search-list .peer-leaf').length;
+        header.textContent = rendered + ' of ' + total + ' match' + (total === 1 ? '' : 'es');
+      }
+    }
+  }
+
+  async function fetchActionSearchPage(q, offset, limit) {
+    var url = '/api/actions/search?q=' + encodeURIComponent(q) +
+              '&offset=' + offset + '&limit=' + limit;
+    var resp = await fetch(url);
+    var env = await resp.json();
+    actSearch.total = env.total || 0;
+    actSearch.offset = (env.offset || 0) + (env.items || []).length;
+    actSearch.hasMore = !!env.has_more;
+    return env;
+  }
+
+  function wireActionSearchScroll() {
+    detachActionSearchScroll();
+    var el = document.getElementById('actions-tree');
+    if (!el) return;
+    actSearch.scrollHandler = function() {
+      if (actSearch.loading || !actSearch.hasMore) return;
+      var threshold = 80;
+      if (el.scrollTop + el.clientHeight + threshold >= el.scrollHeight) {
+        loadMoreActionSearch();
+      }
+    };
+    el.addEventListener('scroll', actSearch.scrollHandler);
+  }
+
+  function detachActionSearchScroll() {
+    var el = document.getElementById('actions-tree');
+    if (el && actSearch.scrollHandler) {
+      el.removeEventListener('scroll', actSearch.scrollHandler);
+    }
+    actSearch.scrollHandler = null;
+  }
+
+  async function loadMoreActionSearch() {
+    if (actSearch.loading || !actSearch.hasMore) return;
+    actSearch.loading = true;
+    try {
+      var env = await fetchActionSearchPage(actSearch.query, actSearch.offset, actSearch.limit);
+      renderActionSearchEnvelope(env, /*append=*/ true);
+    } finally {
+      actSearch.loading = false;
+    }
   }
 
   OL.loadActions = async function() {
@@ -27,11 +109,19 @@
       OL.mountSearchInput(mount, {
         placeholder: 'Search actions by id, tool name, or keyword...',
         onSearch: async function(q) {
-          const results = await fetchJSON('/api/actions/search?q=' + encodeURIComponent(q));
-          renderActionSearchList(el, results || []);
-          return (results || []).length;
+          actSearch.query = q;
+          actSearch.offset = 0;
+          actSearch.total = 0;
+          actSearch.hasMore = false;
+          var env = await fetchActionSearchPage(q, 0, actSearch.limit);
+          renderActionSearchEnvelope(env, /*append=*/ false);
+          wireActionSearchScroll();
+          return (env.items || []).length;
         },
-        onClear: function() { OL.loadActions(); }
+        onClear: function() {
+          detachActionSearchScroll();
+          OL.loadActions();
+        }
       });
     }
 

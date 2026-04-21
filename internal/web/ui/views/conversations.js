@@ -1,27 +1,83 @@
 (function(OL) {
   'use strict';
   var fetchJSON = OL.fetchJSON, esc = OL.esc, formatTime = OL.formatTime, formatModel = OL.formatModel;
+
+  // Infinite-scroll state for the conversations keyword search. Reset on
+  // every new query via onSearch, appended to on scroll-bottom.
+  var convSearch = {
+    query: '',
+    offset: 0,
+    limit: 50,
+    total: 0,
+    hasMore: false,
+    loading: false,
+    scrollHandler: null
+  };
+
   function setupConvSearch() {
     var mount = document.getElementById('conv-search-mount');
     if (!mount || !OL.mountSearchInput) return;
     OL.mountSearchInput(mount, {
       placeholder: 'Search conversations by id, marker, or keyword...',
       onSearch: async function(q) {
-        var resp = await fetch('/api/conversations/search?q=' + encodeURIComponent(q));
-        var results = await resp.json();
-        var convos = (results || []).map(function(c) {
-          return {
-            id: c.id,
-            title: c.title,
-            agent: c.agent,
-            turn_count: c.turn_count
-          };
-        });
-        renderConversationSearchResults(convos);
-        return convos.length;
+        convSearch.query = q;
+        convSearch.offset = 0;
+        convSearch.total = 0;
+        convSearch.hasMore = false;
+        var env = await fetchConvSearchPage(q, 0, convSearch.limit);
+        renderConversationSearchEnvelope(env, /*append=*/ false);
+        wireConvSearchScroll();
+        return (env.items || []).length + (env.semantic || []).length;
       },
-      onClear: function() { OL.loadConversations(); }
+      onClear: function() {
+        detachConvSearchScroll();
+        OL.loadConversations();
+      }
     });
+  }
+
+  async function fetchConvSearchPage(q, offset, limit) {
+    var url = '/api/conversations/search?q=' + encodeURIComponent(q) +
+              '&offset=' + offset + '&limit=' + limit;
+    var resp = await fetch(url);
+    var env = await resp.json();
+    convSearch.total = env.total || 0;
+    convSearch.offset = (env.offset || 0) + (env.items || []).length;
+    convSearch.hasMore = !!env.has_more;
+    return env;
+  }
+
+  function wireConvSearchScroll() {
+    detachConvSearchScroll();
+    var el = document.getElementById('conv-list');
+    if (!el) return;
+    convSearch.scrollHandler = function() {
+      if (convSearch.loading || !convSearch.hasMore) return;
+      var threshold = 80; // px from bottom
+      if (el.scrollTop + el.clientHeight + threshold >= el.scrollHeight) {
+        loadMoreConvSearch();
+      }
+    };
+    el.addEventListener('scroll', convSearch.scrollHandler);
+  }
+
+  function detachConvSearchScroll() {
+    var el = document.getElementById('conv-list');
+    if (el && convSearch.scrollHandler) {
+      el.removeEventListener('scroll', convSearch.scrollHandler);
+    }
+    convSearch.scrollHandler = null;
+  }
+
+  async function loadMoreConvSearch() {
+    if (convSearch.loading || !convSearch.hasMore) return;
+    convSearch.loading = true;
+    try {
+      var env = await fetchConvSearchPage(convSearch.query, convSearch.offset, convSearch.limit);
+      renderConversationSearchEnvelope(env, /*append=*/ true);
+    } finally {
+      convSearch.loading = false;
+    }
   }
 
   OL.loadConversations = async function() {
@@ -91,22 +147,71 @@
     }
   };
 
-  function renderConversationSearchResults(convos) {
+  // renderConversationSearchItem builds one row. snippet_html is already
+  // HTML-escaped on the server with only <mark> tags literal, so it is
+  // safe to interpolate directly.
+  function renderConversationSearchItem(c) {
+    var snippet = c.snippet_html ? '<div class="conv-item-snippet">' + c.snippet_html + '</div>' : '';
+    return '<div class="conv-item" data-id="' + esc(c.id) + '" role="button" tabindex="0">' +
+      '<div class="conv-item-title">' + esc(c.title) + '</div>' +
+      '<div class="conv-item-meta">' +
+        '<span class="conv-item-agent">' + esc(c.agent || 'unknown') + '</span>' +
+        '<span>' + (c.turn_count || 0) + ' turns</span>' +
+      '</div>' +
+      snippet +
+    '</div>';
+  }
+
+  // renderConversationSearchEnvelope handles both initial render and
+  // append-on-scroll. Initial render draws keyword results plus an optional
+  // "Related by meaning" tail from env.semantic (page 0 only). Append adds
+  // only new keyword items.
+  function renderConversationSearchEnvelope(env, append) {
     var el = document.getElementById('conv-list');
-    if (!convos.length) {
-      el.innerHTML = '<div class="empty-state">No conversations found</div>';
-      return;
-    }
-    el.innerHTML = convos.map(function(c) {
-      return '<div class="conv-item" data-id="' + esc(c.id) + '" role="button" tabindex="0">' +
-        '<div class="conv-item-title">' + esc(c.title) + '</div>' +
-        '<div class="conv-item-meta">' +
-          '<span class="conv-item-agent">' + esc(c.agent || 'unknown') + '</span>' +
-          '<span>' + c.turn_count + ' turns</span>' +
-        '</div>' +
+    if (!el) return;
+    var keywordItems = env.items || [];
+    var semanticItems = env.semantic || [];
+    var total = env.total || 0;
+
+    if (!append) {
+      if (!keywordItems.length && !semanticItems.length) {
+        el.innerHTML = '<div class="empty-state">No conversations found</div>';
+        return;
+      }
+      var html = '<div class="search-header" style="padding:6px 8px;font-size:11px;color:var(--text-muted)">' +
+        esc(String(keywordItems.length)) + ' of ' + esc(String(total)) + ' keyword match' + (total === 1 ? '' : 'es') +
       '</div>';
-    }).join('');
+      html += '<div class="conv-search-keyword-list">' +
+        keywordItems.map(renderConversationSearchItem).join('') +
+      '</div>';
+      if (semanticItems.length) {
+        html += '<div class="search-header" style="padding:6px 8px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:4px">' +
+          'Related by meaning (' + esc(String(semanticItems.length)) + ')' +
+        '</div>';
+        html += '<div class="conv-search-semantic-list">' +
+          semanticItems.map(renderConversationSearchItem).join('') +
+        '</div>';
+      }
+      el.innerHTML = html;
+    } else {
+      var kwList = el.querySelector('.conv-search-keyword-list');
+      if (kwList && keywordItems.length) {
+        kwList.insertAdjacentHTML('beforeend', keywordItems.map(renderConversationSearchItem).join(''));
+      }
+      var header = el.querySelector('.search-header');
+      if (header) {
+        var rendered = el.querySelectorAll('.conv-search-keyword-list .conv-item').length;
+        header.textContent = rendered + ' of ' + total + ' keyword match' + (total === 1 ? '' : 'es');
+      }
+    }
+
+    wireConvItemClicks(el);
+  }
+
+  function wireConvItemClicks(el) {
     el.querySelectorAll('.conv-item').forEach(function(item) {
+      if (item.dataset.wired === '1') return;
+      item.dataset.wired = '1';
       var handler = function() {
         el.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
         item.classList.add('active');
@@ -117,6 +222,12 @@
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); }
       });
     });
+  }
+
+  // Back-compat shim: older call sites may still invoke this with a bare
+  // array of conversations. Map to the envelope renderer.
+  function renderConversationSearchResults(convos) {
+    renderConversationSearchEnvelope({ items: convos || [], total: (convos || []).length }, false);
   }
 
   // Expose to onclick
