@@ -55,7 +55,12 @@ func Catalog() []KnobDef {
 		{Key: "temperature", Type: KnobFloat, SliderMin: f(0), SliderMax: f(2), SliderStep: f(0.05), Default: 0.2, Description: "LLM sampling temperature"},
 		{Key: "reasoning_effort", Type: KnobEnum, EnumValues: []string{"minimal", "low", "medium", "high"}, Default: "medium", Description: "Thinking budget for reasoning models"},
 		{Key: "default_agent", Type: KnobEnum, EnumValues: []string{"claude-code", "codex", "cursor", "windsurf"}, Default: "claude-code", Description: "Agent runtime"},
-		{Key: "default_model", Type: KnobString, Default: "", Description: "Model ID (agent-dependent)"},
+		{Key: "default_model", Type: KnobEnum, EnumValues: []string{
+			"",                   // empty = let the agent runtime choose its own default
+			"claude-opus-4-7",    // Opus 4.7 — highest capability, 1M context
+			"claude-sonnet-4-6",  // Sonnet 4.6 — balanced
+			"claude-haiku-4-5",   // Haiku 4.5 — fast / cheap
+		}, Default: "", Description: "Model ID passed to the agent as --model. Empty = agent default."},
 		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
 		{Key: "approval_mode", Type: KnobEnum, EnumValues: []string{"auto", "manual", "on-failure"}, Default: "auto", Description: "Codex approval mode"},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
