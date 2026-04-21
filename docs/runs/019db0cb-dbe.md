@@ -104,3 +104,15 @@ All acceptance criteria met (screen ended, no mysqldump procs, success
 sentinel in log, `all_schema.sql` > 0, all 5 `data/*.sql` objects present).
 `review_approval` posted on main task 019db0cb-487. Verify task self-cancelled
 via `POST /api/tasks/019db0cb-dbe/cancel`.
+
+## Run 7 @ 2026-04-21T23:19Z — re-confirm & re-cancel
+
+Verify task refired (runner did not honor the prior self-cancel — run_count=7,
+status=running). Re-checked clone + GCS: no `mysql-backup` screen running, no
+`mysqldump` procs, log tail shows the `=====` success terminator, GCS listing
+still shows `all_schema.sql` (16.79 MiB) + all 5 `data/*.sql` objects
+(31.49 GiB) under `gs://mysqldump_migration/int-clonecm01/2026-04-21_18-12-36/`.
+
+No new `review_approval` posted — the 22:45Z one stands. Dropped an
+`agent_note` on main 019db0cb-487 noting this re-check converges to the same
+verdict, and re-issued `task_cancel` on self.
