@@ -600,26 +600,34 @@
           }
         }
 
-        // Sort tasks: first task has no depends_on, rest chain
-        var taskOrder = [];
+        // Lay tasks out vertically in DB order (roots first, then their
+        // children), but draw edges from actual depends_on values — not
+        // from vertical position. The prior renderer assumed every manifest
+        // held a single linear chain and drew edges taskOrder[i-1] → taskOrder[i]
+        // purely by index, which painted N independent pairs as one fake chain.
         var taskMap = {};
         tasks.forEach(function(t) { taskMap[t.id] = t; });
-        // Find first task (no depends_on or depends_on not in this manifest)
-        var first = tasks.find(function(t) { return !t.depends_on || !taskMap[t.depends_on]; });
-        if (first) {
-          taskOrder.push(first);
-          var current = first;
-          while (true) {
-            var next = tasks.find(function(t) { return t.depends_on === current.id; });
-            if (!next) break;
-            taskOrder.push(next);
-            current = next;
-          }
-        }
-        // Add any remaining tasks not in chain
-        tasks.forEach(function(t) { if (taskOrder.indexOf(t) === -1) taskOrder.push(t); });
 
-        // Place tasks vertically below manifest
+        // Order: roots first (no depends_on, or depends_on outside this manifest),
+        // then each root's in-manifest children right below it.
+        var taskOrder = [];
+        var placed = {};
+        tasks.forEach(function(t) {
+          if (placed[t.id]) return;
+          if (!t.depends_on || !taskMap[t.depends_on]) {
+            taskOrder.push(t);
+            placed[t.id] = true;
+            tasks.forEach(function(c) {
+              if (!placed[c.id] && c.depends_on === t.id) {
+                taskOrder.push(c);
+                placed[c.id] = true;
+              }
+            });
+          }
+        });
+        // Safety net: any stragglers (shouldn't happen, but keep layout stable).
+        tasks.forEach(function(t) { if (!placed[t.id]) { taskOrder.push(t); placed[t.id] = true; } });
+
         for (var ti = 0; ti < taskOrder.length; ti++) {
           var t = taskOrder[ti];
           var shortTitle = t.title.length > 25 ? t.title.substring(0, 23) + '…' : t.title;
@@ -631,11 +639,10 @@
           }});
           positions[t.id] = { x: x, y: taskStartY + ti * rowH };
 
-          // Edge: manifest → first task, then task → task
-          if (ti === 0) {
-            elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
+          if (t.depends_on && taskMap[t.depends_on]) {
+            elements.push({ data: { source: t.depends_on, target: t.id, edgeType: 'task_dep' } });
           } else {
-            elements.push({ data: { source: taskOrder[ti - 1].id, target: t.id, edgeType: 'task_dep' } });
+            elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
           }
         }
       }
