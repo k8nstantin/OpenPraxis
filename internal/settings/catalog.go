@@ -58,7 +58,24 @@ func Catalog() []KnobDef {
 		{Key: "default_model", Type: KnobString, Default: "", Description: "Model ID (agent-dependent)"},
 		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
 		{Key: "approval_mode", Type: KnobEnum, EnumValues: []string{"auto", "manual", "on-failure"}, Default: "auto", Description: "Codex approval mode"},
-		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{"Bash", "Read", "Write", "Edit", "Glob", "Grep"}, Description: "Tool allowlist for agent"},
+		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
+			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
+			// MCP tools the runner's prompt template instructs agents to call.
+			// Must stay in sync with internal/task/runner.go:defaultAllowedTools.
+			// Missing any of these silently denies the agent — it can't post its
+			// closing execution_review, load visceral rules, or read settings.
+			"mcp__openpraxis__memory_store",
+			"mcp__openpraxis__memory_search",
+			"mcp__openpraxis__memory_recall",
+			"mcp__openpraxis__visceral_rules",
+			"mcp__openpraxis__visceral_confirm",
+			"mcp__openpraxis__manifest_get",
+			"mcp__openpraxis__conversation_save",
+			"mcp__openpraxis__settings_get",
+			"mcp__openpraxis__settings_resolve",
+			"mcp__openpraxis__settings_catalog",
+			"mcp__openpraxis__comment_add",
+		}, Description: "Tool allowlist for agent. Includes MCP tools the runner prompts reference; removing any breaks the corresponding closing step."},
 	}
 }
 
