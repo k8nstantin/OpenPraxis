@@ -46,7 +46,7 @@ func newCommentsTestEnv(t *testing.T) *commentsTestEnv {
 
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api").Subrouter()
-	registerCommentsRoutes(api, store)
+	registerCommentsRoutes(api, store, nil)
 
 	srv := httptest.NewServer(r)
 	t.Cleanup(func() {
@@ -499,7 +499,7 @@ func TestGET_CommentsTypes(t *testing.T) {
 func TestRoutes_AllCommentEndpointsRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api").Subrouter()
-	registerCommentsRoutes(api, nil)
+	registerCommentsRoutes(api, nil, nil)
 
 	want := map[string]string{
 		"GET /api/products/{id}/comments":   "",

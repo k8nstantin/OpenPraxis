@@ -210,14 +210,82 @@ type editCommentRequest struct {
 	Body string `json:"body"`
 }
 
+// TargetResolver canonicalizes a target_id from the URL path into the full
+// UUID by looking up the entity. Accepts short markers (8-12 char prefixes)
+// as well as full UUIDs. Returns an error if the target does not exist.
+//
+// Tests can pass a passthrough resolver (returns raw as-is) when entity
+// stores are not wired; production uses nodeTargetResolver.
+type TargetResolver func(target comments.TargetType, raw string) (string, error)
+
+// passthroughResolver is the no-op TargetResolver for tests that don't wire
+// real entity stores. Accepts whatever id the caller passes.
+func passthroughResolver(_ comments.TargetType, raw string) (string, error) {
+	return raw, nil
+}
+
+// nodeTargetResolver builds a TargetResolver backed by the node's entity
+// stores. Each store's Get accepts marker or full UUID via `id = ? OR id LIKE ?`.
+func nodeTargetResolver(n *node.Node) TargetResolver {
+	return func(target comments.TargetType, raw string) (string, error) {
+		switch target {
+		case comments.TargetTask:
+			if n.Tasks == nil {
+				return raw, nil
+			}
+			t, err := n.Tasks.Get(raw)
+			if err != nil {
+				return "", fmt.Errorf("resolve target task %q: %w", raw, err)
+			}
+			if t == nil {
+				return "", fmt.Errorf("target task not found: %s", raw)
+			}
+			return t.ID, nil
+		case comments.TargetManifest:
+			if n.Manifests == nil {
+				return raw, nil
+			}
+			m, err := n.Manifests.Get(raw)
+			if err != nil {
+				return "", fmt.Errorf("resolve target manifest %q: %w", raw, err)
+			}
+			if m == nil {
+				return "", fmt.Errorf("target manifest not found: %s", raw)
+			}
+			return m.ID, nil
+		case comments.TargetProduct:
+			if n.Products == nil {
+				return raw, nil
+			}
+			p, err := n.Products.Get(raw)
+			if err != nil {
+				return "", fmt.Errorf("resolve target product %q: %w", raw, err)
+			}
+			if p == nil {
+				return "", fmt.Errorf("target product not found: %s", raw)
+			}
+			return p.ID, nil
+		}
+		return raw, nil
+	}
+}
+
 // listComments is the shared handler body for
 // GET /api/{products|manifests|tasks}/{id}/comments.
-func listComments(store *comments.Store, target comments.TargetType) http.HandlerFunc {
+//
+// Resolves the URL {id} to full UUID so short markers find the same
+// target_id rows that MCP comment_add (also resolved) wrote.
+func listComments(store *comments.Store, target comments.TargetType, resolve TargetResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
-		if id == "" {
+		rawID := mux.Vars(r)["id"]
+		if rawID == "" {
 			writeCommentError(w, "empty_target_id",
 				comments.ErrEmptyTargetID.Error(), http.StatusBadRequest)
+			return
+		}
+		id, err := resolve(target, rawID)
+		if err != nil {
+			writeCommentError(w, "target_not_found", err.Error(), http.StatusNotFound)
 			return
 		}
 		limit, ok := parseLimit(w, r)
@@ -243,12 +311,20 @@ func listComments(store *comments.Store, target comments.TargetType) http.Handle
 
 // addComment is the shared handler body for
 // POST /api/{products|manifests|tasks}/{id}/comments.
-func addComment(store *comments.Store, target comments.TargetType) http.HandlerFunc {
+//
+// Resolves the URL {id} to full UUID before insert so comments posted via
+// HTTP never orphan on a short-marker target_id.
+func addComment(store *comments.Store, target comments.TargetType, resolve TargetResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
-		if id == "" {
+		rawID := mux.Vars(r)["id"]
+		if rawID == "" {
 			writeCommentError(w, "empty_target_id",
 				comments.ErrEmptyTargetID.Error(), http.StatusBadRequest)
+			return
+		}
+		id, err := resolve(target, rawID)
+		if err != nil {
+			writeCommentError(w, "target_not_found", err.Error(), http.StatusNotFound)
 			return
 		}
 		var req addCommentRequest
@@ -353,12 +429,17 @@ var commentScopeRoutes = []struct {
 	{"tasks", comments.TargetTask},
 }
 
-// registerCommentsRoutes attaches the 8 comment endpoints to /api.
-func registerCommentsRoutes(api *mux.Router, store *comments.Store) {
+// registerCommentsRoutes attaches the 8 comment endpoints to /api using the
+// given TargetResolver. Tests pass passthroughResolver; production wires
+// nodeTargetResolver via registerCommentsRoutesFromNode.
+func registerCommentsRoutes(api *mux.Router, store *comments.Store, resolve TargetResolver) {
+	if resolve == nil {
+		resolve = passthroughResolver
+	}
 	for _, s := range commentScopeRoutes {
 		path := "/" + s.segment + "/{id}/comments"
-		api.HandleFunc(path, listComments(store, s.target)).Methods("GET")
-		api.HandleFunc(path, addComment(store, s.target)).Methods("POST")
+		api.HandleFunc(path, listComments(store, s.target, resolve)).Methods("GET")
+		api.HandleFunc(path, addComment(store, s.target, resolve)).Methods("POST")
 	}
 	api.HandleFunc("/comments/types", listCommentTypes()).Methods("GET")
 	api.HandleFunc("/comments/{id}", editComment(store)).Methods("PATCH")
@@ -366,7 +447,8 @@ func registerCommentsRoutes(api *mux.Router, store *comments.Store) {
 }
 
 // registerCommentsRoutesFromNode is the production entry point. Keeps the
-// wire-up in handler.go a single line.
+// wire-up in handler.go a single line. Uses nodeTargetResolver so every
+// HTTP comment call canonicalizes target_id to full UUID before insert/read.
 func registerCommentsRoutesFromNode(api *mux.Router, n *node.Node) {
-	registerCommentsRoutes(api, n.Comments)
+	registerCommentsRoutes(api, n.Comments, nodeTargetResolver(n))
 }
