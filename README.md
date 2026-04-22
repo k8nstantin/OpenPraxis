@@ -23,6 +23,29 @@ One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the
 - **You already fix the same bug twice — stop.** Semantic memory with 768-dim embeddings recalls decisions, patterns, and constraints across sessions, agents, and machines.
 - **You don't trust an agent to grade itself — don't have to.** A separate watcher audits every completed task against git, build, and the manifest deliverables, and posts findings as first-class comments.
 
+## Where OpenPraxis fits
+
+**If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
+
+**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to justify the AI bill, defend the merges, and find out what the agent actually did on Tuesday.
+
+OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
+
+| | OpenPraxis | Consumer agent-message managers (e.g. OpenClaw) |
+|---|---|---|
+| **Domain** | AI-assisted software development | Local personal assistant over chat/voice |
+| **Front door** | Manifests + scheduled tasks written by a developer | Inbound messages on WhatsApp, iMessage, Telegram, Signal, Slack, Discord, ... |
+| **Output** | Commits, branches, PRs, dashboard state | Reply messages in the source channel + voice + canvas |
+| **Unit of work** | A task that runs an agent session against a spec | A conversation turn in a messaging thread |
+| **Isolation** | One agent per task, in its own git worktree | One agent per channel / account / workspace |
+| **Cost model** | Per-task, per-turn, per-day, per-product spend — first-class metric | Not a first-class surface |
+| **Audit model** | Independent watcher + typed review comments + execution_review retrospectives | Conversation history |
+| **Ideal user** | Professional developer / team with AI spend to justify and merges to defend | Power user who wants a private assistant across their chat apps |
+| **Persistence** | SQLite + WAL + `sqlite-vec` semantic search | JSON config + workspace dirs |
+| **Primary language** | Go (single binary) | TypeScript / Node.js |
+
+Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
+
 ## Features
 
 - **Spec-driven task orchestration** — `Product → Manifest → Task → Run → Action` hierarchy; every layer aggregates cost, turns, and status from its children.
@@ -42,7 +65,7 @@ One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the
 
 ## Table of contents
 
-- [Why OpenPraxis](#why-openpraxis) · [Features](#features)
+- [Why OpenPraxis](#why-openpraxis) · [Where OpenPraxis fits](#where-openpraxis-fits) · [Features](#features)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
