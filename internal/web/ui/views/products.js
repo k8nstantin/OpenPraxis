@@ -520,24 +520,17 @@
       const data = await fetchJSON('/api/products/' + productId + '/hierarchy');
       if (!data) return;
 
+      // Nodes + edges, no manual positions. Layout is delegated to the
+      // dagre cytoscape plugin (loaded in index.html alongside cytoscape),
+      // which ranks + places automatically for any DAG shape — linear
+      // chains, independent pairs, multi-parent fan-in, empty manifests,
+      // all handled without layout-specific code here.
+      //
+      // This replaced three rounds of hand-rolled position math
+      // (preset layout + column/row arithmetic + DFS task ordering) that
+      // each broke as soon as a new product DAG shape showed up.
       const elements = [];
-      const positions = {};
       const manifests = data.children || [];
-
-      // Sort manifests by dependency order (topological sort)
-      const sorted = [];
-      const visited = {};
-      function topoSort(m) {
-        if (visited[m.id]) return;
-        visited[m.id] = true;
-        var deps = (m.depends_on || '').split(',').filter(Boolean);
-        for (var i = 0; i < deps.length; i++) {
-          var dep = manifests.find(function(x) { return x.id === deps[i].trim(); });
-          if (dep) topoSort(dep);
-        }
-        sorted.push(m);
-      }
-      manifests.forEach(function(m) { topoSort(m); });
 
       function shortLabel(title) {
         return title.replace(/^QA\s+/, '').replace(/^OpenPraxis\s+/, '').replace(/\s*—\s*.+$/, '');
@@ -553,35 +546,24 @@
         return '#71717a';
       };
 
-      // Layout: product on top, manifests horizontal below, tasks vertical below each
-      var colW = 180;  // horizontal spacing between manifests
-      var rowH = 60;   // vertical spacing between tasks
-      var manifestY = 0;
-      var taskStartY = 80;
-
-      // Product node centered above manifests
-      var totalWidth = (sorted.length - 1) * colW;
+      // Product node
       elements.push({ data: {
         id: data.id, label: data.title, title: data.title, type: 'product',
         status: data.status, marker: data.marker,
         meta: JSON.stringify(data.meta || {})
       }});
-      positions[data.id] = { x: totalWidth / 2, y: -120 };
 
-      // Connect product to all its manifests
-      for (var mi = 0; mi < sorted.length; mi++) {
-        elements.push({ data: { source: data.id, target: sorted[mi].id, edgeType: 'product_link' } });
+      // Product → manifest edges (ownership)
+      for (var mi = 0; mi < manifests.length; mi++) {
+        elements.push({ data: { source: data.id, target: manifests[mi].id, edgeType: 'product_link' } });
       }
 
-      // Place manifests horizontally
-      for (var col = 0; col < sorted.length; col++) {
-        var m = sorted[col];
-        var x = col * colW;
+      for (var col = 0; col < manifests.length; col++) {
+        var m = manifests[col];
         var tasks = m.children || [];
         var taskCount = tasks.length;
         var completedCount = tasks.filter(function(t) { return t.status === 'completed'; }).length;
 
-        // Manifest node
         elements.push({ data: {
           id: m.id,
           label: shortLabel(m.title),
@@ -590,9 +572,8 @@
           meta: JSON.stringify(m.meta || {}),
           taskInfo: completedCount + '/' + taskCount
         }});
-        positions[m.id] = { x: x, y: manifestY };
 
-        // Manifest-to-manifest edge
+        // Manifest → manifest edges (explicit depends_on)
         if (m.depends_on) {
           var depIds = m.depends_on.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
           for (var di = 0; di < depIds.length; di++) {
@@ -600,50 +581,15 @@
           }
         }
 
-        // Lay tasks out vertically by walking depends_on chains depth-first
-        // from each root, so a linear chain of N tasks renders in chain
-        // order and edges never skip rows. Edges themselves come from
-        // actual depends_on values (not vertical index) so independent
-        // pairs within the same manifest still render as short parallel
-        // chains rather than one fake long one.
-        //
-        // The prior pass-per-root layout only placed a root and its
-        // immediate children, dumping deeper descendants into a safety-net
-        // in API-return order. On a 12-task linear chain that produced
-        // arrows jumping row 1 → row 11 → row 2 (the "every which where"
-        // complaint). DFS fixes that.
-        var taskMap = {};
-        tasks.forEach(function(t) { taskMap[t.id] = t; });
+        // Task nodes + edges. Each task gets an edge from its actual
+        // depends_on parent (when that parent is inside the same manifest),
+        // otherwise an ownership edge from the manifest itself. Dagre
+        // figures out the layout from the edge set.
+        var taskIds = {};
+        tasks.forEach(function(t) { taskIds[t.id] = true; });
 
-        var childrenOf = {};
-        tasks.forEach(function(t) {
-          if (t.depends_on && taskMap[t.depends_on]) {
-            (childrenOf[t.depends_on] = childrenOf[t.depends_on] || []).push(t);
-          }
-        });
-
-        var taskOrder = [];
-        var placed = {};
-        function walkDown(t) {
-          if (placed[t.id]) return;
-          taskOrder.push(t);
-          placed[t.id] = true;
-          (childrenOf[t.id] || []).forEach(walkDown);
-        }
-
-        // Roots first (no in-manifest parent), walk each chain to the bottom.
-        tasks.forEach(function(t) {
-          if (!t.depends_on || !taskMap[t.depends_on]) {
-            walkDown(t);
-          }
-        });
-        // Safety net: any task whose parent is inside the manifest but got
-        // skipped by the root walk (shouldn't happen with a clean DAG, but
-        // keeps rendering stable if state is weird).
-        tasks.forEach(function(t) { if (!placed[t.id]) walkDown(t); });
-
-        for (var ti = 0; ti < taskOrder.length; ti++) {
-          var t = taskOrder[ti];
+        for (var ti = 0; ti < tasks.length; ti++) {
+          var t = tasks[ti];
           var shortTitle = t.title.length > 25 ? t.title.substring(0, 23) + '…' : t.title;
           elements.push({ data: {
             id: t.id, label: shortTitle,
@@ -651,9 +597,8 @@
             marker: t.marker, depends_on: t.depends_on || '',
             meta: JSON.stringify(t.meta || {})
           }});
-          positions[t.id] = { x: x, y: taskStartY + ti * rowH };
 
-          if (t.depends_on && taskMap[t.depends_on]) {
+          if (t.depends_on && taskIds[t.depends_on]) {
             elements.push({ data: { source: t.depends_on, target: t.id, edgeType: 'task_dep' } });
           } else {
             elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
@@ -665,9 +610,18 @@
       const cy = cytoscape({
         container: container,
         elements: elements,
+        // dagre: hierarchical topological layout. rankDir=TB puts product
+        // at the top and flows downward through manifests and tasks.
+        // nodeSep / rankSep tuned for the current label sizes; if labels
+        // grow, bump these rather than going back to manual positions.
         layout: {
-          name: 'preset',
-          positions: function(node) { return positions[node.id()] || { x: 0, y: 0 }; },
+          name: 'dagre',
+          rankDir: 'TB',
+          nodeSep: 40,
+          rankSep: 70,
+          edgeSep: 20,
+          padding: 24,
+          fit: true,
         },
         style: [
           {
