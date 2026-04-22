@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
@@ -102,4 +103,192 @@ func (n *Node) currentDescription(target comments.TargetType, idOrMarker string)
 		return t.Description, t.ID, nil
 	}
 	return "", "", nil
+}
+
+// RevisionEntry is a single description_revision presented to API / MCP
+// callers. Version is 1-based with 1 being the oldest revision — i.e. the
+// backfilled seed row or the first user edit after schema rollout.
+type RevisionEntry struct {
+	ID        string `json:"id"`
+	Version   int    `json:"version"`
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// DescriptionHistory returns the description_revision comments for the given
+// entity, newest first, with a 1-based Version field derived from insertion
+// order (oldest = 1). The targetID argument may be a short marker or the full
+// UUID; the returned rows always carry full comment IDs.
+func (n *Node) DescriptionHistory(
+	ctx context.Context,
+	target comments.TargetType,
+	targetID string,
+	limit int,
+) ([]RevisionEntry, error) {
+	if n == nil || n.Comments == nil {
+		return nil, nil
+	}
+	_, fullID, err := n.currentDescription(target, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if fullID == "" {
+		return nil, fmt.Errorf("%s not found: %s", target, targetID)
+	}
+	ct := comments.TypeDescriptionRevision
+	rows, err := n.Comments.List(ctx, target, fullID, limit, &ct)
+	if err != nil {
+		return nil, err
+	}
+	// List returns newest first. Version numbering is oldest-first, so
+	// the last element gets version 1 and the first element gets len(rows).
+	out := make([]RevisionEntry, 0, len(rows))
+	total := len(rows)
+	for i, c := range rows {
+		out = append(out, RevisionEntry{
+			ID:        c.ID,
+			Version:   total - i,
+			Author:    c.Author,
+			Body:      c.Body,
+			CreatedAt: c.CreatedAt.Unix(),
+		})
+	}
+	return out, nil
+}
+
+// GetDescriptionRevision fetches a single description_revision by id and
+// enforces that it actually belongs to the given (target, targetID) pair
+// so operators can't read a revision from a sibling entity by guessing the
+// comment id.
+func (n *Node) GetDescriptionRevision(
+	ctx context.Context,
+	target comments.TargetType,
+	targetID, commentID string,
+) (*RevisionEntry, error) {
+	if n == nil || n.Comments == nil {
+		return nil, nil
+	}
+	_, fullID, err := n.currentDescription(target, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if fullID == "" {
+		return nil, fmt.Errorf("%s not found: %s", target, targetID)
+	}
+	c, err := n.Comments.Get(ctx, commentID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Type != comments.TypeDescriptionRevision {
+		return nil, fmt.Errorf("comment %s is not a description_revision", commentID)
+	}
+	if c.TargetType != target || c.TargetID != fullID {
+		return nil, fmt.Errorf("revision %s does not belong to %s %s", commentID, target, fullID)
+	}
+	// Version is the count of revisions with created_at <= this one.
+	ct := comments.TypeDescriptionRevision
+	all, err := n.Comments.List(ctx, target, fullID, 0, &ct)
+	if err != nil {
+		return nil, err
+	}
+	version := 0
+	total := len(all)
+	for i, row := range all {
+		if row.ID == c.ID {
+			version = total - i
+			break
+		}
+	}
+	return &RevisionEntry{
+		ID:        c.ID,
+		Version:   version,
+		Author:    c.Author,
+		Body:      c.Body,
+		CreatedAt: c.CreatedAt.Unix(),
+	}, nil
+}
+
+// RestoreDescription re-applies a prior description_revision as the current
+// body. The mechanism is deliberately additive: we record a *new*
+// description_revision whose body equals the historical revision's body, then
+// denormalise that body back onto the entity column via the appropriate
+// store.Update. The original revision row is untouched so the full trail
+// remains intact — an operator can see "restored from X" as the latest row.
+//
+// Returns the newly-created revision ID. When the historical body already
+// matches the current body (i.e. nothing to do) returns ("", nil).
+func (n *Node) RestoreDescription(
+	ctx context.Context,
+	target comments.TargetType,
+	targetID, fromCommentID, author string,
+) (string, error) {
+	if n == nil || n.Comments == nil {
+		return "", nil
+	}
+	rev, err := n.GetDescriptionRevision(ctx, target, targetID, fromCommentID)
+	if err != nil {
+		return "", err
+	}
+	_, fullID, err := n.currentDescription(target, targetID)
+	if err != nil {
+		return "", err
+	}
+	if fullID == "" {
+		return "", fmt.Errorf("%s not found: %s", target, targetID)
+	}
+
+	newCommentID, err := n.RecordDescriptionChange(ctx, target, fullID, rev.Body, author)
+	if err != nil {
+		return "", err
+	}
+	if newCommentID == "" {
+		// Historical body already matches current; no UPDATE needed.
+		return "", nil
+	}
+
+	if err := n.writeEntityDescription(target, fullID, rev.Body); err != nil {
+		return "", err
+	}
+	return newCommentID, nil
+}
+
+// writeEntityDescription updates only the denormalised description/content
+// column for the given entity, preserving all other fields. Used by
+// RestoreDescription so the HTTP/MCP restore path doesn't have to re-send
+// the whole PATCH payload.
+func (n *Node) writeEntityDescription(target comments.TargetType, fullID, body string) error {
+	switch target {
+	case comments.TargetProduct:
+		if n.Products == nil {
+			return fmt.Errorf("products store not wired")
+		}
+		p, err := n.Products.Get(fullID)
+		if err != nil {
+			return err
+		}
+		if p == nil {
+			return fmt.Errorf("product not found: %s", fullID)
+		}
+		return n.Products.Update(p.ID, p.Title, body, p.Status, p.Tags)
+	case comments.TargetManifest:
+		if n.Manifests == nil {
+			return fmt.Errorf("manifests store not wired")
+		}
+		m, err := n.Manifests.Get(fullID)
+		if err != nil {
+			return err
+		}
+		if m == nil {
+			return fmt.Errorf("manifest not found: %s", fullID)
+		}
+		return n.Manifests.Update(m.ID, m.Title, m.Description, body, m.Status, m.ProjectID, m.DependsOn, m.JiraRefs, m.Tags)
+	case comments.TargetTask:
+		if n.Tasks == nil {
+			return fmt.Errorf("tasks store not wired")
+		}
+		_, err := n.Tasks.Update(fullID, nil, &body)
+		return err
+	}
+	return fmt.Errorf("unsupported target type: %s", target)
 }
