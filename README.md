@@ -6,26 +6,27 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-### Ship software with autonomous coding agents — without losing the plot.
+### Control plane for agentic software development.
 
-**OpenPraxis is the operating system between you and your coding agents.** Write a spec, hand it to an agent, walk away — and come back to a dashboard that shows you every turn, every tool call, every dollar spent, every rule acknowledged, every commit landed, audited by an independent watcher your agent can't silence. **All local. All persistent. Peer-to-peer across your machines.**
+OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs — and captures every tool call, every turn, every commit, and every dollar in a local SQLite store you can query months later.
 
-One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the runner clamps against it; runaway agents can't hide.
+**Bill auditing for your AI spend.** The agent still calls cloud LLM APIs; the git push still hits GitHub. OpenPraxis is the meter between you and those bills — per-turn, per-task, per-manifest, per-product, per-day line items, attributed to the actual work that caused them. You pay the bill; you also see every item on it.
+
+Single Go binary. Control plane runs locally. Integrates with Anthropic / OpenAI / Google / Ollama LLM APIs, GitHub remotes, and Claude Code / Cursor / Codex agent runtimes. Peer-to-peer over LAN via mDNS + Automerge — no SaaS backend, no analytics phone-home.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — Cost Today $16.24 / $100, 438 turns, 147 tasks, tasks-today ranked by cost" width="100%" />
 </p>
 
-> **The shift.** Chat wrappers hand you a black box: you press run, you hope, and you meet the bill at the end of the month. OpenPraxis inverts that — every turn captured as it happens, aggregated upward, and surfaced on a single dashboard. Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a rule. Independent evaluation is non-negotiable: the watcher audits every completed task and posts findings the agent cannot delete.
->
-> **The result is cost control by construction.** You set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+### What the tool actually does for agentic AI development
 
-## Why OpenPraxis
-
-- **You already pay for agents — start seeing where the money goes.** Spend surfaces on the task, the manifest, the product, and the day, live, in one place.
-- **You already write specs — stop copy-pasting them into every chat.** Manifests are versioned, searchable, and injected into every agent session automatically.
-- **You already fix the same bug twice — stop.** Semantic memory with 768-dim embeddings recalls decisions, patterns, and constraints across sessions, agents, and machines.
-- **You don't trust an agent to grade itself — don't have to.** A separate watcher audits every completed task against git, build, and the manifest deliverables, and posts findings as first-class comments.
+- **Track record of actions.** Every tool call an agent makes — Bash, Read, Edit, Write, Grep, Glob, Web, MCP — is recorded with `tool_name`, `tool_input`, `tool_response`, `cwd`, `session_id`, timestamp, and the owning `task_id`. That's the `actions` table, currently holding 25k+ rows in a typical install. Searchable by keyword with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)), filterable by session/task/peer. "What did the agent actually edit on Thursday?" is an answered question, not a vibe.
+- **Independent auditing.** A separate `watcher` process runs three gates on every completed task: **git** (did commits land on the task branch?), **build** (`go build ./...` or the per-language equivalent), and **manifest** (were the deliverables in the spec addressed in the diff?). Findings post as typed `watcher_finding` comments on the task. The watcher is observer-only as of [PR #149](https://github.com/k8nstantin/OpenPraxis/pull/149) — it doesn't mutate task state; the paired review task posts the canonical `review_approval` / `review_rejection` verdict.
+- **Git integration as first-class orchestration.** One branch per task (`openpraxis/<task-id>`), one worktree per task (`.openpraxis-work/<task-id>/`) off fresh `origin/main`. The runner creates the worktree, spawns the agent with the spec + visceral rules + relevant memories injected, and tears the worktree down on completion. The `execution_review` comment is enforced at completion ([PR #118](https://github.com/k8nstantin/OpenPraxis/pull/118)); the watcher's git gate reads commits from the branch directly. Branch name is surfaced next to the task status on the dashboard.
+- **Spec-to-execution pipeline.** A Manifest is versioned markdown with deliverables, `depends_on` other manifests, `jira_refs`, and `status`. A Task is a scheduled work item linked to a manifest (many-to-many). A Run is one execution attempt. An Action is one tool call. The scheduler respects `depends_on` at both the manifest and task layer; the runner injects the manifest body into the agent prompt; the resolver walks task → manifest → product → system for every execution knob (`max_turns`, `temperature`, `default_model`, `max_cost_usd`, 8 more).
+- **Cost accounting with real numbers.** The `model_pricing` table calibrates cost per model from actual runs. Every `task_run` row carries `cost_usd`, token counts, turn count. Aggregation rolls up at read time to task → manifest → product → daily total. A visceral rule caps `daily_budget_usd=100`; the runner clamps at spawn time. The dashboard shows live spend versus budget with a hard red boundary.
+- **Persistent memory across sessions.** 768-dim embeddings (`nomic-embed-text` via Ollama) in `sqlite-vec`. Memories are path-organized (`/project/openpraxis/bugs/macos-codesign-required`), scoped (personal / project / team), typed (insight / decision / pattern / bug / context / reference), and tiered (L0 one-liner / L1 summary / L2 full). Decisions survive the session that made them.
+- **P2P sync over LAN.** mDNS discovery + Automerge CRDTs replicate memories, conversations, manifests, and visceral rules between machines. Laptop, desktop, server see the same state without a cloud account.
 
 ## Where OpenPraxis fits
 
