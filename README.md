@@ -6,13 +6,43 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-**Spec-driven development platform for autonomous coding agents.** Define products, write specs, and let independent agent sessions build them — with persistent memory, compliance enforcement, and independent execution auditing.
+### Ship software with autonomous coding agents — without losing the plot.
 
-OpenPraxis is the operating system between you and your coding agents. It manages the full lifecycle: ideas become specs, specs become tasks, tasks execute autonomously, a watcher audits the output, and everything persists across sessions, agents, and machines.
+**OpenPraxis is the operating system between you and your coding agents.** Write a spec, hand it to an agent, walk away — and come back to a dashboard that shows you every turn, every tool call, every dollar spent, every rule acknowledged, every commit landed, audited by an independent watcher your agent can't silence. **All local. All persistent. Peer-to-peer across your machines.**
+
+One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the runner clamps against it; runaway agents can't hide.
+
+<p align="center">
+  <img src="docs/images/overview.png" alt="OpenPraxis dashboard — Cost Today $16.24 / $100, 438 turns, 147 tasks, tasks-today ranked by cost" width="100%" />
+</p>
+
+## Why OpenPraxis
+
+- **You already pay for agents — start seeing where the money goes.** Spend surfaces on the task, the manifest, the product, and the day, live, in one place.
+- **You already write specs — stop copy-pasting them into every chat.** Manifests are versioned, searchable, and injected into every agent session automatically.
+- **You already fix the same bug twice — stop.** Semantic memory with 768-dim embeddings recalls decisions, patterns, and constraints across sessions, agents, and machines.
+- **You don't trust an agent to grade itself — don't have to.** A separate watcher audits every completed task against git, build, and the manifest deliverables, and posts findings as first-class comments.
+
+## Features
+
+- **Spec-driven task orchestration** — `Product → Manifest → Task → Run → Action` hierarchy; every layer aggregates cost, turns, and status from its children.
+- **Autonomous agent sessions** — tasks spawn Claude Code / Cursor / Codex subprocesses in isolated git worktrees off fresh `origin/main`, with the manifest spec, visceral rules, and relevant memories injected as context.
+- **Cost as a first-class metric** — live spend per task, per turn, per day, rolled up to the product. Hard daily budget enforced as a visceral rule.
+- **Hierarchical execution controls** — 12 knobs (`max_turns`, `temperature`, `default_model`, `max_cost_usd`, …) inherit through `task → manifest → product → system` scope with one-click override + reset.
+- **Independent observer** — a separate watcher runs three gates (git, build, manifest-deliverables) on every completed task and posts findings as comments; the paired review task owns the verdict.
+- **Review workflow with typed comments** — every entity has a comment thread; `review_approval` / `review_rejection` / `execution_review` / `agent_note` / `watcher_finding` are first-class types with enforcement at both the MCP and HTTP boundaries.
+- **Visceral rules + amnesia detection** — non-negotiable operating constraints every agent must acknowledge; violations auto-flagged on the dashboard.
+- **Semantic + keyword search** — `sqlite-vec` 768-dim embeddings over memories, conversations, actions; keyword-first paginated results with `<mark>`-highlighted snippets and optional "Related by meaning" tail.
+- **Interactive DAG visualization** — cytoscape + dagre renders product hierarchy; edges derived from real `depends_on`, layout computed by dagre, assets bundled locally (no CDN).
+- **Peer-to-peer sync** — mDNS discovery + Automerge CRDT replicates memories, conversations, manifests, and visceral rules across machines on the LAN.
+- **Single-binary distribution** — one Go build, `go:embed`-ded dashboard, no npm, no separate frontend deploy.
+- **55 MCP tools** — full programmatic surface for agents: products, manifests, tasks, memory, comments, reviews, settings, visceral rules, ideas, markers, peers.
+- **17-tab operator dashboard** — overview, memories, conversations, actions, amnesia, visceral, ideas, products, manifests, tasks, chat, delusions, watcher, peers, activity, recall, settings.
+- **Mobile peer app** — React Native / Expo companion that acts as a full OpenPraxis peer from your phone, syncing over LAN.
 
 ## Table of contents
 
-- [What's new (April 2026)](#whats-new-april-2026)
+- [Why OpenPraxis](#why-openpraxis) · [Features](#features)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
@@ -42,34 +72,8 @@ OpenPraxis is the operating system between you and your coding agents. It manage
 
 **Deeper references:**
 - [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
-
-## What's new (April 2026)
-
-Landed on main this week:
-
-**Reliability**
-- **Watcher is observer-only (#149).** Removed the gatekeeper path that was mutating task state + blocking `ActivateDependents` on gate failure. Audits still run; findings post as `watcher_finding` comments; the paired review task owns the verdict. Fixes the "ops-task with 0 commits auto-downgraded to failed" bug that stranded INT MySQL backup chains.
-- **Task `depends_on` display widened 8 → 14 chars (#145).** UUIDv7 tasks created in the same millisecond share an 8-char time prefix, so the old `task_get` output rendered every child as if it pointed at the same parent. Now unambiguous.
-- **Scheduler cleanup rule for cancelled recurring tasks.** `task_cancel` on a task with `schedule: 30m` is now durable: status flips to `cancelled`, schedule collapses to `once`, `next_run_at` clears, so the runner can't re-fire it. (Operational tooling, not a PR — directly applied.)
-
-**DAG renderer — one-and-done**
-- **Dagre layout (#158).** Deleted 80+ lines of hand-rolled column/row arithmetic + manual topo sort + per-manifest DFS. Replaced with `layout: { name: 'dagre', rankDir: 'TB', ... }`. Any DAG shape — linear chain, independent pairs, multi-parent fan-in, empty manifests — now renders correctly with no layout-specific code.
-- **Edges from real `depends_on` (#146, kept through #158).** Product → manifest (ownership), manifest → manifest (explicit deps), parent-task → child-task (`depends_on`), manifest → task (ownership for in-manifest roots).
-- **Local vendor bundle (#159).** Cytoscape + dagre + cytoscape-dagre pinned and served from `/vendor/`, not a CDN. Dashboard works offline; no silent break when jsdelivr hiccups.
-- **Extract + contract test (#160).** Diagram code moved out of the 900-line `products.js` into `views/product-dag.js`. Added `TestProductHierarchy_EmptyProduct / _LinearChain / _ParallelPairs` in `handlers_product_hierarchy_test.go` so the API contract dagre rides on is locked at build time.
-
-**Search**
-- **Keyword-first search for conversations + actions (#152).** New envelope response `{ items, total, offset, limit, has_more, semantic? }`. Infinite scroll appends pages. `<mark>`-highlighted snippets around the first literal match, 80 chars of context each side. Conversations get an optional "Related by meaning" semantic tail on page 0 (capped at 10, deduped). Actions stay keyword-only (already LIKE-based).
-
-**Execution controls**
-- **Model selector is an enum (#151).** `default_model` moved from free-form string to `KnobEnum` with the Claude family (`""` agent default, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`). Dashboard renders as a `<select>`; typos rejected at validation.
-
-**Comments + target resolution**
-- **Short-marker target IDs resolve everywhere.** `comment_add` + HTTP comment endpoints accept 8–12 char markers or full UUIDs; both paths canonicalize via the entity stores before writing (PR #136, PR #139). Sweep migration for legacy short-marker orphans shipped as `openpraxis admin migrate-comment-orphans` (PR #141).
-- **`execution_review` enforcement (PR #118).** Task completion blocked unless the agent posted its post-run retrospective.
-
-**Branding**
-- **OpenPraxis mark (#161).** Sidebar glyph swapped for a transparent 256×256 PNG served from `/assets/`. Favicon + apple-touch-icon wired at the same path.
+- [Workflow Engine — DAG, states, activation model, review loop, SCD principle](docs/workflow-engine.md)
+- [Changelog — April 2026 release notes](docs/changelog.md)
 
 ## See it in action
 
