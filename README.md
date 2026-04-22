@@ -105,37 +105,48 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 
 **One organizational model, used everywhere.** OpenPraxis orchestrates work as a three-level hierarchy borrowed from how actual engineering teams already think. Everything — cost, turns, status, settings, review verdicts — cascades up or down this spine.
 
-```
- Peer  (your machine, identified by UUID v7 + MAC fingerprint)
-   │
-   ├──  Idea               [CAPTURED CONCEPT — upstream of any build work]
-   │      │                  priority (low/medium/high/critical) · tags
-   │      │                  link_idea_manifest ties ideas to the specs they spawned
-   │      │
-   ├──  Product            [SPEC — top level, groups manifests under one umbrella]
-   │      │                  title · tags · status · cost rollup · DAG root
-   │      │
-   │      ├──  Manifest    [SPEC — versioned markdown with deliverables]
-   │      │      │           depends_on other manifests (build order)
-   │      │      │           jira_refs · status · linked ideas · comments
-   │      │      │
-   │      │      ├──  Task [ATOMIC UNIT OF WORK — executes one agent]
-   │      │      │     │    depends_on other tasks · schedule (once / 5m / at:)
-   │      │      │     │    status, cost, turns, run_count, branch · comments
-   │      │      │     │
-   │      │      │     ├──  Run     [ATOMIC UNIT OF EXECUTION — one attempt]
-   │      │      │     │     │         started_at / completed_at · cost · exit code
-   │      │      │     │     │
-   │      │      │     │     └──  Action  [ATOMIC UNIT OF MEASUREMENT — one tool call]
-   │      │      │     │                    tool_name · tool_input · tool_response · cwd
-   │      │      │
-   │      │      └──  Review Task [ATOMIC UNIT OF VERDICT — paired via depends_on]
-   │      │            auto-activates on parent completion
-   │      │            posts review_approval / review_rejection on parent
-   │      │
-   │      └──  More manifests … chained by manifest depends_on
-   │
-   └──  More products …
+```mermaid
+flowchart TB
+    Peer["<b>Peer</b><br/><i>your machine — UUID v7 + MAC fingerprint</i>"]:::peer
+
+    Peer ==> Idea
+    Peer ==> Product
+
+    Idea[/"<b>Idea</b>  [CAPTURED CONCEPT — upstream of any build work]<br/>priority (low / medium / high / critical) · tags<br/><i>link_idea_manifest ties ideas to the specs they spawned</i>"/]:::idea
+
+    Product(["<b>Product</b>  [SPEC — top level, groups manifests under one umbrella]<br/>title · tags · status · cost rollup · DAG root"]):::product
+
+    Idea -. link_idea_manifest .-> Manifest
+
+    Product ==> Manifest
+    Product -.-> ProductN[/"more products..."/]:::more
+
+    Manifest["<b>Manifest</b>  [SPEC — versioned markdown with deliverables]<br/>depends_on other manifests (build order)<br/>jira_refs · status · linked ideas · comments"]:::manifest
+    Manifest -. depends_on .-> ManifestN[/"more manifests... chained by manifest depends_on"/]:::more
+
+    Manifest ==> Task
+    Manifest ==> Review
+
+    Task["<b>Task</b>  [ATOMIC UNIT OF WORK — executes one agent]<br/>depends_on other tasks · schedule (once / 5m / at:)<br/>status · cost · turns · run_count · branch · comments"]:::task
+    Task ==> Run
+
+    Review["<b>Review Task</b>  [ATOMIC UNIT OF VERDICT — paired via depends_on]<br/>auto-activates on parent completion<br/>posts review_approval / review_rejection on parent"]:::review
+    Task -. pairs via depends_on .-> Review
+
+    Run["<b>Run</b>  [ATOMIC UNIT OF EXECUTION — one attempt]<br/>started_at / completed_at · cost · exit code"]:::run
+    Run ==> Action
+
+    Action["<b>Action</b>  [ATOMIC UNIT OF MEASUREMENT — one tool call]<br/>tool_name · tool_input · tool_response · cwd"]:::action
+
+    classDef peer fill:#0a0a0f,stroke:#71717a,stroke-width:2px,color:#e4e4e7
+    classDef idea fill:#1a1a2e,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
+    classDef product fill:#4c1d95,stroke:#8b5cf6,stroke-width:3px,color:#fff
+    classDef manifest fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
+    classDef task fill:#0a0a0f,stroke:#71717a,stroke-width:2px,color:#e4e4e7
+    classDef run fill:#0a0a0f,stroke:#a1a1aa,stroke-width:1.5px,color:#e4e4e7
+    classDef action fill:#0a0a0f,stroke:#71717a,stroke-width:1.5px,color:#a1a1aa
+    classDef review fill:#0a0a0f,stroke:#f59e0b,stroke-width:2px,color:#f59e0b
+    classDef more fill:transparent,stroke:#71717a,stroke-dasharray:3 3,color:#71717a
 ```
 
 **The taxonomy at a glance:**
