@@ -75,7 +75,12 @@ body {
 }
 
 .brand-icon {
-  font-size: 22px;
+  /* Was a unicode glyph (&#x2B21;); now the OpenPraxis mark served from
+     /assets/openpraxis-icon.png. Sized to fit the 20px-padded sidebar
+     header comfortably; object-fit preserves the transparent background. */
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
   color: var(--accent);
 }
 
