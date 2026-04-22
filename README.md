@@ -26,6 +26,7 @@
 - **Atomic-granularity observability.** Drill from a product's total spend to the exact tool call that caused it in two clicks.
 - **Interactive build DAG.** The whole plan as a clickable, status-colored graph — brief a stakeholder without a deck.
 - **Self-hosted, offline-capable.** Control plane runs on your hardware; we're not in your data path.
+- **→ [How is this different from OpenClaw?](#where-openpraxis-fits)** Short answer: OpenPraxis is a professional AI development platform; OpenClaw is a consumer agent-message manager. See the comparison table below.
 
 ### How it fits
 
@@ -68,29 +69,6 @@ flowchart LR
 ```
 
 Developers write the spec. Leadership sets the budget, caps, and rules. OpenPraxis dispatches the work to whichever agent is best for the job, captures every action the agent takes, audits the result independently of the agent, attributes the spend to the originating spec, and syncs the memory across the team — all on your hardware, on your terms.
-
-## Where OpenPraxis fits
-
-**If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
-
-**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
-
-OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
-
-| | OpenPraxis | Consumer agent-message managers (e.g. OpenClaw) |
-|---|---|---|
-| **Domain** | AI-assisted software development | Local personal assistant over chat/voice |
-| **Front door** | Manifests + scheduled tasks written by a developer | Inbound messages on WhatsApp, iMessage, Telegram, Signal, Slack, Discord, ... |
-| **Output** | Commits, branches, PRs, dashboard state | Reply messages in the source channel + voice + canvas |
-| **Unit of work** | A task that runs an agent session against a spec | A conversation turn in a messaging thread |
-| **Isolation** | One agent per task, in its own git worktree | One agent per channel / account / workspace |
-| **Cost model** | Per-task, per-turn, per-day, per-product spend — first-class metric | Not a first-class surface |
-| **Audit model** | Independent watcher + typed review comments + execution_review retrospectives | Conversation history |
-| **Ideal user** | Professional developer / team with AI spend to justify and merges to defend | Power user who wants a private assistant across their chat apps |
-| **Persistence** | Embedded local store with semantic + keyword search | JSON config + workspace dirs |
-| **Primary language** | Go (single binary) | TypeScript / Node.js |
-
-Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
 
 ## The Hierarchy — Product → Manifest → Task
 
@@ -154,7 +132,7 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 
 ## Table of contents
 
-- [Features](#features) · [Where OpenPraxis fits](#where-openpraxis-fits) · [The Hierarchy](#the-hierarchy--product--manifest--task) · [The DAG](#the-dag--your-shop-floor-at-a-glance)
+- [Features](#features) · [How it fits](#how-it-fits) · [The Hierarchy](#the-hierarchy--product--manifest--task) · [The DAG](#the-dag--your-shop-floor-at-a-glance) · [Where OpenPraxis fits (vs OpenClaw)](#where-openpraxis-fits)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
@@ -186,6 +164,29 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 - [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
 - [Workflow Engine — DAG, states, activation model, review loop, SCD principle](docs/workflow-engine.md)
 - [Changelog — April 2026 release notes](docs/changelog.md)
+
+## Where OpenPraxis fits
+
+**If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
+
+**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every cost unit is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
+
+OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
+
+| | OpenPraxis | Consumer agent-message managers (e.g. OpenClaw) |
+|---|---|---|
+| **Domain** | AI-assisted software development | Local personal assistant over chat/voice |
+| **Front door** | Manifests + scheduled tasks written by a developer | Inbound messages on WhatsApp, iMessage, Telegram, Signal, Slack, Discord, ... |
+| **Output** | Commits, branches, PRs, dashboard state | Reply messages in the source channel + voice + canvas |
+| **Unit of work** | A task that runs an agent session against a spec | A conversation turn in a messaging thread |
+| **Isolation** | One agent per task, in its own git worktree | One agent per channel / account / workspace |
+| **Cost model** | Per-task, per-turn, per-day, per-product spend — first-class metric | Not a first-class surface |
+| **Audit model** | Independent watcher + typed review comments + execution_review retrospectives | Conversation history |
+| **Ideal user** | Professional developer / team with AI spend to justify and merges to defend | Power user who wants a private assistant across their chat apps |
+| **Persistence** | Embedded local store with semantic + keyword search | JSON config + workspace dirs |
+| **Primary language** | Go (single binary) | TypeScript / Node.js |
+
+Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
 
 ## See it in action
 
