@@ -6,11 +6,11 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-### DAG execution engine + management layer for AI-driven software development.
+### Build products with AI agents — end to end.
 
-**OpenPraxis orchestrates AI-assisted work as a directed acyclic graph.** Products (initiative-level specs) hold Manifests (detailed specs with deliverables), Manifests hold Tasks (scheduled units of work), Tasks hold Runs (individual execution attempts), Runs hold Actions (single tool calls) — with dependencies at every layer and a scheduler that respects them. Each Task dispatches to the best-fit agent (Claude Code, Cursor, Codex) in an isolated git worktree; the platform captures every action, audits the output independently of the agent, and attributes every cost unit back to the spec that drove it.
+**OpenPraxis is a full DAG execution engine for AI-assisted software development.** One initiative becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
 
-**Cost control, quality audit, agent comparison, and forecasting are built on top of that execution graph** — they are outcomes of the engine, not separate tools bolted on.
+**Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — live spend vs daily budget, running tasks, tasks ranked by cost" width="100%" />
@@ -18,6 +18,7 @@
 
 ### Features
 
+- **End-to-end product build graph.** One Product, many chained Manifests (build-order dependencies), many chained Tasks per Manifest (execution-order + paired reviews). The graph plans, dispatches, audits, and costs every step from initiative spec to merged commit. IDE agents, orchestration SDKs, and observability proxies each cover a slice; OpenPraxis owns the whole chain. [Detailed comparison →](docs/compared-to-ai-agent-tools.md)
 - **Line-item cost attribution.** Every cost unit spent attributed to a task, a spec, a product, a day, and the authorizing policy.
 - **Pre-fire cost forecasting.** Predict what the next run, manifest, or sprint will cost from your actual history, per model, per agent, per spec shape.
 - **Independent quality audit.** Every completed task audited against spec, build, and diff by a separate watcher; paired review tasks post the final verdict.
@@ -28,7 +29,7 @@
 - **Atomic-granularity observability.** Drill from a product's total spend to the exact tool call that caused it in two clicks.
 - **Interactive build DAG.** The whole plan as a clickable, status-colored graph — brief a stakeholder without a deck.
 - **Self-hosted, offline-capable.** Control plane runs on your hardware; we're not in your data path.
-- **→ [How is this different from OpenClaw?](#where-openpraxis-fits)** Short answer: OpenPraxis is a professional AI development platform; OpenClaw is a consumer agent-message manager. See the comparison table below.
+- **→ [How is OpenPraxis different from other AI-agent tools?](docs/compared-to-ai-agent-tools.md)** Full landscape map vs IDE agent runtimes (Cline, Cursor, OpenHands, Goose), orchestration SDKs (CrewAI, LangChain), observability proxies (Helicone, Langfuse, AgentOps), enterprise platforms (watsonx, UiPath), and closest concept match (Paperclip). Plus [OpenClaw comparison ↓](#where-openpraxis-fits) for the consumer-assistant axis.
 
 ### How it fits
 
@@ -175,6 +176,7 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 - [License](#license)
 
 **Deeper references:**
+- [Compared to other AI-agent tools — full landscape map](docs/compared-to-ai-agent-tools.md) — IDE runtimes, orchestration SDKs, observability proxies, enterprise platforms, and Paperclip
 - [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
 - [Workflow Engine — DAG, states, activation model, review loop, SCD principle](docs/workflow-engine.md)
 - [Changelog — April 2026 release notes](docs/changelog.md)
