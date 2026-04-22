@@ -8,13 +8,13 @@
 
 ### Build products with AI agents — end to end.
 
-**OpenPraxis is a full DAG execution engine for AI-assisted software development.** One initiative becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
+**OpenPraxis is a full DAG execution engine for AI-assisted software development.** One captured Idea becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
 
 ```mermaid
 flowchart TB
-    Init[/"Initiative"/]:::init --> P
+    Idea[/"<b>Idea</b><br/>captured concept<br/>priority · tags"/]:::idea --> P
 
-    P["<b>Product</b><br/><i>initiative-level spec</i>"]:::product
+    P["<b>Product</b><br/><i>top-level spec<br/>tags · status · cost</i>"]:::product
 
     P --> M1["<b>Manifest 1</b><br/><i>versioned spec<br/>+ deliverables</i>"]:::manifest
     P --> M2["<b>Manifest 2</b>"]:::manifest
@@ -40,7 +40,7 @@ flowchart TB
     Dispatch --> Audit[["<b>Audited</b><br/>git · build · manifest deliverables"]]:::audit
     Dispatch --> Cost[["<b>Costed</b><br/>every cost unit back to the spec"]]:::cost
 
-    classDef init fill:#1a1a2e,stroke:#71717a,color:#e4e4e7
+    classDef idea fill:#1a1a2e,stroke:#3b82f6,color:#e4e4e7
     classDef product fill:#4c1d95,stroke:#8b5cf6,color:#fff,font-weight:bold
     classDef manifest fill:#1e3a5f,stroke:#3b82f6,color:#e4e4e7
     classDef task fill:#1a1a2e,stroke:#71717a,color:#a1a1aa
@@ -121,7 +121,11 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 ```
  Peer  (your machine, identified by UUID v7 + MAC fingerprint)
    │
-   ├──  Product            [SPEC — initiative level]
+   ├──  Idea               [CAPTURED CONCEPT — upstream of any build work]
+   │      │                  priority (low/medium/high/critical) · tags
+   │      │                  link_idea_manifest ties ideas to the specs they spawned
+   │      │
+   ├──  Product            [SPEC — top level, groups manifests under one umbrella]
    │      │                  title · tags · status · cost rollup · DAG root
    │      │
    │      ├──  Manifest    [SPEC — versioned markdown with deliverables]
@@ -151,7 +155,8 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 
 | Level | What it is | Atomic? |
 |---|---|---|
-| **Product** | Initiative-level spec — the "what we're building" | No (container) |
+| **Idea** | Captured concept — priority + tags. Upstream of any build work; links to the Manifests it spawned. | No (seed) |
+| **Product** | Top-level spec — groups related manifests under one umbrella | No (container) |
 | **Manifest** | Versioned detailed spec with deliverables, depends_on, status | No (container) |
 | **Task** | Scheduled unit of work that dispatches one agent session | **Atomic unit of work** |
 | **Run** | One execution attempt of a task | **Atomic unit of execution** |
