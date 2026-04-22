@@ -3,6 +3,7 @@
   var fetchJSON = OL.fetchJSON, esc = OL.esc;
   var _pendingIdeaId = null;
 
+
   function renderIdeaSearchList(el, ideas) {
     if (!ideas || !ideas.length) {
       el.innerHTML = '<div class="empty-state" style="padding:16px">No ideas found</div>';
@@ -63,41 +64,35 @@
         el.innerHTML = '<div class="empty-state" style="padding:16px">No ideas yet</div>';
         return;
       }
-      var html = '';
       var allIdeas = [];
-      for (var pi = 0; pi < peerGroups.length; pi++) {
-        var pg = peerGroups[pi];
-        html += '<div class="tree-node peer-header clickable" data-idea-peer="' + pi + '" role="button" tabindex="0" aria-expanded="true">' +
-          '<span class="tree-arrow">&#x25BC;</span>' +
-          '<span class="status-dot green"></span>' +
-          '<span>' + esc(pg.peer_id) + '</span>' +
-          '<span class="count">' + pg.count + '</span>' +
-        '</div>';
-        html += '<div class="peer-children" data-idea-peer-children="' + pi + '">';
-        for (var ii = 0; ii < pg.ideas.length; ii++) {
-          var i = pg.ideas[ii];
-          allIdeas.push(i);
-          var prioClass = i.priority === 'critical' || i.priority === 'high' ? 'high' : i.priority === 'low' ? 'low' : 'medium';
-          html += '<div class="manifest-item clickable" data-id="' + esc(i.id) + '" role="button" tabindex="0">' +
-            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">' +
-              '<span class="amnesia-score ' + prioClass + ' badge-sm">' + esc(i.priority) + '</span>' +
-              '<span class="session-uuid">' + esc(i.marker) + '</span>' +
-              '<span class="badge">' + esc(i.status) + '</span>' +
-            '</div>' +
-            '<div class="manifest-item-title">' + esc(i.title) + '</div>' +
+      peerGroups.forEach(function(pg) { pg.ideas.forEach(function(i) { allIdeas.push(i); }); });
+
+      OL.renderTree(el, peerGroups, {
+        prefix: 'idea',
+        emptyMessage: 'No ideas yet',
+        levels: [
+          {
+            label: function(pg) { return esc(pg.peer_id); },
+            count: function(pg) { return pg.count; },
+            children: function(pg) { return pg.ideas; },
+          }
+        ],
+        renderLeaf: function(i) {
+          var prioClass = i.priority === 'critical' || i.priority === 'high' ? 'high' :
+            i.priority === 'low' ? 'low' : 'medium';
+          var prioColor = prioClass === 'high' ? 'var(--red)' : prioClass === 'low' ? 'var(--text-muted)' : 'var(--yellow)';
+          return '<div class="tree-node peer-leaf clickable tree-leaf" data-id="' + esc(i.id) + '">' +
+            '<span class="session-uuid">' + esc(i.marker) + '</span>' +
+            '<span class="badge badge-sm" style="color:' + prioColor + '">' + esc(i.priority) + '</span>' +
+            '<span style="font-size:12px;color:var(--text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(i.title) + '</span>' +
           '</div>';
-        }
-        html += '</div>';
-      }
-      el.innerHTML = html;
-
-      OL.wireTreeToggles(el, 'data-idea-peer');
-
-      el.querySelectorAll('.manifest-item').forEach(function(item) {
-        OL.onView(item, 'click', function() { OL.loadIdea(item.dataset.id); });
-        OL.onView(item, 'keydown', function(e) {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); OL.loadIdea(item.dataset.id); }
-        });
+        },
+        leafSelector: '.tree-leaf',
+        onLeafClick: function(node) {
+          el.querySelectorAll('.tree-node').forEach(function(n) { n.classList.remove('active'); });
+          node.classList.add('active');
+          OL.loadIdea(node.dataset.id);
+        },
       });
 
       if (_pendingIdeaId) {
@@ -139,7 +134,6 @@
 
       bodyEl.innerHTML =
         '<div class="manifest-detail-view">' +
-          '<!-- BREADCRUMB -->' +
           '<div class="breadcrumb">' +
             '<span class="breadcrumb-link" onclick="OL.switchView(\'ideas\')">' + esc(idea.source_node ? idea.source_node.substring(0,12) : 'node') + '</span>' +
             '<span class="breadcrumb-sep"> &rarr; </span>' +
@@ -152,16 +146,27 @@
             '<span style="font-size:12px;color:var(--text-muted)">by ' + esc(idea.author) + '</span>' +
             '<button class="btn-copy" onclick="OL.copy(\'get idea ' + idea.marker + '\')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>' +
           '</div>' +
-          (idea.description ? '<div style="font-size:14px;color:var(--text-primary);margin:12px 0;line-height:1.5">' + esc(idea.description) + '</div>' : '') +
+          '<div class="toolbar-row">' +
+            '<button class="btn-search btn-action promote-idea-btn">+ Create Manifest from Idea</button>' +
+            '<button class="btn-dismiss btn-action" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
+          '</div>' +
+          '<div id="idea-revisions-mount" style="margin-bottom:12px"></div>' +
+          (idea.description ? '<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">' + esc(idea.description) + '</div>' : '') +
           linkedHtml +
+          '<div id="idea-comments-mount" style="margin-top:16px"></div>' +
           '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)">' +
             'Created: ' + new Date(idea.created_at).toLocaleString() + ' | ID: ' + esc(idea.id) +
           '</div>' +
-          '<div style="margin-top:12px;display:flex;gap:8px">' +
-            '<button class="btn-search promote-idea-btn btn-md">Create Manifest from Idea</button>' +
-            '<button class="btn-dismiss" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
-          '</div>' +
         '</div>';
+
+      var ideaRevisionsMount = document.getElementById('idea-revisions-mount');
+      if (ideaRevisionsMount && OL.renderRevisionsSection) {
+        OL.renderRevisionsSection(ideaRevisionsMount, { type: 'idea', id: idea.id });
+      }
+      var ideaCommentsMount = document.getElementById('idea-comments-mount');
+      if (ideaCommentsMount && OL.renderCommentsSection) {
+        OL.renderCommentsSection(ideaCommentsMount, { type: 'idea', id: idea.id });
+      }
 
       // Bind manifest links — click to navigate to manifest
       bodyEl.querySelectorAll('.manifest-link').forEach(function(el) {

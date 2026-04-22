@@ -265,6 +265,18 @@ func nodeTargetResolver(n *node.Node) TargetResolver {
 				return "", fmt.Errorf("target product not found: %s", raw)
 			}
 			return p.ID, nil
+		case comments.TargetIdea:
+			if n.Ideas == nil {
+				return raw, nil
+			}
+			i, err := n.Ideas.Get(raw)
+			if err != nil {
+				return "", fmt.Errorf("resolve target idea %q: %w", raw, err)
+			}
+			if i == nil {
+				return "", fmt.Errorf("target idea not found: %s", raw)
+			}
+			return i.ID, nil
 		}
 		return raw, nil
 	}
@@ -427,6 +439,7 @@ var commentScopeRoutes = []struct {
 	{"products", comments.TargetProduct},
 	{"manifests", comments.TargetManifest},
 	{"tasks", comments.TargetTask},
+	{"ideas", comments.TargetIdea},
 }
 
 // registerCommentsRoutes attaches the 8 comment endpoints to /api using the

@@ -58,8 +58,10 @@ func parseTargetType(raw string) (comments.TargetType, error) {
 		return comments.TargetManifest, nil
 	case "task":
 		return comments.TargetTask, nil
+	case "idea":
+		return comments.TargetIdea, nil
 	}
-	return "", fmt.Errorf("target_type must be one of: product, manifest, task (got %q)", raw)
+	return "", fmt.Errorf("target_type must be one of: product, manifest, task, idea (got %q)", raw)
 }
 
 func (s *Server) handleDescriptionHistory(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

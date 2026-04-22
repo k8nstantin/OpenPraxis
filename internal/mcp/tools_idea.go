@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 )
 
 func (s *Server) registerIdeaTools() {
@@ -107,6 +109,14 @@ func (s *Server) handleIdeaUpdate(ctx context.Context, req mcplib.CallToolReques
 	tagsStr := argStr(a, "tags")
 	tags := existing.Tags
 	if tagsStr != "" { tags = splitCSV(tagsStr) }
+
+	// DV consistency — append-only description_revision before the
+	// denormalised UPDATE, same pattern as product / manifest / task.
+	if argStr(a, "description") != "" {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetIdea, existing.ID, desc, ""); err != nil {
+			return errResult("record revision: %v", err), nil
+		}
+	}
 
 	if err := s.node.Ideas.Update(existing.ID, title, desc, status, priority, existing.ProjectID, tags); err != nil {
 		return errResult("update idea: %v", err), nil

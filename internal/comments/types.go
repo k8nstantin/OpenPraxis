@@ -55,7 +55,7 @@ func IsValidCommentType(s string) bool {
 
 func IsValidTargetType(s string) bool {
 	switch TargetType(s) {
-	case TargetProduct, TargetManifest, TargetTask:
+	case TargetProduct, TargetManifest, TargetTask, TargetIdea:
 		return true
 	}
 	return false
