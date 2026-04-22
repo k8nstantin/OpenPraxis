@@ -171,6 +171,7 @@ var descriptionScopeRoutes = []struct {
 	{"products", comments.TargetProduct},
 	{"manifests", comments.TargetManifest},
 	{"tasks", comments.TargetTask},
+	{"ideas", comments.TargetIdea},
 }
 
 // registerDescriptionRoutes attaches the 9 DV/M3 endpoints to /api.

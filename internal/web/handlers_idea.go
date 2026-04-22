@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	"github.com/gorilla/mux"
@@ -136,6 +137,15 @@ func apiIdeaUpdate(n *node.Node) http.HandlerFunc {
 		}
 		tags := existing.Tags
 		if req.Tags != nil { tags = req.Tags }
+		// Record append-only description_revision on description changes
+		// before the denormalised UPDATE (DV consistency with products /
+		// manifests / tasks).
+		if req.Description != nil {
+			if _, err := n.RecordDescriptionChange(r.Context(), comments.TargetIdea, existing.ID, desc, ""); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+		}
 		if err := n.Ideas.Update(existing.ID, title, desc, status, priority, projectID, tags); err != nil {
 			http.Error(w, err.Error(), 500)
 			return

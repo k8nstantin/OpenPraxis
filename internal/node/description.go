@@ -101,6 +101,15 @@ func (n *Node) currentDescription(target comments.TargetType, idOrMarker string)
 			return "", "", err
 		}
 		return t.Description, t.ID, nil
+	case comments.TargetIdea:
+		if n.Ideas == nil {
+			return "", "", nil
+		}
+		i, err := n.Ideas.Get(idOrMarker)
+		if err != nil || i == nil {
+			return "", "", err
+		}
+		return i.Description, i.ID, nil
 	}
 	return "", "", nil
 }
@@ -289,6 +298,18 @@ func (n *Node) writeEntityDescription(target comments.TargetType, fullID, body s
 		}
 		_, err := n.Tasks.Update(fullID, nil, &body)
 		return err
+	case comments.TargetIdea:
+		if n.Ideas == nil {
+			return fmt.Errorf("ideas store not wired")
+		}
+		i, err := n.Ideas.Get(fullID)
+		if err != nil {
+			return err
+		}
+		if i == nil {
+			return fmt.Errorf("idea not found: %s", fullID)
+		}
+		return n.Ideas.Update(i.ID, i.Title, body, i.Status, i.Priority, i.ProjectID, i.Tags)
 	}
 	return fmt.Errorf("unsupported target type: %s", target)
 }
