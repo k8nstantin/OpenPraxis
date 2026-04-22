@@ -402,10 +402,7 @@
         } else {
           linkedTasksHtml = `<div style="margin-bottom:16px;padding-top:12px;border-top:1px solid var(--border)">
             <div class="section-title">Executed Tasks</div>
-            <div class="empty-placeholder">
-              No tasks executed yet
-              <button class="btn-search manifest-create-task-btn" style="margin-left:8px;padding:4px 12px;font-size:11px">+ Create Task</button>
-            </div>
+            <div class="empty-placeholder">No tasks executed yet</div>
           </div>`;
         }
       } catch(e) {}
@@ -448,6 +445,7 @@
             ${product ? `<button id="manifest-toolbar-dag" class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(product.id)}','${esc(product.title)}')">&#x25C8; Product DAG</button>` : ''}
             ${statusToggleHtml}
           </div>
+          <div id="manifest-revisions-mount" style="margin-bottom:12px"></div>
           <!-- METADATA BAR -->
           <div class="stats-bar">
             <span>Tasks: <strong style="color:var(--text-primary)">${m.total_tasks || 0}</strong></span>
@@ -464,12 +462,10 @@
           ${linkedIdeasHtml}
           ${linkedTasksHtml}
           <div id="manifest-knobs-mount" style="margin-top:16px"></div>
-          <div id="manifest-revisions-mount" style="margin-top:16px"></div>
           <div id="manifest-comments-mount" style="margin-top:16px"></div>
           ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
-          <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
+          <div style="margin-bottom:4px">
             <span style="font-size:12px;color:var(--text-muted);font-weight:500">Spec / Content</span>
-            <button id="manifest-edit-content-btn" class="btn-search" style="padding:2px 10px;font-size:11px">Edit</button>
           </div>
           <div id="manifest-content-display" class="manifest-content">${esc(m.content)}</div>
           <div id="manifest-content-editor" style="display:none;margin-bottom:12px">
@@ -701,21 +697,25 @@
         });
       }
 
-      // Inline edit: Content (toggle editor)
-      const contentBtn = document.getElementById('manifest-edit-content-btn');
+      // Toolbar Edit → toggle the Spec/Content editor directly.
+      // The inline "Edit" button next to the Spec/Content heading was
+      // removed; the toolbar is the single entry point now.
       const contentDisplay = document.getElementById('manifest-content-display');
       const contentEditor = document.getElementById('manifest-content-editor');
-      if (contentBtn && contentDisplay && contentEditor) {
-        OL.onView(contentBtn, 'click', () => {
-          contentDisplay.style.display = 'none';
-          contentBtn.style.display = 'none';
-          contentEditor.style.display = 'block';
-        });
-        OL.onView(document.getElementById('manifest-content-cancel'), 'click', () => {
-          contentEditor.style.display = 'none';
-          contentDisplay.style.display = '';
-          contentBtn.style.display = '';
-        });
+      const openContentEditor = () => {
+        if (!contentDisplay || !contentEditor) return;
+        contentDisplay.style.display = 'none';
+        contentEditor.style.display = 'block';
+        const ta = document.getElementById('manifest-content-textarea');
+        if (ta) ta.focus();
+      };
+      const closeContentEditor = () => {
+        if (!contentDisplay || !contentEditor) return;
+        contentEditor.style.display = 'none';
+        contentDisplay.style.display = '';
+      };
+      if (contentDisplay && contentEditor) {
+        OL.onView(document.getElementById('manifest-content-cancel'), 'click', closeContentEditor);
         OL.onView(document.getElementById('manifest-content-save'), 'click', async () => {
           const val = document.getElementById('manifest-content-textarea').value;
           await fetch('/api/manifests/' + m.id, {
@@ -727,13 +727,8 @@
           OL.loadManifest(m.id);
         });
       }
-
-      // Toolbar: Edit → trigger the content editor toggle.
       const toolbarEdit = document.getElementById('manifest-toolbar-edit');
-      if (toolbarEdit) OL.onView(toolbarEdit, 'click', () => {
-        const btn = document.getElementById('manifest-edit-content-btn');
-        if (btn) btn.click();
-      });
+      if (toolbarEdit) OL.onView(toolbarEdit, 'click', openContentEditor);
 
       // Toolbar: + New Task → switch to tasks view, open the create form, prefill this manifest.
       const toolbarNewTask = document.getElementById('manifest-toolbar-new-task');
@@ -769,21 +764,6 @@
           OL.loadManifest(m.id);
         } catch (e) { alert('Link failed: ' + e.message); }
       });
-
-      // Create task button (when no tasks exist for this manifest)
-      const createTaskBtn = bodyEl.querySelector('.manifest-create-task-btn');
-      if (createTaskBtn) {
-        OL.onView(createTaskBtn, 'click', () => {
-          OL.switchView('tasks');
-          setTimeout(() => {
-            OL.showTaskCreateForm();
-            setTimeout(() => {
-              const sel = document.getElementById('tc-manifest-id');
-              if (sel) { sel.value = m.id; }
-            }, 100);
-          }, 300);
-        });
-      }
 
     } catch (e) {
       console.error('Load manifest failed:', e);
