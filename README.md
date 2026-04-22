@@ -12,27 +12,27 @@
 
 ```mermaid
 flowchart TB
-    Idea[/"<b>Idea</b><br/><i>captured concept</i>"/]:::idea --> P
+    Idea[/"<b>Idea</b><br/><i>captured concept</i>"/]:::idea -->|becomes| P
 
-    P(["<b>Product</b><br/><i>top-level spec</i>"]):::product
+    P(["<b>Product</b><br/><i>top-level spec</i>"]):::product -->|holds| MH([Manifests])
 
-    P --> M1["<b>Manifest A</b><br/><i>versioned spec</i>"]:::manifest
-    P --> M2["<b>Manifest B</b>"]:::manifest
-    P --> M3["<b>Manifest C</b>"]:::manifest
+    MH --- M1["<b>Manifest A</b><br/><i>versioned spec</i>"]:::manifest
+    MH --- M2["<b>Manifest B</b>"]:::manifest
+    MH --- M3["<b>Manifest C</b>"]:::manifest
     M1 -. depends_on .-> M2
     M2 -. depends_on .-> M3
 
-    M1 --> T1a[Task]:::task
-    M1 --> T1b[Task]:::task
-    M1 --> T1c[Task]:::task
-    M1 --> R1[Review<br/>Task]:::review
+    M1 -->|holds| T1a["Task<br/><i>atomic</i>"]:::task
+    M1 --- T1b["Task<br/><i>atomic</i>"]:::task
+    M1 --- T1c["Task<br/><i>atomic</i>"]:::task
+    M1 --- R1[Review<br/>Task]:::review
 
-    M2 --> T2a[Task]:::task
-    M2 --> T2b[Task]:::task
-    M2 --> R2[Review<br/>Task]:::review
+    M2 --- T2a["Task<br/><i>atomic</i>"]:::task
+    M2 --- T2b["Task<br/><i>atomic</i>"]:::task
+    M2 --- R2[Review<br/>Task]:::review
 
-    M3 --> T3a[Task]:::task
-    M3 --> R3[Review<br/>Task]:::review
+    M3 --- T3a["Task<br/><i>atomic</i>"]:::task
+    M3 --- R3[Review<br/>Task]:::review
 
     classDef idea fill:#1a1a2e,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
     classDef product fill:#4c1d95,stroke:#8b5cf6,stroke-width:3px,color:#fff
@@ -41,7 +41,7 @@ flowchart TB
     classDef review fill:#0a0a0f,stroke:#f59e0b,color:#f59e0b
 ```
 
-Idea at the top. Product beneath it as the spec root. Manifests hang off the Product as chained specs (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — multiple per Manifest, paired with a Review Task that auto-activates when its siblings complete. The Task is where an agent is actually dispatched; the Review Task is where the verdict is posted.
+**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests chain off the Product (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Every Manifest can pair Tasks with a Review Task that auto-activates to post the verdict.
 
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
