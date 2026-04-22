@@ -10,7 +10,22 @@
 
 OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs — and captures every tool call, every turn, every commit, and every dollar in a local SQLite store you can query months later.
 
-**Bill auditing for your AI spend.** The agent still calls cloud LLM APIs; the git push still hits GitHub. OpenPraxis is the meter between you and those bills — per-turn, per-task, per-manifest, per-product, per-day line items, attributed to the actual work that caused them. You pay the bill; you also see every item on it.
+### The question nobody's answering
+
+**Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI agents don't.** Who audits what an AI agent actually did? Who tracks which runs succeeded, which failed, which burned the budget without landing a commit, which wrote files nobody asked for? Without a layer that captures every action and keeps receipts, you are paying a vendor bill for work you cannot inspect.
+
+**OpenPraxis is that layer.** Every Bash, Read, Edit, Write, Grep, Web, and MCP call an agent makes lands in `actions` with full input, output, working directory, session id, and task id. Every run lands in `task_runs` with cost, turns, exit status, branch. Every completed task is audited by the watcher against git, build, and the manifest's deliverables. The record survives the agent, the session, and the machine.
+
+### Control, not surprise
+
+- **Know where the money is going.** Per-turn spend, attributed to the task, the manifest, the product, and the day. Drill from "today cost $16" to the exact tool call that spent the last dollar.
+- **Know what failed.** `failed` tasks surface their last run's stderr, the watcher's git / build / manifest findings, and the review task's `review_rejection` with root cause. Not "the agent got confused."
+- **Know what was wasted.** Completed tasks with `watcher_finding: Git gate observation — no commits on branch` are wasted spend you can now see. Review-task rejections that trace to upstream corruption post an `agent_note` on the upstream main so you find the root cause, not just the symptom.
+- **Know what was done.** Every commit landed under `openpraxis/<task-id>`. Every action searchable by keyword with highlighted snippets. "What did the agent do on Thursday?" is an SQL query, not a guessing game.
+
+### Bill auditing for AI spend
+
+The agent still calls cloud LLM APIs; the git push still hits GitHub. OpenPraxis is the meter between you and those bills — per-turn, per-task, per-manifest, per-product, per-day line items, attributed to the actual work that caused them. You pay the bill; you also see every item on it, **and you see which items produced no value.**
 
 Single Go binary. Control plane runs locally. Integrates with Anthropic / OpenAI / Google / Ollama LLM APIs, GitHub remotes, and Claude Code / Cursor / Codex agent runtimes. Peer-to-peer over LAN via mDNS + Automerge — no SaaS backend, no analytics phone-home.
 
