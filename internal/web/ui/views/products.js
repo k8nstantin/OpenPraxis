@@ -257,7 +257,6 @@
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
             <span style="color:var(--text-muted);font-size:12px;font-weight:500">Depends on</span>
             ${satisfiedPill}
-            <button id="product-add-dep-btn" class="btn-search" style="padding:2px 10px;font-size:11px">+ Add</button>
           </div>
           <div id="product-dep-pills" style="display:flex;flex-wrap:wrap;align-items:center;min-height:24px">
             ${outPills || '<span style="font-size:11px;color:var(--text-muted);font-style:italic">No dependencies</span>'}
@@ -328,18 +327,12 @@
             </div>`;
           }).join('');
           ideasHtml = `<div class="section-divider">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas <span class="sub-count">(${ideas.length})</span></span>
-              <button class="btn-search btn-xs" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
-            </div>
+            <div class="section-title">Linked Ideas <span class="sub-count">(${ideas.length})</span></div>
             <div class="bordered-container">${ideaRows}</div>
           </div>`;
         } else {
           ideasHtml = `<div class="section-divider">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-              <span style="font-size:13px;color:var(--text-primary);font-weight:600">Linked Ideas</span>
-              <button class="btn-search btn-xs" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
-            </div>
+            <div class="section-title">Linked Ideas</div>
             <div class="empty-placeholder">No ideas linked yet</div>
           </div>`;
         }
@@ -376,6 +369,7 @@
             <button class="btn-search btn-action" onclick="OL.createManifest({productId:'${esc(p.id)}'})">+ New Manifest</button>
             <button class="btn-search btn-action" style="background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
             <button class="btn-search btn-action" id="product-toolbar-dep">+ Depends On</button>
+            <button class="btn-search btn-action" onclick="OL.linkIdeaToProduct('${esc(p.id)}')">+ Link Idea</button>
             <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
             ${['draft','open','closed','archive'].map(s => {
               const active = p.status === s;
@@ -383,11 +377,11 @@
               return '<button class="product-status-btn btn-action" data-status="' + s + '" style="font-weight:600;text-transform:uppercase;border-radius:4px;cursor:pointer;border:1px solid ' + color + ';background:' + (active ? color : 'transparent') + ';color:' + (active ? 'var(--bg-primary)' : color) + ';opacity:' + (active ? '1' : '0.7') + '" onclick="OL.updateProductStatus(\'' + esc(p.id) + '\',\'' + s + '\')">' + s + '</button>';
             }).join('')}
           </div>
+          <div id="product-revisions-mount" style="margin-bottom:12px"></div>
           ${p.description ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${esc(p.description)}</div>` : ''}
           ${productDepsHtml}
           ${manifestsHtml}
           <div id="product-knobs-mount" style="margin-top:16px"></div>
-          <div id="product-revisions-mount" style="margin-top:16px"></div>
           <div id="product-comments-mount" style="margin-top:16px"></div>
           ${ideasHtml}
         </div>`;
@@ -437,36 +431,31 @@
         });
       });
 
-      // Toolbar "+ Depends On" — shortcut to the inline picker below.
-      const toolbarDepBtn = document.getElementById('product-toolbar-dep');
-      if (toolbarDepBtn) {
-        toolbarDepBtn.addEventListener('click', () => {
-          const inline = document.getElementById('product-add-dep-btn');
-          if (inline) {
-            inline.click();
-            inline.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        });
-      }
-
-      // Wire add-dep button + picker. 409 = cycle, 400 = self-loop/bad body,
-      // 404 = missing product. The server error surfaces inline in red.
-      const addDepBtn = document.getElementById('product-add-dep-btn');
+      // Toolbar "+ Depends On" — toggle the picker + scroll the dep
+      // section into view. Replaces the old inline "+ Add" button.
       const depPicker = document.getElementById('product-dep-picker');
       const depSelect = document.getElementById('product-dep-select');
       const depError = document.getElementById('product-dep-error');
+      const depSection = document.getElementById('product-deps-section');
       const showDepError = (msg) => {
         if (!depError) return;
         depError.textContent = msg;
         depError.style.display = msg ? 'block' : 'none';
       };
-      if (addDepBtn && depPicker && depSelect) {
-        addDepBtn.addEventListener('click', () => {
+      const toolbarDepBtn = document.getElementById('product-toolbar-dep');
+      if (toolbarDepBtn && depPicker && depSelect) {
+        toolbarDepBtn.addEventListener('click', () => {
           const visible = depPicker.style.display !== 'none';
           depPicker.style.display = visible ? 'none' : 'block';
           showDepError('');
-          if (!visible) depSelect.focus();
+          if (!visible) {
+            if (depSection) depSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setTimeout(() => depSelect.focus(), 200);
+          }
         });
+      }
+
+      if (depPicker && depSelect) {
         depSelect.addEventListener('change', async () => {
           const selectedId = depSelect.value;
           if (!selectedId) return;

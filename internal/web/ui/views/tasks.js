@@ -400,6 +400,8 @@
             ` : ''}
           </div>
 
+          <div id="task-revisions-mount" style="margin-bottom:12px"></div>
+
           <!-- SCHEDULE SECTION -->
           <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
             ${!isRunningOrPaused ? `
@@ -468,11 +470,10 @@
             </div>
           </div>
 
-          <!-- 4. INSTRUCTIONS (editable) -->
+          <!-- 4. INSTRUCTIONS (editable via toolbar Edit) -->
           <div id="task-instructions-section" style="margin-bottom:12px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="margin-bottom:6px">
               <span class="heading-sm">Instructions</span>
-              <button id="task-instructions-edit-btn" class="btn-search btn-xs" onclick="OL.editInstructions('${esc(t.id)}')">${t.description ? 'Edit' : 'Add Instructions'}</button>
             </div>
             <div id="task-instructions-display">
               ${t.description
@@ -490,9 +491,6 @@
 
           <!-- EXECUTION CONTROLS -->
           <div id="task-knobs-mount" style="margin-top:16px"></div>
-
-          <!-- DESCRIPTION HISTORY -->
-          <div id="task-revisions-mount" style="margin-top:16px"></div>
 
           <!-- COMMENTS -->
           <div id="task-comments-mount" style="margin-top:16px"></div>
