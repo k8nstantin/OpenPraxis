@@ -147,11 +147,21 @@
             '<button class="btn-copy" onclick="OL.copy(\'get idea ' + idea.marker + '\')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>' +
           '</div>' +
           '<div class="toolbar-row">' +
+            '<button id="idea-toolbar-edit" class="btn-search btn-action">&#9998; Edit</button>' +
             '<button class="btn-search btn-action promote-idea-btn">+ Create Manifest from Idea</button>' +
             '<button class="btn-dismiss btn-action" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
           '</div>' +
           '<div id="idea-revisions-mount" style="margin-bottom:12px"></div>' +
-          (idea.description ? '<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">' + esc(idea.description) + '</div>' : '') +
+          '<div id="idea-desc-display" style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">' +
+            (idea.description ? esc(idea.description) : '<span style="color:var(--text-muted);font-style:italic">No description — click Edit to add</span>') +
+          '</div>' +
+          '<div id="idea-desc-editor" style="display:none;margin-bottom:12px">' +
+            '<textarea id="idea-desc-textarea" class="conv-search" style="width:100%;min-height:240px;font-family:var(--font-mono);font-size:13px;padding:10px;resize:vertical;line-height:1.5">' + esc(idea.description || '') + '</textarea>' +
+            '<div style="margin-top:6px;display:flex;gap:8px">' +
+              '<button id="idea-desc-save" class="btn-search" style="padding:4px 16px;font-size:12px">Save</button>' +
+              '<button id="idea-desc-cancel" class="btn-dismiss" style="padding:4px 12px;font-size:12px">Cancel</button>' +
+            '</div>' +
+          '</div>' +
           linkedHtml +
           '<div id="idea-comments-mount" style="margin-top:16px"></div>' +
           '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)">' +
@@ -166,6 +176,36 @@
       var ideaCommentsMount = document.getElementById('idea-comments-mount');
       if (ideaCommentsMount && OL.renderCommentsSection) {
         OL.renderCommentsSection(ideaCommentsMount, { type: 'idea', id: idea.id });
+      }
+
+      // Toolbar Edit → toggle inline textarea; Save PUTs /api/ideas/:id
+      // which records a description_revision before the denormalised UPDATE.
+      var editBtn = document.getElementById('idea-toolbar-edit');
+      var descDisplay = document.getElementById('idea-desc-display');
+      var descEditor = document.getElementById('idea-desc-editor');
+      var descTextarea = document.getElementById('idea-desc-textarea');
+      if (editBtn && descDisplay && descEditor) {
+        OL.onView(editBtn, 'click', function() {
+          descDisplay.style.display = 'none';
+          descEditor.style.display = 'block';
+          if (descTextarea) descTextarea.focus();
+        });
+        OL.onView(document.getElementById('idea-desc-cancel'), 'click', function() {
+          descEditor.style.display = 'none';
+          descDisplay.style.display = '';
+          if (descTextarea) descTextarea.value = idea.description || '';
+        });
+        OL.onView(document.getElementById('idea-desc-save'), 'click', async function() {
+          var val = descTextarea ? descTextarea.value : '';
+          var resp = await fetch('/api/ideas/' + idea.id, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ description: val })
+          });
+          if (!resp.ok) { alert('Save failed: HTTP ' + resp.status); return; }
+          OL.loadIdeas();
+          OL.loadIdea(idea.id);
+        });
       }
 
       // Bind manifest links — click to navigate to manifest
