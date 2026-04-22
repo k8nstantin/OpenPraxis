@@ -7,6 +7,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/manifest"
 )
 
@@ -283,6 +284,14 @@ func (s *Server) handleManifestUpdate(ctx context.Context, req mcplib.CallToolRe
 	if status == "archive" && existing.Status != "archive" {
 		if err := s.node.ValidateArchiveManifest(existing.ID); err != nil {
 			return errResult("%v", err), nil
+		}
+	}
+	// Append a description_revision comment on content changes before the
+	// denormalised UPDATE (DV/M2). Manifest's spec text lives in Content;
+	// the short Description summary is not tracked for history in v1.
+	if argStr(a, "content") != "" {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetManifest, existing.ID, content, ""); err != nil {
+			return errResult("record revision: %v", err), nil
 		}
 	}
 	if err := s.node.Manifests.Update(existing.ID, title, desc, content, status, projectID, dependsOn, jiraRefs, tags); err != nil {

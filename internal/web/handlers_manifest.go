@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/manifest"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
@@ -191,6 +192,15 @@ func apiManifestUpdate(n *node.Node) http.HandlerFunc {
 		if status == "archive" && existing.Status != "archive" {
 			if err := n.ValidateArchiveManifest(existing.ID); err != nil {
 				http.Error(w, err.Error(), 409)
+				return
+			}
+		}
+		// Record append-only description_revision on content changes, before
+		// the denormalised UPDATE (DV/M2). Manifest's spec text lives in
+		// Content; Description is the short summary line and is not tracked.
+		if req.Content != nil {
+			if _, err := n.RecordDescriptionChange(r.Context(), comments.TargetManifest, existing.ID, content, ""); err != nil {
+				writeError(w, err.Error(), 500)
 				return
 			}
 		}

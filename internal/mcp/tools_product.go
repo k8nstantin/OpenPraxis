@@ -7,6 +7,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
 )
 
@@ -281,6 +282,13 @@ func (s *Server) handleProductUpdate(ctx context.Context, req mcplib.CallToolReq
 	if status == "archive" && existing.Status != "archive" {
 		if err := s.node.ValidateArchiveProduct(existing.ID); err != nil {
 			return errResult("%v", err), nil
+		}
+	}
+	// Append a description_revision comment on description changes before the
+	// denormalised UPDATE (DV/M2). The helper no-ops when desc is unchanged.
+	if argStr(a, "description") != "" {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetProduct, existing.ID, desc, ""); err != nil {
+			return errResult("record revision: %v", err), nil
 		}
 	}
 	if err := s.node.Products.Update(existing.ID, title, desc, status, tags); err != nil {
