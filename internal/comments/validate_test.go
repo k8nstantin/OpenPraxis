@@ -18,6 +18,9 @@ func TestValidateAdd(t *testing.T) {
 		{"ok product", TargetProduct, "p1", "alice", TypeUserNote, "hello", nil},
 		{"ok manifest", TargetManifest, "m1", "bob", TypeDecision, "decided", nil},
 		{"ok task", TargetTask, "t1", "carol", TypeAgentNote, "noted", nil},
+		{"ok product description_revision", TargetProduct, "p1", "alice", TypeDescriptionRevision, "v1 body", nil},
+		{"ok manifest description_revision", TargetManifest, "m1", "bob", TypeDescriptionRevision, "v1 body", nil},
+		{"ok task description_revision", TargetTask, "t1", "carol", TypeDescriptionRevision, "v1 body", nil},
 
 		{"unknown target type", TargetType("peer"), "id", "a", TypeUserNote, "body", ErrUnknownTargetType},
 		{"empty target type", TargetType(""), "id", "a", TypeUserNote, "body", ErrUnknownTargetType},
@@ -65,9 +68,9 @@ func TestRegistry(t *testing.T) {
 	reg := Registry()
 	all := AllCommentTypes()
 
-	// 6 original types + 2 review types added in #93.
-	if len(reg) != 8 {
-		t.Fatalf("Registry len = %d, want 8", len(reg))
+	// 6 original types + 2 review types added in #93 + description_revision (DV/M1).
+	if len(reg) != 9 {
+		t.Fatalf("Registry len = %d, want 9", len(reg))
 	}
 	if len(reg) != len(all) {
 		t.Fatalf("Registry (%d) and AllCommentTypes (%d) length mismatch", len(reg), len(all))

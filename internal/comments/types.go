@@ -18,6 +18,10 @@ const (
 	// off. Does NOT change the task status — approval is an input to
 	// manifest closure warnings, not a task-level transition.
 	TypeReviewApproval CommentType = "review_approval"
+	// TypeDescriptionRevision records an append-only edit of an entity's
+	// description / content / instructions. The latest revision comment
+	// is treated as the current text; earlier rows remain as history.
+	TypeDescriptionRevision CommentType = "description_revision"
 )
 
 // AllCommentTypes returns the canonical ordering of comment types used by
@@ -34,6 +38,7 @@ func AllCommentTypes() []CommentType {
 		TypeLink,
 		TypeReviewRejection,
 		TypeReviewApproval,
+		TypeDescriptionRevision,
 	}
 }
 
@@ -41,7 +46,8 @@ func IsValidCommentType(s string) bool {
 	switch CommentType(s) {
 	case TypeExecutionReview, TypeUserNote, TypeWatcherFinding,
 		TypeAgentNote, TypeDecision, TypeLink,
-		TypeReviewRejection, TypeReviewApproval:
+		TypeReviewRejection, TypeReviewApproval,
+		TypeDescriptionRevision:
 		return true
 	}
 	return false
@@ -107,6 +113,11 @@ func Registry() []CommentTypeInfo {
 			Type:        TypeReviewApproval,
 			Label:       "Review Approval",
 			Description: "Reviewer signed off a completed task; clears the needs-rework flag for manifest closure",
+		},
+		{
+			Type:        TypeDescriptionRevision,
+			Label:       "Description Revision",
+			Description: "Append-only edit of description / content / instructions. Latest revision is the current text.",
 		},
 	}
 }
