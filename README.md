@@ -12,6 +12,7 @@ OpenPraxis is the operating system between you and your coding agents. It manage
 
 ## Table of contents
 
+- [What's new (April 2026)](#whats-new-april-2026)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
@@ -26,8 +27,8 @@ OpenPraxis is the operating system between you and your coding agents. It manage
 - [Key Concepts](#key-concepts)
   - [Products](#products) · [Manifests (Specs)](#manifests-specs) · [Tasks (Autonomous Execution)](#tasks-autonomous-execution) · [Watcher (Independent Auditor)](#watcher-independent-auditor)
   - [Ideas](#ideas) · [Memories](#memories) · [Visceral Rules](#visceral-rules) · [Conversations](#conversations) · [Chat](#chat)
-- [Dashboard (16 Tabs)](#dashboard-16-tabs)
-- [MCP Tools (44+)](#mcp-tools-44)
+- [Dashboard (17 Tabs)](#dashboard-17-tabs)
+- [MCP Tools (55 as of 2026-04-22)](#mcp-tools-55-as-of-2026-04-22)
 - [Quick Start](#quick-start)
   - [Prerequisites](#prerequisites) · [Build and Run](#build-and-run) · [Connect to Claude Code](#connect-to-claude-code) · [Dashboard](#dashboard)
 - [Stats](#stats)
@@ -41,6 +42,34 @@ OpenPraxis is the operating system between you and your coding agents. It manage
 
 **Deeper references:**
 - [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
+
+## What's new (April 2026)
+
+Landed on main this week:
+
+**Reliability**
+- **Watcher is observer-only (#149).** Removed the gatekeeper path that was mutating task state + blocking `ActivateDependents` on gate failure. Audits still run; findings post as `watcher_finding` comments; the paired review task owns the verdict. Fixes the "ops-task with 0 commits auto-downgraded to failed" bug that stranded INT MySQL backup chains.
+- **Task `depends_on` display widened 8 → 14 chars (#145).** UUIDv7 tasks created in the same millisecond share an 8-char time prefix, so the old `task_get` output rendered every child as if it pointed at the same parent. Now unambiguous.
+- **Scheduler cleanup rule for cancelled recurring tasks.** `task_cancel` on a task with `schedule: 30m` is now durable: status flips to `cancelled`, schedule collapses to `once`, `next_run_at` clears, so the runner can't re-fire it. (Operational tooling, not a PR — directly applied.)
+
+**DAG renderer — one-and-done**
+- **Dagre layout (#158).** Deleted 80+ lines of hand-rolled column/row arithmetic + manual topo sort + per-manifest DFS. Replaced with `layout: { name: 'dagre', rankDir: 'TB', ... }`. Any DAG shape — linear chain, independent pairs, multi-parent fan-in, empty manifests — now renders correctly with no layout-specific code.
+- **Edges from real `depends_on` (#146, kept through #158).** Product → manifest (ownership), manifest → manifest (explicit deps), parent-task → child-task (`depends_on`), manifest → task (ownership for in-manifest roots).
+- **Local vendor bundle (#159).** Cytoscape + dagre + cytoscape-dagre pinned and served from `/vendor/`, not a CDN. Dashboard works offline; no silent break when jsdelivr hiccups.
+- **Extract + contract test (#160).** Diagram code moved out of the 900-line `products.js` into `views/product-dag.js`. Added `TestProductHierarchy_EmptyProduct / _LinearChain / _ParallelPairs` in `handlers_product_hierarchy_test.go` so the API contract dagre rides on is locked at build time.
+
+**Search**
+- **Keyword-first search for conversations + actions (#152).** New envelope response `{ items, total, offset, limit, has_more, semantic? }`. Infinite scroll appends pages. `<mark>`-highlighted snippets around the first literal match, 80 chars of context each side. Conversations get an optional "Related by meaning" semantic tail on page 0 (capped at 10, deduped). Actions stay keyword-only (already LIKE-based).
+
+**Execution controls**
+- **Model selector is an enum (#151).** `default_model` moved from free-form string to `KnobEnum` with the Claude family (`""` agent default, `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`). Dashboard renders as a `<select>`; typos rejected at validation.
+
+**Comments + target resolution**
+- **Short-marker target IDs resolve everywhere.** `comment_add` + HTTP comment endpoints accept 8–12 char markers or full UUIDs; both paths canonicalize via the entity stores before writing (PR #136, PR #139). Sweep migration for legacy short-marker orphans shipped as `openpraxis admin migrate-comment-orphans` (PR #141).
+- **`execution_review` enforcement (PR #118).** Task completion blocked unless the agent posted its post-run retrospective.
+
+**Branding**
+- **OpenPraxis mark (#161).** Sidebar glyph swapped for a transparent 256×256 PNG served from `/assets/`. Favicon + apple-touch-icon wired at the same path.
 
 ## See it in action
 
@@ -121,7 +150,7 @@ Every agent session is captured as a conversation:
 - **Semantic search** — 768-dim embeddings via Ollama. "Find the session where we fixed the sqlite busy_timeout bug" is a similarity query, not a filename search.
 - **Per-peer, per-session grouping** — every conversation is tagged with the peer that ran it, so multi-machine teams get one unified history.
 
-### Independent evaluation — three gates an agent can't override
+### Independent observer — three gates whose findings post as comments
 
 <p align="center">
   <img src="docs/images/watcher-audit-history.png" alt="Watcher audit history — 53 total audits, 24 passed, 29 failed, per-task verdict with git, build, and manifest checks" width="100%" />
@@ -129,13 +158,15 @@ Every agent session is captured as a conversation:
 
 The watcher is a **separate process** outside every agent session. After a task finishes, it runs three gates:
 
-1. **Git gate** — did the agent produce commits on the task branch? (Zero commits = instant fail. No "I did the work, I just didn't commit it" excuses.)
+1. **Git gate** — did the agent produce commits on the task branch? (Zero commits = observation flagged.)
 2. **Build gate** — does the code compile? (`go build ./...` here; configurable per language.)
 3. **Manifest gate** — were the deliverables addressed? (Parses the manifest markdown into a checklist, scores how many items were actually touched in the diff.)
 
-The screenshot shows 53 total audits, 24 passed, 29 failed, 45 % pass rate — and the **Nice-to-have: Polish** manifest's tasks all green on all three gates. A task marked "completed" by the agent runner gets **downgraded to failed** if any gate fails. Nothing an agent can say overrides the watcher.
+**As of 2026-04-22 the watcher is observer-only** (PR #149). Gate outcomes persist as `watcher_audits` rows and auto-post a `watcher_finding` comment on the task. The watcher **does not mutate task status** and **does not block downstream activation** — the paired review task (if any) is the sole decision point for the verdict.
 
-The three gates together enforce what an outside reviewer would check: code exists, code builds, code addresses the spec. Agents don't self-grade. **The watcher does.**
+Why the shift: ops-style tasks (SSH-dispatch, fire-and-forget infrastructure jobs) legitimately produce zero commits, and the earlier "zero commits = instant fail" behaviour kept downgrading those to `failed` and blocking their chained verify task. The three gates are still valuable **signals** — they still surface in the UI and in the audit history — but verdicts belong to the review task, which can see the live state on the remote target.
+
+The review task pattern: pair every main task with a `depends_on`-linked review task that auto-activates on completion, polls the real-world side effects, and posts `review_approval` or `review_rejection` as the canonical verdict.
 
 ### Hierarchical execution controls — budgets, turns, and agent knobs that inherit
 
@@ -258,14 +289,28 @@ Scheduled work units linked to manifests. The execution engine:
 5. Supports: dependency chains (`depends_on`), pause/resume (SIGSTOP/SIGCONT), max turns, recurring schedules
 6. On completion: watcher audit runs independently
 
-### Watcher (Independent Auditor)
-Server-side execution auditor. Runs **outside** the agent session — the agent has no visibility or control. Three gates on every completed task:
+### Watcher (Independent Observer)
+Server-side execution observer. Runs **outside** the agent session — the agent has no visibility or control. Three gates on every completed task:
 
-1. **Git Gate** — did the agent create commits on the task branch? (Zero commits = instant fail)
+1. **Git Gate** — did the agent create commits on the task branch?
 2. **Build Gate** — does the code compile? (`go build ./...`)
 3. **Manifest Gate** — were the deliverables addressed? (Scores deliverables found in diff)
 
-If any gate fails, the task is downgraded from "completed" to "failed" — the agent has no say in the verdict.
+**Observer-only (PR #149).** Each gate posts a `watcher_finding` comment on the task capturing the result. The watcher **never mutates task state** and **never blocks downstream `ActivateDependents`**. The paired review task (if any) is the sole decision point for `review_approval` / `review_rejection`. This decouples code-check gates from ops-task lifecycles that legitimately produce zero commits.
+
+### Reviews and Comments
+Every entity (product, manifest, task) carries a comment thread. Comment types are typed and discoverable via MCP:
+
+| Type | Purpose |
+|------|---------|
+| `agent_note` | Progress / observation during a run |
+| `execution_review` | Main-task post-run retrospective |
+| `review_approval` | Final verdict from a paired review task — success |
+| `review_rejection` | Final verdict from a paired review task — failure |
+| `watcher_finding` | Observer-posted gate result (watcher only) |
+| `user_note`, `decision`, `link` | Human-authored notes |
+
+Review agents post `agent_note` for progress and `review_approval` / `review_rejection` for verdicts — they never author `watcher_finding` (reserved for the observer).
 
 ### Ideas
 Capture product ideas, feature requests, bugs, and improvements with priority levels (low/medium/high/critical) and tags. Ideas link to manifests — trace which idea became which spec, and track from concept to execution.
@@ -296,40 +341,48 @@ Every agent session's tool calls and interactions are captured — searchable by
 ### Chat
 Multi-provider AI chat built into the dashboard. Supports Anthropic (Claude), Google (Gemini), OpenAI (GPT-4), and Ollama (local models) with streaming, tool use, vision, and extended thinking.
 
-## Dashboard (16 Tabs)
+## Dashboard (17 Tabs)
 
-| Tab | What it shows |
-|-----|---------------|
-| **Overview** | Running tasks, total cost, turns, session count, peer list |
-| **Memories** | Semantic search, path browser, memory tree, tiered content |
-| **Conversations** | All captured sessions, searchable by similarity |
-| **Actions** | Every tool call, searchable by tool name/input |
-| **Activity** | Real-time feed across all sessions and peers |
-| **Visceral** | Rules list, pattern detection, confirmation tracking |
-| **Compliance** | Amnesia (rule violations), delusions (factual errors) |
-| **Ideas** | Capture, prioritize, link to manifests |
-| **Products** | Interactive DAG (Cytoscape.js), cost aggregates, manifest chains |
-| **Manifests** | Specs with dependencies, linked tasks/ideas, version history |
-| **Tasks** | Status, dependency chains, run history, real-time output, pause/resume |
-| **Cost** | Daily/weekly trends, agent breakdown, spend forecasting |
-| **Watcher** | Audit results (git/build/manifest gates), pass/fail rates |
-| **Recall** | Soft-deleted items, restorable |
-| **Chat** | Multi-provider AI chat with model switching and thinking toggle |
-| **Settings** | Profile, agent integrations, chat provider config |
+Grouped in the sidebar under three headers — **Memory**, **Development**, **Network**.
 
-## MCP Tools (40+)
+| Tab | Group | What it shows |
+|-----|-------|---------------|
+| **Overview** | — | Running tasks, total cost, turns, session count, peer list |
+| **Visceral** | Memory | Rules list, pattern detection, confirmation tracking |
+| **Memories** | Memory | Semantic + keyword search, path browser, tiered content |
+| **Conversations** | Memory | Keyword-first paginated search with `<mark>` highlights + "Related by meaning" semantic tail on page 0 (PR #152); infinite scroll |
+| **Actions** | Memory | Every tool call, keyword search with snippet highlights + infinite scroll (PR #152) |
+| **Amnesia** | Memory | Agent sessions that skipped `visceral_rules` + `visceral_confirm` |
+| **Ideas** | Development | Capture, prioritize, link to manifests |
+| **Products** | Development | Interactive DAG (cytoscape + dagre, bundled locally), cost aggregates, manifest chains |
+| **Manifests** | Development | Specs with dependencies, linked tasks/ideas, version history, comment threads |
+| **Tasks** | Development | Status, dependency chains, run history, real-time output, pause/resume, comments, review verdicts |
+| **Chat** | Development | Multi-provider AI chat with model switching + thinking toggle |
+| **Delusions** | Development | Agent output that contradicts the manifest spec |
+| **Watcher** | Development | Audit history (git/build/manifest gates) — observer-only as of PR #149 |
+| **Peers** | Network | mDNS-discovered OpenPraxis instances on the LAN |
+| **Activity** | Network | Real-time feed across all sessions and peers |
+| **Recall** | Network | Soft-deleted items, restorable |
+| **Settings** | Network | Profile, agent integrations, chat provider config |
+
+Brand: the sidebar mark is now an image (PR #161) served from `/assets/openpraxis-icon.png` — also wired as the favicon + apple-touch-icon.
+
+## MCP Tools (55 as of 2026-04-22)
 
 | Category | Tools |
 |----------|-------|
 | **Memory** | `memory_store`, `memory_search`, `memory_recall`, `memory_list`, `memory_forget`, `memory_status`, `memory_peers` |
 | **Conversations** | `conversation_save`, `conversation_search`, `conversation_list`, `conversation_get` |
 | **Visceral** | `visceral_rules`, `visceral_confirm`, `visceral_set`, `visceral_remove` |
-| **Manifests** | `manifest_create`, `manifest_get`, `manifest_list`, `manifest_update`, `manifest_delete`, `manifest_search` |
-| **Products** | `product_create`, `product_get`, `product_list`, `product_update`, `product_delete` |
-| **Tasks** | `task_create`, `task_list`, `task_get`, `task_start`, `task_pause`, `task_resume`, `task_cancel`, `task_link_manifest`, `task_unlink_manifest` |
 | **Ideas** | `idea_add`, `idea_list`, `idea_update`, `link_idea_manifest`, `unlink_idea_manifest` |
+| **Products** | `product_create`, `product_get`, `product_list`, `product_update`, `product_delete`, `product_dep_add`, `product_dep_remove`, `product_dep_list` |
+| **Manifests** | `manifest_create`, `manifest_get`, `manifest_list`, `manifest_update`, `manifest_delete`, `manifest_search`, `manifest_dep_add`, `manifest_dep_remove`, `manifest_dep_list` |
+| **Tasks** | `task_create`, `task_list`, `task_get`, `task_start`, `task_pause`, `task_resume`, `task_cancel`, `task_approve`, `task_reject`, `task_link_manifest`, `task_unlink_manifest` |
 | **Markers** | `marker_flag`, `marker_list`, `marker_done` |
-| **Settings** | `settings_catalog`, `settings_get`, `settings_set`, `settings_resolve` (task/manifest/product/system scoped knobs with inheritance) |
+| **Comments** | `comment_add` — thread on any product/manifest/task; typed (`agent_note` / `execution_review` / `review_approval` / `review_rejection` / `watcher_finding` / `user_note` / `decision` / `link`); short-marker target IDs are auto-resolved to full UUIDs (PR #136) |
+| **Settings** | `settings_catalog`, `settings_get`, `settings_set`, `settings_resolve` — task → manifest → product → system inheritance with visceral-rule clamping |
+
+Comment-add and target-id resolvers now canonicalize short markers at both the MCP boundary (PR #136) and the HTTP boundary (PR #139), so agents and dashboards both hit the right row regardless of id form.
 
 ## Quick Start
 
@@ -370,29 +423,37 @@ Claude Code will spawn OpenPraxis as a subprocess. On first session, the agent r
 
 Open `http://localhost:8765`.
 
-## Stats
+## Stats (2026-04-22)
 
 | Metric | Count |
 |--------|-------|
-| Go source files | 78+ |
-| Go lines of code | ~18,000 |
-| Dashboard JS | ~6,000 lines (modular: api.js, tree.js, lifecycle.js, 16 view modules) |
-| MCP tools | 44+ |
-| REST API endpoints | 79+ |
-| SQLite tables | 32 |
-| Dashboard tabs | 16 |
+| Go source files | 150 |
+| Go lines of code | ~36,200 |
+| Dashboard JS | ~7,800 lines (19 view modules + core api.js, tree.js, lifecycle.js, task-status.js) |
+| Vendored JS libs | 3 — cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0 (served from `/vendor/`, PR #159) |
+| MCP tools | 55 |
+| HTTP routes | ~150 (REST, WebSocket, hook endpoint, MCP over streamable HTTP) |
+| Dashboard tabs | 17 |
+| Persistent tables | 23 primary + vec-search virtual tables |
+| Go test files | ~70, incl. contract tests for the product hierarchy DAG shapes (PR #160) |
 
 ## Database
 
-SQLite with WAL mode. Single file at `~/.openpraxis/data/memories.db`.
+SQLite with WAL mode (`_journal_mode=WAL&_busy_timeout=5000`, visceral rule #10). Single file at `~/.openpraxis/data/memories.db`.
 
-**Core:** `memories`, `conversations`, `manifests`, `tasks`, `task_runs`, `products`, `ideas`, `actions`, `sessions`
+**Core:** `memories`, `conversations` (+ `session_turns`), `manifests`, `tasks` (+ `task_runs`, `task_runtime_state`), `products`, `ideas`, `actions`, `sessions`, `chat_sessions`, `comments`, `markers`
+
+**Dependencies:** `product_dependencies`, `manifest_dependencies`, `task_dependency`
 
 **Compliance:** `amnesia`, `delusions`, `visceral_confirmations`, `watcher_audits`, `rule_patterns`
 
+**Costing:** `model_pricing` (calibrated per-run from actual cost)
+
+**Settings:** `settings` (task/manifest/product/system scopes, single table, resolver walks the chain)
+
 **Vector search:** `vec_memories`, `vec_conversations` (sqlite-vec extension, 768-dim cosine similarity)
 
-**Join tables:** `task_manifests`, `idea_manifest_links`, `task_runtime_state`
+**Join tables:** `task_manifests`, `idea_manifest_links`
 
 ## Project Structure
 
