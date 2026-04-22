@@ -6,9 +6,11 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-### The management layer for AI-driven software development.
+### DAG execution engine + management layer for AI-driven software development.
 
-**OpenPraxis turns AI-assisted development into a governed engineering function.** It attributes every cost unit spent to the spec that drove it, audits every completed task independently of the agent that did the work, compares agents on your real code, and forecasts the next run before it fires — so leadership can plan AI capacity like any other engineering resource, and engineers keep shipping without friction.
+**OpenPraxis orchestrates AI-assisted work as a directed acyclic graph.** Products (initiative-level specs) hold Manifests (detailed specs with deliverables), Manifests hold Tasks (scheduled units of work), Tasks hold Runs (individual execution attempts), Runs hold Actions (single tool calls) — with dependencies at every layer and a scheduler that respects them. Each Task dispatches to the best-fit agent (Claude Code, Cursor, Codex) in an isolated git worktree; the platform captures every action, audits the output independently of the agent, and attributes every cost unit back to the spec that drove it.
+
+**Cost control, quality audit, agent comparison, and forecasting are built on top of that execution graph** — they are outcomes of the engine, not separate tools bolted on.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — live spend vs daily budget, running tasks, tasks ranked by cost" width="100%" />
@@ -77,30 +79,42 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 ```
  Peer  (your machine, identified by UUID v7 + MAC fingerprint)
    │
-   ├──  Product            — an initiative / product line
-   │      │                  tags · status · cost rollup · DAG root
+   ├──  Product            [SPEC — initiative level]
+   │      │                  title · tags · status · cost rollup · DAG root
    │      │
-   │      ├──  Manifest    — a versioned spec, markdown with deliverables
+   │      ├──  Manifest    [SPEC — versioned markdown with deliverables]
    │      │      │           depends_on other manifests (build order)
    │      │      │           jira_refs · status · linked ideas · comments
    │      │      │
-   │      │      ├──  Task — a scheduled unit of work, executes an agent
+   │      │      ├──  Task [ATOMIC UNIT OF WORK — executes one agent]
    │      │      │     │    depends_on other tasks · schedule (once / 5m / at:)
    │      │      │     │    status, cost, turns, run_count, branch · comments
    │      │      │     │
-   │      │      │     ├──  Run — one execution attempt, captures agent I/O
-   │      │      │     │     │   started_at / completed_at · cost · exit code
+   │      │      │     ├──  Run     [ATOMIC UNIT OF EXECUTION — one attempt]
+   │      │      │     │     │         started_at / completed_at · cost · exit code
    │      │      │     │     │
-   │      │      │     │     └──  Action — one tool call (Bash, Read, Edit, …)
-   │      │      │     │           tool_name · tool_input · tool_response · cwd
+   │      │      │     │     └──  Action  [ATOMIC UNIT OF MEASUREMENT — one tool call]
+   │      │      │     │                    tool_name · tool_input · tool_response · cwd
    │      │      │
-   │      │      └──  Review Task — paired via depends_on, auto-activates
+   │      │      └──  Review Task [ATOMIC UNIT OF VERDICT — paired via depends_on]
+   │      │            auto-activates on parent completion
    │      │            posts review_approval / review_rejection on parent
    │      │
    │      └──  More manifests … chained by manifest depends_on
    │
    └──  More products …
 ```
+
+**The taxonomy at a glance:**
+
+| Level | What it is | Atomic? |
+|---|---|---|
+| **Product** | Initiative-level spec — the "what we're building" | No (container) |
+| **Manifest** | Versioned detailed spec with deliverables, depends_on, status | No (container) |
+| **Task** | Scheduled unit of work that dispatches one agent session | **Atomic unit of work** |
+| **Run** | One execution attempt of a task | **Atomic unit of execution** |
+| **Action** | One tool call made by the agent during a run | **Atomic unit of measurement** |
+| **Review Task** | A `depends_on`-paired Task that audits its parent's output | **Atomic unit of verdict** |
 
 ### Why a hierarchy
 
