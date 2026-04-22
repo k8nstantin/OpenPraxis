@@ -10,20 +10,34 @@
 
 OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs. Use it to **build products with AI** while tracking, at atomic granularity, both the **cost** of every action and the **quality** of every output — all captured in a local SQLite store you can query months later.
 
-### The question nobody's answering
+### Variable costs → predictable, by measurement
 
-**You are building products with AI agents. Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI-agent-driven development has none of that.** Who tracks the **cost** of every agent action? Who tracks the **quality** of every agent output? Who knows which runs succeeded, which failed, which burned cost without landing a commit, which wrote files nobody asked for? Without a layer that captures every action and scores every output, an AI-driven build is unmeasurable.
+**AI-agent coding is a variable-cost activity.** The same task fired twice can spend an order of magnitude different cost depending on which turn the agent got confused, which files it grepped, how many times the build failed. Without measurement, every fire is a gamble.
 
-**OpenPraxis is that layer.** Both dimensions — cost and quality — tracked at atomic granularity:
+OpenPraxis measures every run at the atomic level — every action, every turn, every dollar, attributed to its task, its manifest, its product, its agent runtime, its model. **That record is the dataset prediction rides on.** Historical spend distributions per model / per manifest shape / per agent runtime / per knob setting feed forward into:
+
+- **Pre-fire cost estimates** — know before you hit run what a task is likely to spend.
+- **Budget forecasts per manifest / product** — aggregate estimates into project-level expectations.
+- **Scope-decision signals** — *is this manifest worth firing today, or should we split it?*
+- **Self-calibrating caps** — `max_cost_usd` tuned from your actual history, not a guessed default.
+- **Variance alerts** — a run whose cost drifts two standard deviations from its historical distribution is a signal, not noise.
+
+*(Forecasting module is [drafted as a dedicated product](https://github.com/k8nstantin/OpenPraxis/issues?q=estimated+cost) — the data layer to power it is already live.)*
+
+### The question we're answering
+
+**You are building products with AI agents. Who tracks the cost of every agent action? Who tracks the quality of every agent output? Who knows which runs succeeded, which failed, which burned spend without landing a commit, which wrote files nobody asked for? Which agent is actually more efficient — Claude Code, Cursor, or Codex — and who compares them on real work, not benchmarks?**
+
+Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI-agent-driven development has had no equivalent. **OpenPraxis is it.** Both dimensions — cost and quality — tracked at atomic granularity from the moment the task fires:
 
 - **Cost.** Every Bash, Read, Edit, Write, Grep, Web, and MCP call an agent makes lands in `actions` with full input, output, working directory, session id, and task id. Every run lands in `task_runs` with `cost_usd` calibrated from real vendor invoices, turn count, token count, exit status, branch.
 - **Quality.** Every completed task is audited by the watcher against git commits, `go build`, and the manifest's deliverables. Every paired review task posts `review_approval` or `review_rejection` with root cause. Manifest-delusion detection flags agent output that contradicts the spec. Amnesia detection flags agents that skip the visceral-rule acknowledgement handshake.
 
-The record survives the agent, the session, and the machine.
+The record survives the agent, the session, and the machine. From it you answer questions that had no answer before: *"what did the agent actually do on Tuesday, what did that cost, did it work, and is it worth firing again?"*
 
 ### Control, not surprise
 
-- **Know at the atomic level what's executing — right now.** The hierarchy bottoms out at single tool calls. Task → Run → Action lets you zoom from "today cost $16" all the way down to the exact Bash invocation at 14:32 that burned $0.04 and exited 1. Live output streams on the task card; pause / stop / emergency-stop-all are one click away.
+- **Know at the atomic level what's executing — right now.** The hierarchy bottoms out at single tool calls. Task → Run → Action lets you zoom from "today's total cost" all the way down to the exact Bash invocation at 14:32 that burned some cost units and exited 1. Live output streams on the task card; pause / stop / emergency-stop-all are one click away.
 - **Know where the money is going.** Per-turn spend, attributed to the task, the manifest, the product, and the day. Every `task_run` carries `cost_usd`, token counts, turn count — calibrated from actual vendor invoices via the `model_pricing` table.
 - **Know what failed.** `failed` tasks surface their last run's stderr, the watcher's git / build / manifest findings, and the review task's `review_rejection` with root cause. Not "the agent got confused."
 - **Know what was wasted.** Completed tasks with `watcher_finding: Git gate observation — no commits on branch` are wasted spend you can now see. Review-task rejections that trace to upstream corruption post an `agent_note` on the upstream main so you find the root cause, not just the symptom.
@@ -35,9 +49,11 @@ The record doesn't expire. Every action, turn, cost, review verdict, and watcher
 
 - Which manifests consistently exceed `max_turns` → the spec is too vague; rewrite or split.
 - Which tool-call sequences precede `failed` runs → failure fingerprints the agent keeps walking into.
-- Which agents (Claude Code vs Cursor vs Codex) produce cleaner diffs per dollar for which manifest shapes → routing intelligence.
+- **Which agent is more efficient per cost unit, and which produces higher quality?** Claude Code vs Cursor vs Codex vs whichever agent you wire in next, measured on *your* manifests, your code, your build. Efficiency = cost per approved task. Quality = review-approval rate, watcher-finding counts, manifest-gate score, diff cleanliness. No benchmarks, no vendor bakeoff — just the record of every run you fired.
 - Which review rejections cluster by embedding similarity → systemic failure modes, not one-off bugs.
 - Which knob values (temperature, max_turns, reasoning_effort) correlate with approvals → settings calibration from your own data, not guesses.
+- What will the next fire of *this kind of task* cost? → cost distributions per model × manifest × agent become the prior that powers pre-fire estimates, budget forecasts, and scope-cut decisions.
+- **Should this manifest be routed to a cheap fast agent or an expensive careful one?** Historical approval rate × cost per shape answers it.
 
 Semantic search (768-dim embeddings via `sqlite-vec`) and keyword search with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)) both run over the full history so these questions stay cheap to ask months later.
 
@@ -128,7 +144,7 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 ### Why a hierarchy
 
 - **Organization matches reality.** Initiatives have specs. Specs have work items. Work items have runs. Runs have tool calls. The model holds all the way down.
-- **Aggregation is free.** Cost and turns roll up at every level with no manual bookkeeping — drill from _"my product cost me $12"_ → _"this manifest accounted for $8"_ → _"this one task is $6"_ → _"this one agent turn burned $3"_ → _"here's the exact prompt and tool call"._
+- **Aggregation is free.** Cost and turns roll up at every level with no manual bookkeeping — drill from _"the product cost X"_ → _"this manifest accounted for most of it"_ → _"this one task spent the bulk"_ → _"this one agent turn burned the peak"_ → _"here's the exact prompt and tool call that caused it"._
 - **Settings cascade.** 12 execution knobs resolve via `task → manifest → product → system`. Set `max_turns=100` once at the product, every task under it inherits. Override for one hard manifest. Override again for one risky task. The resolver walks the chain on every read.
 - **Dependencies at every layer.** Products depend on products. Manifests depend on manifests (build order). Tasks depend on tasks (run order + paired reviews). The same `depends_on` primitive powers all three — and the scheduler blocks dependents until prerequisites are terminal.
 - **Reviews ride the same chain.** The review-task pattern pairs every main task with a verify task via `depends_on`; when main completes, review auto-activates, polls real-world state, and posts the canonical verdict. No watcher can override it; no review agent can impersonate the watcher.
@@ -255,7 +271,7 @@ Every action row is stored and searchable forever. "What did the agent actually 
   </tr>
 </table>
 
-Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns aggregate at every level. Drill from "my product cost me $12" → "this manifest accounted for $8" → "this one task is $6" → "this one agent turn burned $3" → "here's the exact prompt and tool call."
+Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns aggregate at every level. Drill from _"the product cost X"_ → _"this manifest accounted for most of it"_ → _"this one task spent the bulk"_ → _"this one agent turn burned the peak"_ → _"here's the exact prompt and tool call."_
 
 ### Visualize the plan — interactive DAG, status-colored
 
