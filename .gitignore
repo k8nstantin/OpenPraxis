@@ -40,3 +40,4 @@ mobile/package-lock.json
 
 # Per-task worktrees created by the runner
 .openpraxis-work/
+openpraxis-darwin-arm64
