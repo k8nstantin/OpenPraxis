@@ -56,6 +56,13 @@ func createEntityTables(t *testing.T, db *sql.DB) {
 			updated_at TEXT NOT NULL DEFAULT '',
 			deleted_at TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE ideas (
+			id TEXT PRIMARY KEY, title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			source_node TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT '',
+			deleted_at TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 	for _, s := range schemas {
 		if _, err := db.Exec(s); err != nil {

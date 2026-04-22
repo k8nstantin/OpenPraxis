@@ -19,11 +19,13 @@ type BackfillReport struct {
 	ManifestsSkipped  int
 	TasksSeeded       int
 	TasksSkipped      int
+	IdeasSeeded       int
+	IdeasSkipped      int
 }
 
 // Total returns the total number of rows that would be (or were) inserted.
 func (r BackfillReport) Total() int {
-	return r.ProductsSeeded + r.ManifestsSeeded + r.TasksSeeded
+	return r.ProductsSeeded + r.ManifestsSeeded + r.TasksSeeded + r.IdeasSeeded
 }
 
 // BackfillDescriptionRevisions seeds one description_revision comment per
@@ -101,6 +103,25 @@ func BackfillDescriptionRevisions(ctx context.Context, db *sql.DB, apply bool) (
 		}
 	}
 
+	// Ideas (added when idea was promoted to a full DV target type —
+	// missing from the original DV/M1 backfill because ideas weren't
+	// in scope at that time).
+	ideaRows, err := queryBackfillIdeas(ctx, db)
+	if err != nil {
+		return rep, fmt.Errorf("query ideas: %w", err)
+	}
+	for _, r := range ideaRows {
+		ok, err := seedRevision(ctx, db, apply, "idea", r.id, r.author, r.body, r.updatedStr)
+		if err != nil {
+			return rep, err
+		}
+		if ok {
+			rep.IdeasSeeded++
+		} else {
+			rep.IdeasSkipped++
+		}
+	}
+
 	return rep, nil
 }
 
@@ -143,6 +164,19 @@ func queryBackfillTasks(ctx context.Context, db *sql.DB) ([]backfillRow, error) 
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, COALESCE(source_node, ''), COALESCE(description, ''), COALESCE(updated_at, '')
 		FROM tasks
+		WHERE COALESCE(deleted_at, '') = ''
+		  AND COALESCE(description, '') <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanBackfillRows(rows)
+}
+
+func queryBackfillIdeas(ctx context.Context, db *sql.DB) ([]backfillRow, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, COALESCE(source_node, ''), COALESCE(description, ''), COALESCE(updated_at, '')
+		FROM ideas
 		WHERE COALESCE(deleted_at, '') = ''
 		  AND COALESCE(description, '') <> ''`)
 	if err != nil {
