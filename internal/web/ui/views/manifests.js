@@ -340,7 +340,6 @@
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
             <span style="color:var(--text-muted);font-size:12px;font-weight:500">Depends on</span>
             ${satisfiedPill}
-            <button id="manifest-add-dep-btn" class="btn-search" style="padding:2px 10px;font-size:11px">+ Add</button>
           </div>
           <div id="manifest-dep-pills" style="display:flex;flex-wrap:wrap;align-items:center;min-height:24px">
             ${outPills || '<span style="font-size:11px;color:var(--text-muted);font-style:italic">No dependencies</span>'}
@@ -436,9 +435,18 @@
           </div>
           <div class="manifest-meta">
             <span class="session-uuid" style="font-size:14px">${esc(m.marker)}</span>
-            <div style="display:inline-flex;gap:4px;margin:0 8px">${statusToggleHtml}</div>
             <span style="font-size:12px;color:var(--text-muted)">v${m.version}</span>
             <span style="font-size:12px;color:var(--text-muted)">by ${esc(m.author)}</span>
+            ${jira ? `<span style="font-size:12px;color:var(--text-muted)">Jira: ${jira}</span>` : ''}
+          </div>
+          <!-- TOP TOOLBAR — single row for every action on the manifest detail panel -->
+          <div class="toolbar-row">
+            <button id="manifest-toolbar-edit" class="btn-search btn-action">&#9998; Edit</button>
+            <button id="manifest-toolbar-new-task" class="btn-search btn-action">+ New Task</button>
+            <button id="manifest-toolbar-link-task" class="btn-search btn-action" style="background:var(--bg-input)">+ Link Task</button>
+            <button id="manifest-add-dep-btn" class="btn-search btn-action">+ Dep</button>
+            ${product ? `<button id="manifest-toolbar-dag" class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(product.id)}','${esc(product.title)}')">&#x25C8; Product DAG</button>` : ''}
+            ${statusToggleHtml}
           </div>
           <!-- METADATA BAR -->
           <div class="stats-bar">
@@ -457,7 +465,6 @@
           ${linkedTasksHtml}
           <div id="manifest-knobs-mount" style="margin-top:16px"></div>
           <div id="manifest-comments-mount" style="margin-top:16px"></div>
-          ${jira ? `<div style="margin-bottom:12px">Jira: ${jira}</div>` : ''}
           ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
             <span style="font-size:12px;color:var(--text-muted);font-weight:500">Spec / Content</span>
@@ -714,6 +721,48 @@
           OL.loadManifest(m.id);
         });
       }
+
+      // Toolbar: Edit → trigger the content editor toggle.
+      const toolbarEdit = document.getElementById('manifest-toolbar-edit');
+      if (toolbarEdit) OL.onView(toolbarEdit, 'click', () => {
+        const btn = document.getElementById('manifest-edit-content-btn');
+        if (btn) btn.click();
+      });
+
+      // Toolbar: + New Task → switch to tasks view, open the create form, prefill this manifest.
+      const toolbarNewTask = document.getElementById('manifest-toolbar-new-task');
+      if (toolbarNewTask) OL.onView(toolbarNewTask, 'click', () => {
+        OL.switchView('tasks');
+        setTimeout(() => {
+          if (OL.showTaskCreateForm) OL.showTaskCreateForm();
+          setTimeout(() => {
+            const sel = document.getElementById('tc-manifest-id');
+            if (sel) sel.value = m.id;
+          }, 100);
+        }, 300);
+      });
+
+      // Toolbar: + Link Task → pick an existing (standalone or differently-linked) task and
+      // PUT its manifest_id to this manifest. Uses /api/tasks for the list.
+      const toolbarLinkTask = document.getElementById('manifest-toolbar-link-task');
+      if (toolbarLinkTask) OL.onView(toolbarLinkTask, 'click', async () => {
+        try {
+          const allTasks = await fetchJSON('/api/tasks');
+          const candidates = (allTasks || []).filter(t => t.manifest_id !== m.id);
+          if (!candidates.length) { alert('No tasks available to link'); return; }
+          const pick = prompt('Marker of task to link to this manifest:\n\n' +
+            candidates.slice(0, 40).map(t => `${t.marker}  ${t.title}  [${t.status}]`).join('\n'));
+          if (!pick) return;
+          const task = candidates.find(t => t.marker === pick.trim() || t.id === pick.trim());
+          if (!task) { alert('No matching task'); return; }
+          await fetchJSON('/api/tasks/' + task.id, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({manifest_id: m.id})
+          });
+          OL.loadManifest(m.id);
+        } catch (e) { alert('Link failed: ' + e.message); }
+      });
 
       // Create task button (when no tasks exist for this manifest)
       const createTaskBtn = bodyEl.querySelector('.manifest-create-task-btn');

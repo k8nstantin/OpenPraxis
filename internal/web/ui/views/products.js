@@ -370,23 +370,20 @@
             <span>Created: ${new Date(p.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(p.updated_at).toLocaleString()}</span>
           </div>
-          <!-- CONTROLS -->
-          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-            <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="OL.editProduct('${esc(p.id)}')">&#9998; Edit</button>
-            <button class="btn-search" style="font-size:11px;padding:4px 12px" onclick="OL.createManifest({productId:'${esc(p.id)}'})">+ New Manifest</button>
-            <button class="btn-search" style="font-size:11px;padding:4px 12px;background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
+          <!-- TOP TOOLBAR — single row for every action on the product detail panel -->
+          <div class="toolbar-row">
+            <button class="btn-search btn-action" onclick="OL.editProduct('${esc(p.id)}')">&#9998; Edit</button>
+            <button class="btn-search btn-action" onclick="OL.createManifest({productId:'${esc(p.id)}'})">+ New Manifest</button>
+            <button class="btn-search btn-action" style="background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
+            <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
             ${['draft','open','closed','archive'].map(s => {
               const active = p.status === s;
               const color = s === 'open' ? 'var(--green)' : s === 'closed' ? 'var(--text-muted)' : s === 'archive' ? 'var(--red)' : 'var(--yellow)';
-              return '<button class="product-status-btn" data-status="' + s + '" style="padding:4px 12px;font-size:11px;font-weight:600;text-transform:uppercase;border-radius:4px;cursor:pointer;border:1px solid ' + color + ';background:' + (active ? color : 'transparent') + ';color:' + (active ? 'var(--bg-primary)' : color) + ';opacity:' + (active ? '1' : '0.7') + '" onclick="OL.updateProductStatus(\'' + esc(p.id) + '\',\'' + s + '\')">' + s + '</button>';
+              return '<button class="product-status-btn btn-action" data-status="' + s + '" style="font-weight:600;text-transform:uppercase;border-radius:4px;cursor:pointer;border:1px solid ' + color + ';background:' + (active ? color : 'transparent') + ';color:' + (active ? 'var(--bg-primary)' : color) + ';opacity:' + (active ? '1' : '0.7') + '" onclick="OL.updateProductStatus(\'' + esc(p.id) + '\',\'' + s + '\')">' + s + '</button>';
             }).join('')}
           </div>
           ${p.description ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${esc(p.description)}</div>` : ''}
           ${productDepsHtml}
-          <!-- DIAGRAM BUTTON -->
-          <div style="margin-bottom:12px">
-            <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
-          </div>
           ${manifestsHtml}
           <div id="product-knobs-mount" style="margin-top:16px"></div>
           <div id="product-comments-mount" style="margin-top:16px"></div>

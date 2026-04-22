@@ -1281,6 +1281,9 @@ mark {
 .btn-md { font-size: 12px; padding: 6px 14px; }
 .btn-action { font-size: 12px; padding: 6px 16px; }
 
+/* === Single top toolbar for detail panels (product / manifest / task) === */
+.toolbar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+
 /* === Execution Controls (knobs) — shared component rendered by OL.renderKnobSection === */
 .knob-section { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
 .knob-section-title { font-weight: 600; margin-bottom: 12px; color: var(--text-primary); font-size: 13px; }
