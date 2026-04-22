@@ -75,9 +75,9 @@ body {
 }
 
 .brand-icon {
-  /* Was a unicode glyph (&#x2B21;); now the Dedomena mark served from
-     /assets/. Sized to fit the 20px-padded sidebar header comfortably;
-     object-fit preserves the transparent background in the PNG. */
+  /* Was a unicode glyph (&#x2B21;); now the OpenPraxis mark served from
+     /assets/openpraxis-icon.png. Sized to fit the 20px-padded sidebar
+     header comfortably; object-fit preserves the transparent background. */
   width: 32px;
   height: 32px;
   object-fit: contain;
