@@ -19,8 +19,6 @@ flowchart TB
     MH --- M1["<b>Manifest A</b><br/><i>versioned spec</i>"]:::manifest
     MH --- M2["<b>Manifest B</b>"]:::manifest
     MH --- M3["<b>Manifest C</b>"]:::manifest
-    M1 -. depends_on .-> M2
-    M2 -. depends_on .-> M3
 
     M1 -->|holds| T1a["Task<br/><i>atomic</i>"]:::task
     M1 --- T1b["Task<br/><i>atomic</i>"]:::task
@@ -44,7 +42,9 @@ flowchart TB
     classDef review fill:#0a0a0f,stroke:#f59e0b,color:#f59e0b
 ```
 
-**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)* → *Review Task*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests chain off the Product (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Each Task pairs with its own Review Task, chained via `depends_on`: when the parent Task completes, the Review Task auto-activates, inspects the real-world side effects, and posts `review_approval` or `review_rejection` on the parent. The watcher's gate findings surface as comments; the Review Task owns the verdict.
+**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)* → *Review Task*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests hang off the Product as independent specs — they do **not** depend on each other by default; each Manifest is its own fireable unit. Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Each Task pairs with its own Review Task, chained via `depends_on`: when the parent Task completes, the Review Task auto-activates, inspects the real-world side effects, and posts `review_approval` or `review_rejection` on the parent. The watcher's gate findings surface as comments; the Review Task owns the verdict.
+
+*(Manifest-to-manifest and product-to-product `depends_on` dependencies are supported in the model — see [Workflow Engine reference](docs/workflow-engine.md) — but the primary pattern keeps Manifests independent. Complex cross-manifest coordination becomes useful as agents mature.)*
 
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
@@ -54,7 +54,7 @@ flowchart TB
 
 ### Features
 
-- **End-to-end product build graph.** One Product, many chained Manifests (build-order dependencies), many chained Tasks per Manifest (execution-order + paired reviews). The graph plans, dispatches, audits, and costs every step from initiative spec to merged commit. IDE agents, orchestration SDKs, and observability proxies each cover a slice; OpenPraxis owns the whole chain. [Detailed comparison →](docs/compared-to-ai-agent-tools.md)
+- **End-to-end product build graph.** One Product, many independent Manifests (fire each on its own), many Tasks per Manifest with paired Review Tasks chained via `depends_on`. The graph plans, dispatches, audits, and costs every step from initiative spec to merged commit. IDE agents, orchestration SDKs, and observability proxies each cover a slice; OpenPraxis owns the whole chain. [Detailed comparison →](docs/compared-to-ai-agent-tools.md)
 - **Line-item cost attribution.** Every cost unit spent attributed to a task, a spec, a product, a day, and the authorizing policy.
 - **Pre-fire cost forecasting.** Predict what the next run, manifest, or sprint will cost from your actual history, per model, per agent, per spec shape.
 - **Independent quality audit.** Every completed task audited against spec, build, and diff by a separate watcher; paired review tasks post the final verdict.
