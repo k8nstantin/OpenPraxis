@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 
@@ -223,6 +224,14 @@ func apiTaskUpdate(n *node.Node) http.HandlerFunc {
 				"value", *req.MaxTurns,
 				"successor", "PUT /api/tasks/:id/settings",
 				"retired_in", "M4-T14")
+		}
+		// Record append-only description_revision on instructions changes
+		// before the UPDATE, so edit history is preserved (DV/M2).
+		if req.Description != nil {
+			if _, err := n.RecordDescriptionChange(r.Context(), comments.TargetTask, id, *req.Description, ""); err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
 		}
 		t, err := n.Tasks.Update(id, req.Title, req.Description)
 		if err != nil {

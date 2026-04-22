@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
 
@@ -150,6 +151,15 @@ func apiProductUpdate(n *node.Node) http.HandlerFunc {
 		if status == "archive" && existing.Status != "archive" {
 			if err := n.ValidateArchiveProduct(existing.ID); err != nil {
 				http.Error(w, err.Error(), 409)
+				return
+			}
+		}
+		// Record an append-only description_revision comment BEFORE the
+		// denormalised UPDATE so edit history is preserved. No-op when
+		// description unchanged (DV/M2).
+		if req.Description != nil {
+			if _, err := n.RecordDescriptionChange(r.Context(), comments.TargetProduct, existing.ID, description, ""); err != nil {
+				http.Error(w, err.Error(), 500)
 				return
 			}
 		}
