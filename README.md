@@ -8,13 +8,18 @@
 
 ### Control plane for agentic software development.
 
-OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs — and captures every tool call, every turn, every commit, and every dollar in a local SQLite store you can query months later.
+OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs. Use it to **build products with AI** while tracking, at atomic granularity, both the **cost** of every action and the **quality** of every output — all captured in a local SQLite store you can query months later.
 
 ### The question nobody's answering
 
-**Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI agents don't.** Who audits what an AI agent actually did? Who tracks which runs succeeded, which failed, which burned the budget without landing a commit, which wrote files nobody asked for? Without a layer that captures every action and keeps receipts, you are paying a vendor bill for work you cannot inspect.
+**You are building products with AI agents. Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI-agent-driven development has none of that.** Who tracks the **cost** of every agent action? Who tracks the **quality** of every agent output? Who knows which runs succeeded, which failed, which burned cost without landing a commit, which wrote files nobody asked for? Without a layer that captures every action and scores every output, an AI-driven build is unmeasurable.
 
-**OpenPraxis is that layer.** Every Bash, Read, Edit, Write, Grep, Web, and MCP call an agent makes lands in `actions` with full input, output, working directory, session id, and task id. Every run lands in `task_runs` with cost, turns, exit status, branch. Every completed task is audited by the watcher against git, build, and the manifest's deliverables. The record survives the agent, the session, and the machine.
+**OpenPraxis is that layer.** Both dimensions — cost and quality — tracked at atomic granularity:
+
+- **Cost.** Every Bash, Read, Edit, Write, Grep, Web, and MCP call an agent makes lands in `actions` with full input, output, working directory, session id, and task id. Every run lands in `task_runs` with `cost_usd` calibrated from real vendor invoices, turn count, token count, exit status, branch.
+- **Quality.** Every completed task is audited by the watcher against git commits, `go build`, and the manifest's deliverables. Every paired review task posts `review_approval` or `review_rejection` with root cause. Manifest-delusion detection flags agent output that contradicts the spec. Amnesia detection flags agents that skip the visceral-rule acknowledgement handshake.
+
+The record survives the agent, the session, and the machine.
 
 ### Control, not surprise
 
@@ -36,9 +41,18 @@ The record doesn't expire. Every action, turn, cost, review verdict, and watcher
 
 Semantic search (768-dim embeddings via `sqlite-vec`) and keyword search with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)) both run over the full history so these questions stay cheap to ask months later.
 
-### Bill auditing for AI spend
+### What OpenPraxis does
 
-The agent still calls cloud LLM APIs; the git push still hits GitHub. OpenPraxis is the meter between you and those bills — per-turn, per-task, per-manifest, per-product, per-day line items, attributed to the actual work that caused them. You pay the bill; you also see every item on it, **and you see which items produced no value.**
+One platform, several responsibilities. Cost tracking is **one of them**, not the headline:
+
+- **Orchestrates work.** Products → manifests → tasks, with dependencies at every layer and a scheduler that respects them.
+- **Spawns agents.** Claude Code / Cursor / Codex subprocesses in isolated git worktrees off fresh `origin/main`, with manifest spec + visceral rules + relevant memories injected.
+- **Captures everything.** Every tool call → `actions`. Every run → `task_runs`. Every session → `conversations` + `session_turns`. Every decision → `memories`.
+- **Audits independently.** Watcher runs git / build / manifest gates; paired review task posts `review_approval` or `review_rejection`.
+- **Enforces rules.** Visceral rules non-negotiable per session; amnesia detection for agents that skip the acknowledgement handshake.
+- **Tracks costs at the atomic level.** Per-turn, per-action — calibrated from actual vendor invoices via `model_pricing`. Rolls up to task, manifest, product, day. Not a monthly summary; a per-tool-call line item.
+- **Remembers across sessions.** 768-dim embeddings over memories / conversations / actions; semantic and keyword search.
+- **Syncs across machines.** mDNS + Automerge CRDT replication of memories, conversations, manifests, and rules between LAN peers.
 
 Single Go binary. Control plane runs locally. Integrates with Anthropic / OpenAI / Google / Ollama LLM APIs, GitHub remotes, and Claude Code / Cursor / Codex agent runtimes. Peer-to-peer over LAN via mDNS + Automerge — no SaaS backend, no analytics phone-home.
 
@@ -60,7 +74,7 @@ Single Go binary. Control plane runs locally. Integrates with Anthropic / OpenAI
 
 **If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
 
-**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to justify the AI bill, defend the merges, and find out what the agent actually did on Tuesday.
+**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
 
 OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
 
@@ -193,9 +207,9 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 
 ## See it in action
 
-Most agent tools hand you a black box: you push "run", hope for the best, and find out what happened when the monthly bill lands. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and has the final say on "done."
+Most agent tools hand you a black box: you push "run", hope for the best, and reconstruct what happened from a log scroll. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and posts findings the agent cannot delete.
 
-The result is cost control by construction — you set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+The result is cost and quality control by construction — you set a daily budget, you see spend accrue against it live, the watcher flags every failed gate, and runaway sessions can't hide behind a finished status.
 
 ### Dashboard — cost today vs. budget, tasks ranked by spend
 
