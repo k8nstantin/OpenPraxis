@@ -65,6 +65,7 @@ Safe to re-run — the INSERT is guarded so a second invocation writes zero.`,
 		fmt.Printf("  products:  %s %d, skipped %d (already had a revision)\n", label, rep.ProductsSeeded, rep.ProductsSkipped)
 		fmt.Printf("  manifests: %s %d, skipped %d\n", label, rep.ManifestsSeeded, rep.ManifestsSkipped)
 		fmt.Printf("  tasks:     %s %d, skipped %d\n", label, rep.TasksSeeded, rep.TasksSkipped)
+		fmt.Printf("  ideas:     %s %d, skipped %d\n", label, rep.IdeasSeeded, rep.IdeasSkipped)
 		fmt.Printf("  total:     %s %d\n", label, rep.Total())
 		if !adminApply {
 			fmt.Println("\n(dry run — re-run with --apply to write rows)")
