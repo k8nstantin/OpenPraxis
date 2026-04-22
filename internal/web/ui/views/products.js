@@ -600,33 +600,47 @@
           }
         }
 
-        // Lay tasks out vertically in DB order (roots first, then their
-        // children), but draw edges from actual depends_on values — not
-        // from vertical position. The prior renderer assumed every manifest
-        // held a single linear chain and drew edges taskOrder[i-1] → taskOrder[i]
-        // purely by index, which painted N independent pairs as one fake chain.
+        // Lay tasks out vertically by walking depends_on chains depth-first
+        // from each root, so a linear chain of N tasks renders in chain
+        // order and edges never skip rows. Edges themselves come from
+        // actual depends_on values (not vertical index) so independent
+        // pairs within the same manifest still render as short parallel
+        // chains rather than one fake long one.
+        //
+        // The prior pass-per-root layout only placed a root and its
+        // immediate children, dumping deeper descendants into a safety-net
+        // in API-return order. On a 12-task linear chain that produced
+        // arrows jumping row 1 → row 11 → row 2 (the "every which where"
+        // complaint). DFS fixes that.
         var taskMap = {};
         tasks.forEach(function(t) { taskMap[t.id] = t; });
 
-        // Order: roots first (no depends_on, or depends_on outside this manifest),
-        // then each root's in-manifest children right below it.
-        var taskOrder = [];
-        var placed = {};
+        var childrenOf = {};
         tasks.forEach(function(t) {
-          if (placed[t.id]) return;
-          if (!t.depends_on || !taskMap[t.depends_on]) {
-            taskOrder.push(t);
-            placed[t.id] = true;
-            tasks.forEach(function(c) {
-              if (!placed[c.id] && c.depends_on === t.id) {
-                taskOrder.push(c);
-                placed[c.id] = true;
-              }
-            });
+          if (t.depends_on && taskMap[t.depends_on]) {
+            (childrenOf[t.depends_on] = childrenOf[t.depends_on] || []).push(t);
           }
         });
-        // Safety net: any stragglers (shouldn't happen, but keep layout stable).
-        tasks.forEach(function(t) { if (!placed[t.id]) { taskOrder.push(t); placed[t.id] = true; } });
+
+        var taskOrder = [];
+        var placed = {};
+        function walkDown(t) {
+          if (placed[t.id]) return;
+          taskOrder.push(t);
+          placed[t.id] = true;
+          (childrenOf[t.id] || []).forEach(walkDown);
+        }
+
+        // Roots first (no in-manifest parent), walk each chain to the bottom.
+        tasks.forEach(function(t) {
+          if (!t.depends_on || !taskMap[t.depends_on]) {
+            walkDown(t);
+          }
+        });
+        // Safety net: any task whose parent is inside the manifest but got
+        // skipped by the root walk (shouldn't happen with a clean DAG, but
+        // keeps rendering stable if state is weird).
+        tasks.forEach(function(t) { if (!placed[t.id]) walkDown(t); });
 
         for (var ti = 0; ti < taskOrder.length; ti++) {
           var t = taskOrder[ti];
