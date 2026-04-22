@@ -24,15 +24,18 @@ flowchart TB
 
     M1 -->|holds| T1a["Task<br/><i>atomic</i>"]:::task
     M1 --- T1b["Task<br/><i>atomic</i>"]:::task
-    M1 --- T1c["Task<br/><i>atomic</i>"]:::task
-    M1 --- R1[Review<br/>Task]:::review
+    T1a -. depends_on .-> R1a[Review<br/>Task]:::review
+    T1b -. depends_on .-> R1b[Review<br/>Task]:::review
 
     M2 --- T2a["Task<br/><i>atomic</i>"]:::task
     M2 --- T2b["Task<br/><i>atomic</i>"]:::task
-    M2 --- R2[Review<br/>Task]:::review
+    T2a -. depends_on .-> R2a[Review<br/>Task]:::review
+    T2b -. depends_on .-> R2b[Review<br/>Task]:::review
 
     M3 --- T3a["Task<br/><i>atomic</i>"]:::task
-    M3 --- R3[Review<br/>Task]:::review
+    M3 --- T3b["Task<br/><i>atomic</i>"]:::task
+    T3a -. depends_on .-> R3a[Review<br/>Task]:::review
+    T3b -. depends_on .-> R3b[Review<br/>Task]:::review
 
     classDef idea fill:#1a1a2e,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
     classDef product fill:#4c1d95,stroke:#8b5cf6,stroke-width:3px,color:#fff
@@ -41,7 +44,7 @@ flowchart TB
     classDef review fill:#0a0a0f,stroke:#f59e0b,color:#f59e0b
 ```
 
-**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests chain off the Product (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Every Manifest can pair Tasks with a Review Task that auto-activates to post the verdict.
+**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)* → *Review Task*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests chain off the Product (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Each Task pairs with its own Review Task, chained via `depends_on`: when the parent Task completes, the Review Task auto-activates, inspects the real-world side effects, and posts `review_approval` or `review_rejection` on the parent. The watcher's gate findings surface as comments; the Review Task owns the verdict.
 
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
