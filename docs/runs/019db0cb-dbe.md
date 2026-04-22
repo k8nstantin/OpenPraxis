@@ -116,3 +116,20 @@ still shows `all_schema.sql` (16.79 MiB) + all 5 `data/*.sql` objects
 No new `review_approval` posted — the 22:45Z one stands. Dropped an
 `agent_note` on main 019db0cb-487 noting this re-check converges to the same
 verdict, and re-issued `task_cancel` on self.
+
+## Run 14 @ 2026-04-22T03:06Z — re-confirm & re-cancel (again)
+
+Verify task refired a 7th time (run_count=14, status=running). The chained
+self-cancel is clearly not sticking across runs. Clone + GCS state unchanged
+from the 22:45Z approval and 23:19Z re-confirm:
+
+- `screen -ls | grep mysql-backup` → none; `pgrep -af mysqldump` → none.
+- `tail ~/backup-20260421-221225.log` → ends with `==========================================`.
+- GCS `gs://mysqldump_migration/int-clonecm01/2026-04-21_18-12-36/`: 7 objects,
+  31.50 GiB (schema 16.79 MiB + 5 data files 31.49 GiB + dump log 2.3 KiB).
+
+Posted `agent_note` (not another `review_approval`) on main 019db0cb-487 and
+re-issued `task_cancel` on self. **Followup:** runner's honoring of
+`task_cancel` in chained-review tasks (manifest 019db0c2-61d) is broken —
+every 30 min this task refires. Needs a fix on the runner side; a fresh
+in-flight `task_cancel` from the agent is not enough.
