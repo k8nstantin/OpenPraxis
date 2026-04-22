@@ -18,7 +18,6 @@ flowchart TB
 
     MH --- M1["<b>Manifest A</b><br/><i>versioned spec</i>"]:::manifest
     MH --- M2["<b>Manifest B</b>"]:::manifest
-    MH --- M3["<b>Manifest C</b>"]:::manifest
 
     M1 -->|holds| T1a["Task<br/><i>atomic</i>"]:::task
     M1 --- T1b["Task<br/><i>atomic</i>"]:::task
@@ -26,14 +25,7 @@ flowchart TB
     T1b -. depends_on .-> R1b[Review<br/>Task]:::review
 
     M2 --- T2a["Task<br/><i>atomic</i>"]:::task
-    M2 --- T2b["Task<br/><i>atomic</i>"]:::task
     T2a -. depends_on .-> R2a[Review<br/>Task]:::review
-    T2b -. depends_on .-> R2b[Review<br/>Task]:::review
-
-    M3 --- T3a["Task<br/><i>atomic</i>"]:::task
-    M3 --- T3b["Task<br/><i>atomic</i>"]:::task
-    T3a -. depends_on .-> R3a[Review<br/>Task]:::review
-    T3b -. depends_on .-> R3b[Review<br/>Task]:::review
 
     classDef idea fill:#1a1a2e,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
     classDef product fill:#4c1d95,stroke:#8b5cf6,stroke-width:3px,color:#fff
