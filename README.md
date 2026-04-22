@@ -8,48 +8,40 @@
 
 ### Build products with AI agents — end to end.
 
-**OpenPraxis is a full DAG execution engine for AI-assisted software development.** One initiative becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
+**OpenPraxis is a full DAG execution engine for AI-assisted software development.** One captured Idea becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
 
 ```mermaid
 flowchart TB
-    Init[/"Initiative"/]:::init --> P
+    Idea[/"<b>Idea</b><br/><i>captured concept</i>"/]:::idea -->|becomes| P
 
-    P["<b>Product</b><br/><i>initiative-level spec</i>"]:::product
+    P(["<b>Product</b><br/><i>top-level spec</i>"]):::product -->|holds| MH([Manifests])
 
-    P --> M1["<b>Manifest 1</b><br/><i>versioned spec<br/>+ deliverables</i>"]:::manifest
-    P --> M2["<b>Manifest 2</b>"]:::manifest
-    P --> M3["<b>Manifest 3</b>"]:::manifest
+    MH --- M1["<b>Manifest A</b><br/><i>versioned spec</i>"]:::manifest
+    MH --- M2["<b>Manifest B</b>"]:::manifest
+    MH --- M3["<b>Manifest C</b>"]:::manifest
     M1 -. depends_on .-> M2
     M2 -. depends_on .-> M3
 
-    M1 --> T1a["Task"]:::task
-    M1 --> T1b["Task"]:::task
-    M1 --> T1r["Review Task"]:::review
-    T1a -. depends_on .-> T1b
-    T1b --> T1r
+    M1 -->|holds| T1a["Task<br/><i>atomic</i>"]:::task
+    M1 --- T1b["Task<br/><i>atomic</i>"]:::task
+    M1 --- T1c["Task<br/><i>atomic</i>"]:::task
+    M1 --- R1[Review<br/>Task]:::review
 
-    M2 --> T2a["Task"]:::task
-    M2 --> T2r["Review Task"]:::review
-    T2a --> T2r
+    M2 --- T2a["Task<br/><i>atomic</i>"]:::task
+    M2 --- T2b["Task<br/><i>atomic</i>"]:::task
+    M2 --- R2[Review<br/>Task]:::review
 
-    T1a --> Dispatch{{"Dispatch agent<br/><b>Claude Code · Cursor · Codex</b><br/>in isolated git worktree"}}:::agent
-    T1b --> Dispatch
-    T2a --> Dispatch
+    M3 --- T3a["Task<br/><i>atomic</i>"]:::task
+    M3 --- R3[Review<br/>Task]:::review
 
-    Dispatch --> Capture[["<b>Captured</b><br/>every action · turn · tool call"]]:::capture
-    Dispatch --> Audit[["<b>Audited</b><br/>git · build · manifest deliverables"]]:::audit
-    Dispatch --> Cost[["<b>Costed</b><br/>every cost unit back to the spec"]]:::cost
-
-    classDef init fill:#1a1a2e,stroke:#71717a,color:#e4e4e7
-    classDef product fill:#4c1d95,stroke:#8b5cf6,color:#fff,font-weight:bold
-    classDef manifest fill:#1e3a5f,stroke:#3b82f6,color:#e4e4e7
-    classDef task fill:#1a1a2e,stroke:#71717a,color:#a1a1aa
-    classDef review fill:#1a1a2e,stroke:#f59e0b,color:#f59e0b
-    classDef agent fill:#2e2a0a,stroke:#f5c542,color:#f5c542
-    classDef capture fill:#0a2e1a,stroke:#00d97e,color:#00d97e
-    classDef audit fill:#0a2e1a,stroke:#00d97e,color:#00d97e
-    classDef cost fill:#0a2e1a,stroke:#00d97e,color:#00d97e
+    classDef idea fill:#1a1a2e,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
+    classDef product fill:#4c1d95,stroke:#8b5cf6,stroke-width:3px,color:#fff
+    classDef manifest fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#e4e4e7
+    classDef task fill:#0a0a0f,stroke:#71717a,color:#a1a1aa
+    classDef review fill:#0a0a0f,stroke:#f59e0b,color:#f59e0b
 ```
+
+**Progression:** *Idea* → *Product* → *Manifest* → *Task (atomic)*. Idea at the top — the captured concept. Product beneath it as the spec root. Manifests chain off the Product (dotted arrows are `depends_on` build-order). Tasks hang off each Manifest as grapes — the Task is the **atomic unit of work** that dispatches one agent in one worktree. Every Manifest can pair Tasks with a Review Task that auto-activates to post the verdict.
 
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
@@ -121,7 +113,11 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 ```
  Peer  (your machine, identified by UUID v7 + MAC fingerprint)
    │
-   ├──  Product            [SPEC — initiative level]
+   ├──  Idea               [CAPTURED CONCEPT — upstream of any build work]
+   │      │                  priority (low/medium/high/critical) · tags
+   │      │                  link_idea_manifest ties ideas to the specs they spawned
+   │      │
+   ├──  Product            [SPEC — top level, groups manifests under one umbrella]
    │      │                  title · tags · status · cost rollup · DAG root
    │      │
    │      ├──  Manifest    [SPEC — versioned markdown with deliverables]
@@ -151,7 +147,8 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 
 | Level | What it is | Atomic? |
 |---|---|---|
-| **Product** | Initiative-level spec — the "what we're building" | No (container) |
+| **Idea** | Captured concept — priority + tags. Upstream of any build work; links to the Manifests it spawned. | No (seed) |
+| **Product** | Top-level spec — groups related manifests under one umbrella | No (container) |
 | **Manifest** | Versioned detailed spec with deliverables, depends_on, status | No (container) |
 | **Task** | Scheduled unit of work that dispatches one agent session | **Atomic unit of work** |
 | **Run** | One execution attempt of a task | **Atomic unit of execution** |
