@@ -18,10 +18,23 @@ OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as schedul
 
 ### Control, not surprise
 
-- **Know where the money is going.** Per-turn spend, attributed to the task, the manifest, the product, and the day. Drill from "today cost $16" to the exact tool call that spent the last dollar.
+- **Know at the atomic level what's executing — right now.** The hierarchy bottoms out at single tool calls. Task → Run → Action lets you zoom from "today cost $16" all the way down to the exact Bash invocation at 14:32 that burned $0.04 and exited 1. Live output streams on the task card; pause / stop / emergency-stop-all are one click away.
+- **Know where the money is going.** Per-turn spend, attributed to the task, the manifest, the product, and the day. Every `task_run` carries `cost_usd`, token counts, turn count — calibrated from actual vendor invoices via the `model_pricing` table.
 - **Know what failed.** `failed` tasks surface their last run's stderr, the watcher's git / build / manifest findings, and the review task's `review_rejection` with root cause. Not "the agent got confused."
 - **Know what was wasted.** Completed tasks with `watcher_finding: Git gate observation — no commits on branch` are wasted spend you can now see. Review-task rejections that trace to upstream corruption post an `agent_note` on the upstream main so you find the root cause, not just the symptom.
 - **Know what was done.** Every commit landed under `openpraxis/<task-id>`. Every action searchable by keyword with highlighted snippets. "What did the agent do on Thursday?" is an SQL query, not a guessing game.
+
+### Retrospective — learn from everything that's ever run
+
+The record doesn't expire. Every action, turn, cost, review verdict, and watcher finding persists in SQLite with full provenance (peer, session, task, timestamp). The archive is an **analytical surface, not a log file**:
+
+- Which manifests consistently exceed `max_turns` → the spec is too vague; rewrite or split.
+- Which tool-call sequences precede `failed` runs → failure fingerprints the agent keeps walking into.
+- Which agents (Claude Code vs Cursor vs Codex) produce cleaner diffs per dollar for which manifest shapes → routing intelligence.
+- Which review rejections cluster by embedding similarity → systemic failure modes, not one-off bugs.
+- Which knob values (temperature, max_turns, reasoning_effort) correlate with approvals → settings calibration from your own data, not guesses.
+
+Semantic search (768-dim embeddings via `sqlite-vec`) and keyword search with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)) both run over the full history so these questions stay cheap to ask months later.
 
 ### Bill auditing for AI spend
 
