@@ -16,6 +16,10 @@ One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — Cost Today $16.24 / $100, 438 turns, 147 tasks, tasks-today ranked by cost" width="100%" />
 </p>
 
+> **The shift.** Chat wrappers hand you a black box: you press run, you hope, and you meet the bill at the end of the month. OpenPraxis inverts that — every turn captured as it happens, aggregated upward, and surfaced on a single dashboard. Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a rule. Independent evaluation is non-negotiable: the watcher audits every completed task and posts findings the agent cannot delete.
+>
+> **The result is cost control by construction.** You set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+
 ## Why OpenPraxis
 
 - **You already pay for agents — start seeing where the money goes.** Spend surfaces on the task, the manifest, the product, and the day, live, in one place.
@@ -46,6 +50,66 @@ OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound W
 
 Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
 
+## The Hierarchy — Product → Manifest → Task
+
+**One organizational model, used everywhere.** OpenPraxis orchestrates work as a three-level hierarchy borrowed from how actual engineering teams already think. Everything — cost, turns, status, settings, review verdicts — cascades up or down this spine.
+
+```
+ Peer  (your machine, identified by UUID v7 + MAC fingerprint)
+   │
+   ├──  Product            — an initiative / product line
+   │      │                  tags · status · cost rollup · DAG root
+   │      │
+   │      ├──  Manifest    — a versioned spec, markdown with deliverables
+   │      │      │           depends_on other manifests (build order)
+   │      │      │           jira_refs · status · linked ideas · comments
+   │      │      │
+   │      │      ├──  Task — a scheduled unit of work, executes an agent
+   │      │      │     │    depends_on other tasks · schedule (once / 5m / at:)
+   │      │      │     │    status, cost, turns, run_count, branch · comments
+   │      │      │     │
+   │      │      │     ├──  Run — one execution attempt, captures agent I/O
+   │      │      │     │     │   started_at / completed_at · cost · exit code
+   │      │      │     │     │
+   │      │      │     │     └──  Action — one tool call (Bash, Read, Edit, …)
+   │      │      │     │           tool_name · tool_input · tool_response · cwd
+   │      │      │
+   │      │      └──  Review Task — paired via depends_on, auto-activates
+   │      │            posts review_approval / review_rejection on parent
+   │      │
+   │      └──  More manifests … chained by manifest depends_on
+   │
+   └──  More products …
+```
+
+### Why a hierarchy
+
+- **Organization matches reality.** Initiatives have specs. Specs have work items. Work items have runs. Runs have tool calls. The model holds all the way down.
+- **Aggregation is free.** Cost and turns roll up at every level with no manual bookkeeping — drill from _"my product cost me $12"_ → _"this manifest accounted for $8"_ → _"this one task is $6"_ → _"this one agent turn burned $3"_ → _"here's the exact prompt and tool call"._
+- **Settings cascade.** 12 execution knobs resolve via `task → manifest → product → system`. Set `max_turns=100` once at the product, every task under it inherits. Override for one hard manifest. Override again for one risky task. The resolver walks the chain on every read.
+- **Dependencies at every layer.** Products depend on products. Manifests depend on manifests (build order). Tasks depend on tasks (run order + paired reviews). The same `depends_on` primitive powers all three — and the scheduler blocks dependents until prerequisites are terminal.
+- **Reviews ride the same chain.** The review-task pattern pairs every main task with a verify task via `depends_on`; when main completes, review auto-activates, polls real-world state, and posts the canonical verdict. No watcher can override it; no review agent can impersonate the watcher.
+
+## The DAG — your shop floor, at a glance
+
+**The hierarchy isn't just a data model — it's a picture.** Every product renders as an interactive Directed Acyclic Graph. You see the whole build plan at once: what's done, what's running, what's blocked, what's next, where the money went, and exactly which task implements which line of which spec.
+
+<p align="center">
+  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below, status-colored, interactive" width="100%" />
+</p>
+
+- **Purple product node** at the top — the initiative.
+- **Manifest nodes** linked by blue manifest-dep edges — the build order.
+- **Task nodes** under each manifest linked by yellow task-dep edges — the execution chain.
+- **Ownership edges** (dashed) from manifest to each root task — the "I belong to this spec" relationship.
+- **Status colours** — green done, grey pending, red failed, amber in flight. One glance tells you where the build is.
+- **Any shape, no custom code.** Linear 12-task chain (like the ELS product: `T1 → T1R → T2 → T2R → … → T6R`)? Renders top-to-bottom. Eight independent pairs (like INT MySQL backup/verify)? Renders as eight parallel short columns. Multi-parent fan-in? Dagre figures it out. Empty manifest? Graceful. The renderer takes the edge set and delegates layout to [dagre](https://github.com/dagrejs/dagre) ([PR #158](https://github.com/k8nstantin/OpenPraxis/pull/158)); we don't do arithmetic on positions anymore.
+- **Click any node to drill in.** Purple → product detail. Blue → manifest detail. Chain node → task detail with live output. `#view-products/<id>/dag` is shareable.
+- **Locally bundled.** Cytoscape + dagre + cytoscape-dagre are served from `/vendor/` on the same Go binary ([PR #159](https://github.com/k8nstantin/OpenPraxis/pull/159)). The DAG works offline, air-gapped, no CDN risk.
+- **Contract-tested at the API level.** `TestProductHierarchy_EmptyProduct / _LinearChain / _ParallelPairs` locks the `/api/products/:id/hierarchy` payload dagre rides on so a new DAG shape can't silently break the renderer ([PR #160](https://github.com/k8nstantin/OpenPraxis/pull/160)).
+
+**Why it matters.** A spec without a picture is a PDF nobody reads. A DAG without real numbers is a toy. OpenPraxis combines both — you see the plan _and_ the current cost, status, run count, and cost-per-turn of every node in it, live, in one view.
+
 ## Features
 
 - **Spec-driven task orchestration** — `Product → Manifest → Task → Run → Action` hierarchy; every layer aggregates cost, turns, and status from its children.
@@ -65,7 +129,7 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 
 ## Table of contents
 
-- [Why OpenPraxis](#why-openpraxis) · [Where OpenPraxis fits](#where-openpraxis-fits) · [Features](#features)
+- [Why OpenPraxis](#why-openpraxis) · [Where OpenPraxis fits](#where-openpraxis-fits) · [The Hierarchy](#the-hierarchy--product--manifest--task) · [The DAG](#the-dag--your-shop-floor-at-a-glance) · [Features](#features)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
