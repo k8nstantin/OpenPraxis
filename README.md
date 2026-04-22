@@ -6,32 +6,91 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-### Ship software with autonomous coding agents — without losing the plot.
+### Control plane for agentic software development.
 
-**OpenPraxis is the operating system between you and your coding agents.** Write a spec, hand it to an agent, walk away — and come back to a dashboard that shows you every turn, every tool call, every dollar spent, every rule acknowledged, every commit landed, audited by an independent watcher your agent can't silence. **All local. All persistent. Peer-to-peer across your machines.**
+OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs. Use it to **build products with AI** while tracking, at atomic granularity, both the **cost** of every action and the **quality** of every output — all captured in a local SQLite store you can query months later.
 
-One Go binary. No cloud. No monthly bill surprise. You set the daily budget; the runner clamps against it; runaway agents can't hide.
+### Variable costs → predictable, by measurement
+
+**AI-agent coding is a variable-cost activity.** The same task fired twice can spend an order of magnitude different cost depending on which turn the agent got confused, which files it grepped, how many times the build failed. Without measurement, every fire is a gamble.
+
+OpenPraxis measures every run at the atomic level — every action, every turn, every dollar, attributed to its task, its manifest, its product, its agent runtime, its model. **That record is the dataset prediction rides on.** Historical spend distributions per model / per manifest shape / per agent runtime / per knob setting feed forward into:
+
+- **Pre-fire cost estimates** — know before you hit run what a task is likely to spend.
+- **Budget forecasts per manifest / product** — aggregate estimates into project-level expectations.
+- **Scope-decision signals** — *is this manifest worth firing today, or should we split it?*
+- **Self-calibrating caps** — `max_cost_usd` tuned from your actual history, not a guessed default.
+- **Variance alerts** — a run whose cost drifts two standard deviations from its historical distribution is a signal, not noise.
+
+*(Forecasting module is [drafted as a dedicated product](https://github.com/k8nstantin/OpenPraxis/issues?q=estimated+cost) — the data layer to power it is already live.)*
+
+### The question we're answering
+
+**You are building products with AI agents. Who tracks the cost of every agent action? Who tracks the quality of every agent output? Who knows which runs succeeded, which failed, which burned spend without landing a commit, which wrote files nobody asked for? Which agent is actually more efficient — Claude Code, Cursor, or Codex — and who compares them on real work, not benchmarks?**
+
+Databases have data-quality tooling — Great Expectations, Soda, Monte Carlo, dbt tests. AI-agent-driven development has had no equivalent. **OpenPraxis is it.** Both dimensions — cost and quality — tracked at atomic granularity from the moment the task fires:
+
+- **Cost.** Every Bash, Read, Edit, Write, Grep, Web, and MCP call an agent makes lands in `actions` with full input, output, working directory, session id, and task id. Every run lands in `task_runs` with `cost_usd` calibrated from real vendor invoices, turn count, token count, exit status, branch.
+- **Quality.** Every completed task is audited by the watcher against git commits, `go build`, and the manifest's deliverables. Every paired review task posts `review_approval` or `review_rejection` with root cause. Manifest-delusion detection flags agent output that contradicts the spec. Amnesia detection flags agents that skip the visceral-rule acknowledgement handshake.
+
+The record survives the agent, the session, and the machine. From it you answer questions that had no answer before: *"what did the agent actually do on Tuesday, what did that cost, did it work, and is it worth firing again?"*
+
+### Control, not surprise
+
+- **Know at the atomic level what's executing — right now.** The hierarchy bottoms out at single tool calls. Task → Run → Action lets you zoom from "today's total cost" all the way down to the exact Bash invocation at 14:32 that burned some cost units and exited 1. Live output streams on the task card; pause / stop / emergency-stop-all are one click away.
+- **Know where the money is going.** Per-turn spend, attributed to the task, the manifest, the product, and the day. Every `task_run` carries `cost_usd`, token counts, turn count — calibrated from actual vendor invoices via the `model_pricing` table.
+- **Know what failed.** `failed` tasks surface their last run's stderr, the watcher's git / build / manifest findings, and the review task's `review_rejection` with root cause. Not "the agent got confused."
+- **Know what was wasted.** Completed tasks with `watcher_finding: Git gate observation — no commits on branch` are wasted spend you can now see. Review-task rejections that trace to upstream corruption post an `agent_note` on the upstream main so you find the root cause, not just the symptom.
+- **Know what was done.** Every commit landed under `openpraxis/<task-id>`. Every action searchable by keyword with highlighted snippets. "What did the agent do on Thursday?" is an SQL query, not a guessing game.
+
+### Retrospective — learn from everything that's ever run
+
+The record doesn't expire. Every action, turn, cost, review verdict, and watcher finding persists in SQLite with full provenance (peer, session, task, timestamp). The archive is an **analytical surface, not a log file**:
+
+- Which manifests consistently exceed `max_turns` → the spec is too vague; rewrite or split.
+- Which tool-call sequences precede `failed` runs → failure fingerprints the agent keeps walking into.
+- **Which agent is more efficient per cost unit, and which produces higher quality?** Claude Code vs Cursor vs Codex vs whichever agent you wire in next, measured on *your* manifests, your code, your build. Efficiency = cost per approved task. Quality = review-approval rate, watcher-finding counts, manifest-gate score, diff cleanliness. No benchmarks, no vendor bakeoff — just the record of every run you fired.
+- Which review rejections cluster by embedding similarity → systemic failure modes, not one-off bugs.
+- Which knob values (temperature, max_turns, reasoning_effort) correlate with approvals → settings calibration from your own data, not guesses.
+- What will the next fire of *this kind of task* cost? → cost distributions per model × manifest × agent become the prior that powers pre-fire estimates, budget forecasts, and scope-cut decisions.
+- **Should this manifest be routed to a cheap fast agent or an expensive careful one?** Historical approval rate × cost per shape answers it.
+
+Semantic search (768-dim embeddings via `sqlite-vec`) and keyword search with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)) both run over the full history so these questions stay cheap to ask months later.
+
+### What OpenPraxis does
+
+One platform, several responsibilities. Cost tracking is **one of them**, not the headline:
+
+- **Orchestrates work.** Products → manifests → tasks, with dependencies at every layer and a scheduler that respects them.
+- **Spawns agents.** Claude Code / Cursor / Codex subprocesses in isolated git worktrees off fresh `origin/main`, with manifest spec + visceral rules + relevant memories injected.
+- **Captures everything.** Every tool call → `actions`. Every run → `task_runs`. Every session → `conversations` + `session_turns`. Every decision → `memories`.
+- **Audits independently.** Watcher runs git / build / manifest gates; paired review task posts `review_approval` or `review_rejection`.
+- **Enforces rules.** Visceral rules non-negotiable per session; amnesia detection for agents that skip the acknowledgement handshake.
+- **Tracks costs at the atomic level.** Per-turn, per-action — calibrated from actual vendor invoices via `model_pricing`. Rolls up to task, manifest, product, day. Not a monthly summary; a per-tool-call line item.
+- **Remembers across sessions.** 768-dim embeddings over memories / conversations / actions; semantic and keyword search.
+- **Syncs across machines.** mDNS + Automerge CRDT replication of memories, conversations, manifests, and rules between LAN peers.
+
+Single Go binary. Control plane runs locally. Integrates with Anthropic / OpenAI / Google / Ollama LLM APIs, GitHub remotes, and Claude Code / Cursor / Codex agent runtimes. Peer-to-peer over LAN via mDNS + Automerge — no SaaS backend, no analytics phone-home.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — Cost Today $16.24 / $100, 438 turns, 147 tasks, tasks-today ranked by cost" width="100%" />
 </p>
 
-> **The shift.** Chat wrappers hand you a black box: you press run, you hope, and you meet the bill at the end of the month. OpenPraxis inverts that — every turn captured as it happens, aggregated upward, and surfaced on a single dashboard. Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a rule. Independent evaluation is non-negotiable: the watcher audits every completed task and posts findings the agent cannot delete.
->
-> **The result is cost control by construction.** You set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+### What the tool actually does for agentic AI development
 
-## Why OpenPraxis
-
-- **You already pay for agents — start seeing where the money goes.** Spend surfaces on the task, the manifest, the product, and the day, live, in one place.
-- **You already write specs — stop copy-pasting them into every chat.** Manifests are versioned, searchable, and injected into every agent session automatically.
-- **You already fix the same bug twice — stop.** Semantic memory with 768-dim embeddings recalls decisions, patterns, and constraints across sessions, agents, and machines.
-- **You don't trust an agent to grade itself — don't have to.** A separate watcher audits every completed task against git, build, and the manifest deliverables, and posts findings as first-class comments.
+- **Track record of actions.** Every tool call an agent makes — Bash, Read, Edit, Write, Grep, Glob, Web, MCP — is recorded with `tool_name`, `tool_input`, `tool_response`, `cwd`, `session_id`, timestamp, and the owning `task_id`. That's the `actions` table, currently holding 25k+ rows in a typical install. Searchable by keyword with `<mark>`-highlighted snippets ([PR #152](https://github.com/k8nstantin/OpenPraxis/pull/152)), filterable by session/task/peer. "What did the agent actually edit on Thursday?" is an answered question, not a vibe.
+- **Independent auditing.** A separate `watcher` process runs three gates on every completed task: **git** (did commits land on the task branch?), **build** (`go build ./...` or the per-language equivalent), and **manifest** (were the deliverables in the spec addressed in the diff?). Findings post as typed `watcher_finding` comments on the task. The watcher is observer-only as of [PR #149](https://github.com/k8nstantin/OpenPraxis/pull/149) — it doesn't mutate task state; the paired review task posts the canonical `review_approval` / `review_rejection` verdict.
+- **Git integration as first-class orchestration.** One branch per task (`openpraxis/<task-id>`), one worktree per task (`.openpraxis-work/<task-id>/`) off fresh `origin/main`. The runner creates the worktree, spawns the agent with the spec + visceral rules + relevant memories injected, and tears the worktree down on completion. The `execution_review` comment is enforced at completion ([PR #118](https://github.com/k8nstantin/OpenPraxis/pull/118)); the watcher's git gate reads commits from the branch directly. Branch name is surfaced next to the task status on the dashboard.
+- **Spec-to-execution pipeline.** A Manifest is versioned markdown with deliverables, `depends_on` other manifests, `jira_refs`, and `status`. A Task is a scheduled work item linked to a manifest (many-to-many). A Run is one execution attempt. An Action is one tool call. The scheduler respects `depends_on` at both the manifest and task layer; the runner injects the manifest body into the agent prompt; the resolver walks task → manifest → product → system for every execution knob (`max_turns`, `temperature`, `default_model`, `max_cost_usd`, 8 more).
+- **Cost accounting with real numbers.** The `model_pricing` table calibrates cost per model from actual runs. Every `task_run` row carries `cost_usd`, token counts, turn count. Aggregation rolls up at read time to task → manifest → product → daily total. A visceral rule caps `daily_budget_usd=100`; the runner clamps at spawn time. The dashboard shows live spend versus budget with a hard red boundary.
+- **Persistent memory across sessions.** 768-dim embeddings (`nomic-embed-text` via Ollama) in `sqlite-vec`. Memories are path-organized (`/project/openpraxis/bugs/macos-codesign-required`), scoped (personal / project / team), typed (insight / decision / pattern / bug / context / reference), and tiered (L0 one-liner / L1 summary / L2 full). Decisions survive the session that made them.
+- **P2P sync over LAN.** mDNS discovery + Automerge CRDTs replicate memories, conversations, manifests, and visceral rules between machines. Laptop, desktop, server see the same state without a cloud account.
 
 ## Where OpenPraxis fits
 
 **If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
 
-**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to justify the AI bill, defend the merges, and find out what the agent actually did on Tuesday.
+**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
 
 OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
 
@@ -85,7 +144,7 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 ### Why a hierarchy
 
 - **Organization matches reality.** Initiatives have specs. Specs have work items. Work items have runs. Runs have tool calls. The model holds all the way down.
-- **Aggregation is free.** Cost and turns roll up at every level with no manual bookkeeping — drill from _"my product cost me $12"_ → _"this manifest accounted for $8"_ → _"this one task is $6"_ → _"this one agent turn burned $3"_ → _"here's the exact prompt and tool call"._
+- **Aggregation is free.** Cost and turns roll up at every level with no manual bookkeeping — drill from _"the product cost X"_ → _"this manifest accounted for most of it"_ → _"this one task spent the bulk"_ → _"this one agent turn burned the peak"_ → _"here's the exact prompt and tool call that caused it"._
 - **Settings cascade.** 12 execution knobs resolve via `task → manifest → product → system`. Set `max_turns=100` once at the product, every task under it inherits. Override for one hard manifest. Override again for one risky task. The resolver walks the chain on every read.
 - **Dependencies at every layer.** Products depend on products. Manifests depend on manifests (build order). Tasks depend on tasks (run order + paired reviews). The same `depends_on` primitive powers all three — and the scheduler blocks dependents until prerequisites are terminal.
 - **Reviews ride the same chain.** The review-task pattern pairs every main task with a verify task via `depends_on`; when main completes, review auto-activates, polls real-world state, and posts the canonical verdict. No watcher can override it; no review agent can impersonate the watcher.
@@ -164,9 +223,9 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 
 ## See it in action
 
-Most agent tools hand you a black box: you push "run", hope for the best, and find out what happened when the monthly bill lands. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and has the final say on "done."
+Most agent tools hand you a black box: you push "run", hope for the best, and reconstruct what happened from a log scroll. OpenPraxis inverts that. **Every turn, every tool call, every commit, every dollar — captured as it happens, aggregated upward, and surfaced on a single dashboard.** Cost is a first-class metric on the task, the manifest, the product, and the day. Activity is a first-class record: every prompt, every tool input, every tool result, every acknowledgement of a visceral rule. Independent evaluation is non-negotiable: the watcher audits every completed task and posts findings the agent cannot delete.
 
-The result is cost control by construction — you set a daily budget, you see spend accrue against it live, and runaway sessions can't hide behind a finished status.
+The result is cost and quality control by construction — you set a daily budget, you see spend accrue against it live, the watcher flags every failed gate, and runaway sessions can't hide behind a finished status.
 
 ### Dashboard — cost today vs. budget, tasks ranked by spend
 
@@ -212,7 +271,7 @@ Every action row is stored and searchable forever. "What did the agent actually 
   </tr>
 </table>
 
-Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns aggregate at every level. Drill from "my product cost me $12" → "this manifest accounted for $8" → "this one task is $6" → "this one agent turn burned $3" → "here's the exact prompt and tool call."
+Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns aggregate at every level. Drill from _"the product cost X"_ → _"this manifest accounted for most of it"_ → _"this one task spent the bulk"_ → _"this one agent turn burned the peak"_ → _"here's the exact prompt and tool call."_
 
 ### Visualize the plan — interactive DAG, status-colored
 
