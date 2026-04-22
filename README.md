@@ -8,7 +8,7 @@
 
 ### Control plane for agentic software development.
 
-OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs. Use it to **build products with AI** while tracking, at atomic granularity, both the **cost** of every action and the **quality** of every output — all captured in a local SQLite store you can query months later.
+OpenPraxis runs autonomous coding agents (Claude Code, Cursor, Codex) as scheduled tasks against versioned specs. Use it to **build products with AI** with atomic-level visibility into the **cost** of every action and the **quality** of every output — so every run becomes learnable, comparable, and predictable.
 
 ### Variable costs → predictable, by measurement
 
