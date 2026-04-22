@@ -6,9 +6,11 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Release](https://img.shields.io/github/v/release/k8nstantin/OpenPraxis?include_prereleases&sort=semver)](https://github.com/k8nstantin/OpenPraxis/releases)
 
-### The management layer for AI-driven software development.
+### DAG execution engine + management layer for AI-driven software development.
 
-**OpenPraxis turns AI-assisted development into a governed engineering function.** It attributes every cost unit spent to the spec that drove it, audits every completed task independently of the agent that did the work, compares agents on your real code, and forecasts the next run before it fires — so leadership can plan AI capacity like any other engineering resource, and engineers keep shipping without friction.
+**OpenPraxis orchestrates AI-assisted work as a directed acyclic graph.** Products hold manifests, manifests hold tasks, tasks hold runs, runs hold actions — with dependencies at every layer and a scheduler that respects them. Each task dispatches to the best-fit agent (Claude Code, Cursor, Codex) in an isolated git worktree; the platform captures every action, audits the output independently of the agent, and attributes every cost unit back to the spec that drove it.
+
+**Cost control, quality audit, agent comparison, and forecasting are built on top of that execution graph** — they are outcomes of the engine, not separate tools bolted on.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — live spend vs daily budget, running tasks, tasks ranked by cost" width="100%" />
