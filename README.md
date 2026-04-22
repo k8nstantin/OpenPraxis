@@ -10,6 +10,47 @@
 
 **OpenPraxis is a full DAG execution engine for AI-assisted software development.** One initiative becomes a Product. A Product holds chained Manifests (versioned specs with deliverables). Each Manifest holds chained Tasks that dispatch agents (Claude Code, Cursor, Codex) in isolated git worktrees. Every action is captured, every completed Task is audited independently of the agent, every cost unit attributes back to the spec that drove it — on a single graph, visualised, searchable, self-hosted.
 
+```mermaid
+flowchart TB
+    Init[/"Initiative"/]:::init --> P
+
+    P["<b>Product</b><br/><i>initiative-level spec</i>"]:::product
+
+    P --> M1["<b>Manifest 1</b><br/><i>versioned spec<br/>+ deliverables</i>"]:::manifest
+    P --> M2["<b>Manifest 2</b>"]:::manifest
+    P --> M3["<b>Manifest 3</b>"]:::manifest
+    M1 -. depends_on .-> M2
+    M2 -. depends_on .-> M3
+
+    M1 --> T1a["Task"]:::task
+    M1 --> T1b["Task"]:::task
+    M1 --> T1r["Review Task"]:::review
+    T1a -. depends_on .-> T1b
+    T1b --> T1r
+
+    M2 --> T2a["Task"]:::task
+    M2 --> T2r["Review Task"]:::review
+    T2a --> T2r
+
+    T1a --> Dispatch{{"Dispatch agent<br/><b>Claude Code · Cursor · Codex</b><br/>in isolated git worktree"}}:::agent
+    T1b --> Dispatch
+    T2a --> Dispatch
+
+    Dispatch --> Capture[["<b>Captured</b><br/>every action · turn · tool call"]]:::capture
+    Dispatch --> Audit[["<b>Audited</b><br/>git · build · manifest deliverables"]]:::audit
+    Dispatch --> Cost[["<b>Costed</b><br/>every cost unit back to the spec"]]:::cost
+
+    classDef init fill:#1a1a2e,stroke:#71717a,color:#e4e4e7
+    classDef product fill:#4c1d95,stroke:#8b5cf6,color:#fff,font-weight:bold
+    classDef manifest fill:#1e3a5f,stroke:#3b82f6,color:#e4e4e7
+    classDef task fill:#1a1a2e,stroke:#71717a,color:#a1a1aa
+    classDef review fill:#1a1a2e,stroke:#f59e0b,color:#f59e0b
+    classDef agent fill:#2e2a0a,stroke:#f5c542,color:#f5c542
+    classDef capture fill:#0a2e1a,stroke:#00d97e,color:#00d97e
+    classDef audit fill:#0a2e1a,stroke:#00d97e,color:#00d97e
+    classDef cost fill:#0a2e1a,stroke:#00d97e,color:#00d97e
+```
+
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
 <p align="center">
