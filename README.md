@@ -8,47 +8,67 @@
 
 ### The management layer for AI-driven software development.
 
-Your team is shipping with AI agents. Your AI spend is going up. You don't know which agent is worth it, which specs are over budget, which commits were AI-authored, or how to forecast next quarter. **OpenPraxis is how you run AI development like a business function instead of an expense line.**
+**OpenPraxis turns AI-assisted development into a governed engineering function.** It attributes every cost unit spent to the spec that drove it, audits every completed task independently of the agent that did the work, compares agents on your real code, and forecasts the next run before it fires — so leadership can plan AI capacity like any other engineering resource, and engineers keep shipping without friction.
 
 <p align="center">
   <img src="docs/images/overview.png" alt="OpenPraxis dashboard — live spend vs daily budget, running tasks, tasks ranked by cost" width="100%" />
 </p>
 
-### Why your company needs this
+### Features
 
-- **Cost control on variable spend.** AI coding is variable-cost. Without line-item attribution, spend is a monthly surprise. OpenPraxis attributes every dollar to a task, a spec, a product, a day — and to the person or policy that authorized it.
-- **Forecasting for AI budgets.** Predict what the next sprint of AI-assisted development will cost *before* committing the money. Historical spend by spec type, agent, and model drives the estimate; no more vibes-based budgeting.
-- **Independent quality control.** AI output isn't self-grading. OpenPraxis audits every completed task against the spec, the build, and the diff — separately from the agent that did the work.
-- **Vendor leverage.** Claude Code, Cursor, or Codex? Measured on *your* work, not marketing. Know which agent is actually producing shippable output per dollar.
-- **Audit trail that survives the session.** Every action, decision, and review verdict persists with full provenance. Compliance, postmortems, root-cause analysis — answered from the record, not reconstructed from memory.
-- **One shared brain across the team.** Specs, memories, decisions, and rules sync across every engineer's machine over the local network. No SaaS lock-in, no compliance review for a third-party data hoster.
-- **Governance without slowing teams down.** Set daily budgets, per-task caps, approval rules, and scope boundaries centrally; engineers keep shipping; the platform enforces.
-- **Observability down to the tool call.** Drill from *today's total spend* to *the exact action that caused it* in two clicks. No guessing which session burned the budget.
-- **A visual plan you can brief a stakeholder on.** The product DAG shows the whole build graph — what's done, running, blocked, and how the spend maps to it.
-- **No cloud dependency on us.** The control plane runs on your hardware. We're not in your data path; you can audit and redeploy on your terms.
+- **Line-item cost attribution.** Every cost unit spent attributed to a task, a spec, a product, a day, and the authorizing policy.
+- **Pre-fire cost forecasting.** Predict what the next run, manifest, or sprint will cost from your actual history, per model, per agent, per spec shape.
+- **Independent quality audit.** Every completed task audited against spec, build, and diff by a separate watcher; paired review tasks post the final verdict.
+- **Cross-agent efficiency comparison.** Claude Code vs Cursor vs Codex measured on your real code — cost per approved task, review-approval rate, diff cleanliness.
+- **End-to-end audit trail.** Every action, decision, and verdict persists with full provenance for compliance, postmortems, and root-cause analysis.
+- **Team-wide shared memory.** Specs, memories, decisions, and rules sync across every engineer's machine over the local network — no SaaS lock-in.
+- **Central governance.** Daily budgets, per-task caps, approval rules, and scope boundaries enforced by the platform; engineers keep shipping.
+- **Atomic-granularity observability.** Drill from a product's total spend to the exact tool call that caused it in two clicks.
+- **Interactive build DAG.** The whole plan as a clickable, status-colored graph — brief a stakeholder without a deck.
+- **Self-hosted, offline-capable.** Control plane runs on your hardware; we're not in your data path.
+- **→ [How is this different from OpenClaw?](#where-openpraxis-fits)** Short answer: OpenPraxis is a professional AI development platform; OpenClaw is a consumer agent-message manager. See the comparison table below.
 
-## Where OpenPraxis fits
+### How it fits
 
-**If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
+```mermaid
+flowchart LR
+    subgraph Inputs [" "]
+      direction TB
+      Spec[Spec / Manifest]
+      Budget[Budget, Rules, Caps]
+    end
 
-**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every dollar is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
+    OP(["<b>OpenPraxis</b><br/>control plane"])
 
-OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
+    subgraph Agents [Multi-agent execution]
+      direction TB
+      A1[Claude Code]
+      A2[Cursor]
+      A3[Codex]
+    end
 
-| | OpenPraxis | Consumer agent-message managers (e.g. OpenClaw) |
-|---|---|---|
-| **Domain** | AI-assisted software development | Local personal assistant over chat/voice |
-| **Front door** | Manifests + scheduled tasks written by a developer | Inbound messages on WhatsApp, iMessage, Telegram, Signal, Slack, Discord, ... |
-| **Output** | Commits, branches, PRs, dashboard state | Reply messages in the source channel + voice + canvas |
-| **Unit of work** | A task that runs an agent session against a spec | A conversation turn in a messaging thread |
-| **Isolation** | One agent per task, in its own git worktree | One agent per channel / account / workspace |
-| **Cost model** | Per-task, per-turn, per-day, per-product spend — first-class metric | Not a first-class surface |
-| **Audit model** | Independent watcher + typed review comments + execution_review retrospectives | Conversation history |
-| **Ideal user** | Professional developer / team with AI spend to justify and merges to defend | Power user who wants a private assistant across their chat apps |
-| **Persistence** | Embedded local store with semantic + keyword search | JSON config + workspace dirs |
-| **Primary language** | Go (single binary) | TypeScript / Node.js |
+    subgraph Outputs [" "]
+      direction TB
+      Git[(Git<br/>branch per task)]
+      Cost[Cost attribution<br/>per action · task · day]
+      Quality[Independent audit<br/>watcher + reviews]
+      Memory[Shared memory<br/>LAN peer sync]
+      DAG[Interactive DAG<br/>status-colored plan]
+    end
 
-Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
+    Spec --> OP
+    Budget --> OP
+    OP <--> A1
+    OP <--> A2
+    OP <--> A3
+    OP --> Git
+    OP --> Cost
+    OP --> Quality
+    OP --> Memory
+    OP --> DAG
+```
+
+Developers write the spec. Leadership sets the budget, caps, and rules. OpenPraxis dispatches the work to whichever agent is best for the job, captures every action the agent takes, audits the result independently of the agent, attributes the spend to the originating spec, and syncs the memory across the team — all on your hardware, on your terms.
 
 ## The Hierarchy — Product → Manifest → Task
 
@@ -110,26 +130,9 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 
 **Why it matters.** A spec without a picture is a PDF nobody reads. A DAG without real numbers is a toy. OpenPraxis combines both — you see the plan _and_ the current cost, status, run count, and cost-per-turn of every node in it, live, in one view.
 
-## Features
-
-- **Spec-driven task orchestration** — `Product → Manifest → Task → Run → Action` hierarchy; every layer aggregates cost, turns, and status from its children.
-- **Autonomous agent sessions** — tasks spawn Claude Code / Cursor / Codex subprocesses in isolated git worktrees off fresh `origin/main`, with the manifest spec, visceral rules, and relevant memories injected as context.
-- **Cost as a first-class metric** — live spend per task, per turn, per day, rolled up to the product. Hard daily budget enforced as a visceral rule.
-- **Hierarchical execution controls** — 12 knobs (`max_turns`, `temperature`, `default_model`, `max_cost_usd`, …) inherit through `task → manifest → product → system` scope with one-click override + reset.
-- **Independent observer** — a separate watcher runs three gates (git, build, manifest-deliverables) on every completed task and posts findings as comments; the paired review task owns the verdict.
-- **Review workflow with typed comments** — every entity has a comment thread; `review_approval` / `review_rejection` / `execution_review` / `agent_note` / `watcher_finding` are first-class types with enforcement at both the MCP and HTTP boundaries.
-- **Visceral rules + amnesia detection** — non-negotiable operating constraints every agent must acknowledge; violations auto-flagged on the dashboard.
-- **Semantic + keyword search** — 768-dim embeddings over memories, conversations, actions; keyword-first paginated results with `<mark>`-highlighted snippets and optional "Related by meaning" tail.
-- **Interactive DAG visualization** — cytoscape + dagre renders product hierarchy; edges derived from real `depends_on`, layout computed by dagre, assets bundled locally (no CDN).
-- **Peer-to-peer sync** — mDNS discovery + Automerge CRDT replicates memories, conversations, manifests, and visceral rules across machines on the LAN.
-- **Single-binary distribution** — one Go build, `go:embed`-ded dashboard, no npm, no separate frontend deploy.
-- **55 MCP tools** — full programmatic surface for agents: products, manifests, tasks, memory, comments, reviews, settings, visceral rules, ideas, markers, peers.
-- **17-tab operator dashboard** — overview, memories, conversations, actions, amnesia, visceral, ideas, products, manifests, tasks, chat, delusions, watcher, peers, activity, recall, settings.
-- **Mobile peer app** — React Native / Expo companion that acts as a full OpenPraxis peer from your phone, syncing over LAN.
-
 ## Table of contents
 
-- [Why OpenPraxis](#why-openpraxis) · [Where OpenPraxis fits](#where-openpraxis-fits) · [The Hierarchy](#the-hierarchy--product--manifest--task) · [The DAG](#the-dag--your-shop-floor-at-a-glance) · [Features](#features)
+- [Features](#features) · [How it fits](#how-it-fits) · [The Hierarchy](#the-hierarchy--product--manifest--task) · [The DAG](#the-dag--your-shop-floor-at-a-glance) · [Where OpenPraxis fits (vs OpenClaw)](#where-openpraxis-fits)
 - [See it in action](#see-it-in-action)
   - [Dashboard — cost today vs. budget, tasks ranked by spend](#dashboard--cost-today-vs-budget-tasks-ranked-by-spend)
   - [Live tool output — watch the agent work, turn by turn](#live-tool-output--watch-the-agent-work-turn-by-turn)
@@ -161,6 +164,29 @@ Short version: **OpenPraxis captures what the agent did and what it cost, every 
 - [Execution Controls — all 12 knobs in detail](docs/execution-controls.md)
 - [Workflow Engine — DAG, states, activation model, review loop, SCD principle](docs/workflow-engine.md)
 - [Changelog — April 2026 release notes](docs/changelog.md)
+
+## Where OpenPraxis fits
+
+**If an AI model is a CNC machine, OpenPraxis is the factory.** The model cuts metal; OpenPraxis is everything around it: the specs (manifests), the work orders (tasks), the shop floor (execution engine), the time clock (cost + turn tracking), the QA station (watcher), the archive (memory), and the shift log (activity feed). One developer with OpenPraxis runs an engineering shop, not a chat thread.
+
+**Professional AI development tool — not a consumer agent-message manager.** OpenPraxis lives on the builder's side of the tool: every action an agent takes is captured, every cost unit is attributed, every rule is enforceable, every decision is auditable months later. It is purpose-built for the person who has to track the cost of every agent run, defend the merges, and find out what the agent actually did on Tuesday.
+
+OpenPraxis is not a consumer chat wrapper. If you are looking to route inbound WhatsApp / iMessage / Telegram messages to a local assistant, OpenPraxis isn't the tool — [OpenClaw](https://github.com/openclaw/openclaw) or a similar assistant gateway is. OpenPraxis starts where the build request starts and ends where the commit lands.
+
+| | OpenPraxis | Consumer agent-message managers (e.g. OpenClaw) |
+|---|---|---|
+| **Domain** | AI-assisted software development | Local personal assistant over chat/voice |
+| **Front door** | Manifests + scheduled tasks written by a developer | Inbound messages on WhatsApp, iMessage, Telegram, Signal, Slack, Discord, ... |
+| **Output** | Commits, branches, PRs, dashboard state | Reply messages in the source channel + voice + canvas |
+| **Unit of work** | A task that runs an agent session against a spec | A conversation turn in a messaging thread |
+| **Isolation** | One agent per task, in its own git worktree | One agent per channel / account / workspace |
+| **Cost model** | Per-task, per-turn, per-day, per-product spend — first-class metric | Not a first-class surface |
+| **Audit model** | Independent watcher + typed review comments + execution_review retrospectives | Conversation history |
+| **Ideal user** | Professional developer / team with AI spend to justify and merges to defend | Power user who wants a private assistant across their chat apps |
+| **Persistence** | Embedded local store with semantic + keyword search | JSON config + workspace dirs |
+| **Primary language** | Go (single binary) | TypeScript / Node.js |
+
+Short version: **OpenPraxis captures what the agent did and what it cost, every turn, forever.** That's the core. Everything else — specs, review workflows, peer sync, the DAG viewer — is in service of that capture loop.
 
 ## See it in action
 
