@@ -79,30 +79,42 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 ```
  Peer  (your machine, identified by UUID v7 + MAC fingerprint)
    │
-   ├──  Product            — an initiative / product line
-   │      │                  tags · status · cost rollup · DAG root
+   ├──  Product            [SPEC — initiative level]
+   │      │                  title · tags · status · cost rollup · DAG root
    │      │
-   │      ├──  Manifest    — a versioned spec, markdown with deliverables
+   │      ├──  Manifest    [SPEC — versioned markdown with deliverables]
    │      │      │           depends_on other manifests (build order)
    │      │      │           jira_refs · status · linked ideas · comments
    │      │      │
-   │      │      ├──  Task — a scheduled unit of work, executes an agent
+   │      │      ├──  Task [ATOMIC UNIT OF WORK — executes one agent]
    │      │      │     │    depends_on other tasks · schedule (once / 5m / at:)
    │      │      │     │    status, cost, turns, run_count, branch · comments
    │      │      │     │
-   │      │      │     ├──  Run — one execution attempt, captures agent I/O
-   │      │      │     │     │   started_at / completed_at · cost · exit code
+   │      │      │     ├──  Run     [ATOMIC UNIT OF EXECUTION — one attempt]
+   │      │      │     │     │         started_at / completed_at · cost · exit code
    │      │      │     │     │
-   │      │      │     │     └──  Action — one tool call (Bash, Read, Edit, …)
-   │      │      │     │           tool_name · tool_input · tool_response · cwd
+   │      │      │     │     └──  Action  [ATOMIC UNIT OF MEASUREMENT — one tool call]
+   │      │      │     │                    tool_name · tool_input · tool_response · cwd
    │      │      │
-   │      │      └──  Review Task — paired via depends_on, auto-activates
+   │      │      └──  Review Task [ATOMIC UNIT OF VERDICT — paired via depends_on]
+   │      │            auto-activates on parent completion
    │      │            posts review_approval / review_rejection on parent
    │      │
    │      └──  More manifests … chained by manifest depends_on
    │
    └──  More products …
 ```
+
+**The taxonomy at a glance:**
+
+| Level | What it is | Atomic? |
+|---|---|---|
+| **Product** | Initiative-level spec — the "what we're building" | No (container) |
+| **Manifest** | Versioned detailed spec with deliverables, depends_on, status | No (container) |
+| **Task** | Scheduled unit of work that dispatches one agent session | **Atomic unit of work** |
+| **Run** | One execution attempt of a task | **Atomic unit of execution** |
+| **Action** | One tool call made by the agent during a run | **Atomic unit of measurement** |
+| **Review Task** | A `depends_on`-paired Task that audits its parent's output | **Atomic unit of verdict** |
 
 ### Why a hierarchy
 
