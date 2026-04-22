@@ -121,6 +121,15 @@
     const warnings = renderWarnings(knob, currentValue);
     const saveStatus = '<span class="knob-save-status" data-knob-key="' + esc(knob.key) + '"></span>';
 
+    // Description renders inline under the meta row so every knob carries
+    // its own help text without the operator needing to hover for the
+    // tooltip. Source: knob.description from the catalog. Kept as the
+    // tooltip on the label too, for screen-readers and mouse hover on
+    // compact layouts.
+    const description = knob.description
+      ? '<div class="knob-description">' + esc(knob.description) + '</div>'
+      : '';
+
     return (
       '<div class="knob-row" data-knob-key="' + esc(knob.key) + '" data-knob-type="' + esc(knob.type) + '">' +
         '<div class="knob-row-main">' +
@@ -130,6 +139,7 @@
           resetBtn +
         '</div>' +
         '<div class="knob-row-meta">' + provenance + warnings + '</div>' +
+        description +
       '</div>'
     );
   }

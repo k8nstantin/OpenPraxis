@@ -1310,6 +1310,10 @@ mark {
 .knob-save-status.err { color: var(--red); }
 .knob-save-status.pending { color: var(--text-muted); }
 .knob-unsupported { color: var(--text-muted); font-size: 11px; font-style: italic; }
+/* Inline description under each knob row — sourced from the catalog's
+   Description field. Muted, aligned with the meta row, so it explains
+   the control without competing with the current value. */
+.knob-description { padding-left: 170px; color: var(--text-muted); font-size: 11px; line-height: 1.4; margin-top: 2px; }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -1320,6 +1324,7 @@ mark {
   .search-results { left: 0; }
   .knob-row-meta { padding-left: 0; }
   .knob-label { min-width: 0; }
+  .knob-description { padding-left: 0; }
 }
 
 /* === Entity Comments (M3-T6) — rendered by OL.renderCommentsSection === */
