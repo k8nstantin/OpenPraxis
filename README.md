@@ -8,7 +8,7 @@
 
 ### DAG execution engine + management layer for AI-driven software development.
 
-**OpenPraxis orchestrates AI-assisted work as a directed acyclic graph.** Products hold manifests, manifests hold tasks, tasks hold runs, runs hold actions — with dependencies at every layer and a scheduler that respects them. Each task dispatches to the best-fit agent (Claude Code, Cursor, Codex) in an isolated git worktree; the platform captures every action, audits the output independently of the agent, and attributes every cost unit back to the spec that drove it.
+**OpenPraxis orchestrates AI-assisted work as a directed acyclic graph.** Products (initiative-level specs) hold Manifests (detailed specs with deliverables), Manifests hold Tasks (scheduled units of work), Tasks hold Runs (individual execution attempts), Runs hold Actions (single tool calls) — with dependencies at every layer and a scheduler that respects them. Each Task dispatches to the best-fit agent (Claude Code, Cursor, Codex) in an isolated git worktree; the platform captures every action, audits the output independently of the agent, and attributes every cost unit back to the spec that drove it.
 
 **Cost control, quality audit, agent comparison, and forecasting are built on top of that execution graph** — they are outcomes of the engine, not separate tools bolted on.
 
