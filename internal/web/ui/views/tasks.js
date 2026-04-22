@@ -490,6 +490,9 @@
           <!-- EXECUTION CONTROLS -->
           <div id="task-knobs-mount" style="margin-top:16px"></div>
 
+          <!-- DESCRIPTION HISTORY -->
+          <div id="task-revisions-mount" style="margin-top:16px"></div>
+
           <!-- COMMENTS -->
           <div id="task-comments-mount" style="margin-top:16px"></div>
 
@@ -534,6 +537,11 @@
       const knobMount = document.getElementById('task-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'task', id: t.id });
+      }
+
+      const revisionsMount = document.getElementById('task-revisions-mount');
+      if (revisionsMount && OL.renderRevisionsSection) {
+        OL.renderRevisionsSection(revisionsMount, { type: 'task', id: t.id });
       }
 
       const commentsMount = document.getElementById('task-comments-mount');

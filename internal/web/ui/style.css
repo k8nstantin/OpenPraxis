@@ -1374,3 +1374,36 @@ mark {
 .comment-body th, .comment-body td { border: 1px solid var(--border); padding: 4px 8px; }
 .comment-body a { color: var(--accent); }
 .comment-body ul, .comment-body ol { margin: 4px 0 6px 20px; padding: 0; }
+
+/* DV/M5 — Description revisions */
+.revisions-section { border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg-secondary); }
+.revisions-header { font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.revisions-count { color: var(--text-muted); font-weight: 400; }
+.revisions-empty, .revisions-loading, .revisions-error { font-size: 12px; color: var(--text-muted); padding: 8px 0; }
+.revisions-error { color: var(--red); }
+.revisions-list { display: flex; flex-direction: column; gap: 6px; }
+.revision-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.revision-row-meta { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.revision-version { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.revision-author { color: var(--text-primary); }
+.revision-time { color: var(--text-muted); font-size: 11px; }
+.revision-current-badge { padding: 1px 6px; background: var(--green); color: var(--bg-primary); border-radius: 3px; font-size: 10px; text-transform: uppercase; font-weight: 600; }
+.revision-preview { color: var(--text-secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.revision-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.revision-btn { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); font-size: 11px; padding: 3px 8px; border-radius: 3px; cursor: pointer; }
+.revision-btn:hover { background: var(--border); }
+.revision-restore-btn { color: var(--yellow); }
+
+.revision-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.revision-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; width: min(900px, 90vw); max-height: 85vh; display: flex; flex-direction: column; }
+.revision-modal-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.revision-modal-title { font-weight: 600; flex: 1; }
+.revision-modal-close { background: transparent; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1; }
+.revision-modal-body { padding: 12px 14px; overflow: auto; }
+
+.diff-pre { margin: 0; background: var(--bg-primary); padding: 8px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; line-height: 1.45; }
+.diff-line { white-space: pre-wrap; }
+.diff-line.diff-add { background: rgba(0,217,126,0.10); color: var(--green); }
+.diff-line.diff-del { background: rgba(231,76,60,0.10); color: var(--red); }
+.diff-line.diff-eq { color: var(--text-muted); }
+.diff-empty { color: var(--text-muted); font-size: 12px; }

@@ -386,6 +386,7 @@
           ${productDepsHtml}
           ${manifestsHtml}
           <div id="product-knobs-mount" style="margin-top:16px"></div>
+          <div id="product-revisions-mount" style="margin-top:16px"></div>
           <div id="product-comments-mount" style="margin-top:16px"></div>
           ${ideasHtml}
         </div>`;
@@ -393,6 +394,11 @@
       const knobMount = document.getElementById('product-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'product', id: p.id });
+      }
+
+      const revisionsMount = document.getElementById('product-revisions-mount');
+      if (revisionsMount && OL.renderRevisionsSection) {
+        OL.renderRevisionsSection(revisionsMount, { type: 'product', id: p.id });
       }
 
       const commentsMount = document.getElementById('product-comments-mount');

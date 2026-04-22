@@ -464,6 +464,7 @@
           ${linkedIdeasHtml}
           ${linkedTasksHtml}
           <div id="manifest-knobs-mount" style="margin-top:16px"></div>
+          <div id="manifest-revisions-mount" style="margin-top:16px"></div>
           <div id="manifest-comments-mount" style="margin-top:16px"></div>
           ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
@@ -488,6 +489,11 @@
       const knobMount = document.getElementById('manifest-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'manifest', id: m.id });
+      }
+
+      const revisionsMount = document.getElementById('manifest-revisions-mount');
+      if (revisionsMount && OL.renderRevisionsSection) {
+        OL.renderRevisionsSection(revisionsMount, { type: 'manifest', id: m.id });
       }
 
       const commentsMount = document.getElementById('manifest-comments-mount');
