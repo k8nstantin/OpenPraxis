@@ -58,6 +58,10 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	}
 	r.PathPrefix("/views/").HandlerFunc(serveJS)
 	r.PathPrefix("/components/").HandlerFunc(serveJS)
+	// /vendor/*.js — pinned third-party libraries (cytoscape, dagre, cytoscape-dagre).
+	// Served from the embedded FS, not a CDN, so the dashboard works offline and
+	// isn't silently broken when a CDN is flaky or blocked.
+	r.PathPrefix("/vendor/").HandlerFunc(serveJS)
 	r.Path("/app.js").HandlerFunc(serveJS)
 	r.Path("/api.js").HandlerFunc(serveJS)
 	r.Path("/tree.js").HandlerFunc(serveJS)

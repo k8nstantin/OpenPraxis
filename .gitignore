@@ -13,6 +13,10 @@ dist/
 
 # Dependencies
 vendor/
+# …but the frontend's pinned third-party libs (cytoscape, dagre, cytoscape-dagre)
+# live at internal/web/ui/vendor/ and MUST be committed so the dashboard
+# doesn't silently rely on a CDN. Only the root-level Go vendor/ is ignored.
+!internal/web/ui/vendor/
 
 # IDE
 .idea/

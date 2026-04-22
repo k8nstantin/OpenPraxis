@@ -6,9 +6,13 @@
   <title>OpenPraxis</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/components/comments.css">
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <!-- Cytoscape + dagre served locally, not from CDN. If these fail to load
+       the product DAG overlay is non-functional; the rest of the dashboard
+       is unaffected. Pinned: cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0.
+       See internal/web/ui/vendor/ for the files. -->
+  <script src="/vendor/cytoscape.min.js"></script>
+  <script src="/vendor/dagre.min.js"></script>
+  <script src="/vendor/cytoscape-dagre.js"></script>
 </head>
 <body>
   <div class="layout">
