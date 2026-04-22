@@ -63,6 +63,13 @@ func Catalog() []KnobDef {
 		}, Default: "", Description: "Model ID passed to the agent as --model. Empty = agent default."},
 		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
 		{Key: "approval_mode", Type: KnobEnum, EnumValues: []string{"auto", "manual", "on-failure"}, Default: "auto", Description: "Codex approval mode"},
+		// Prompt-context knobs — resolve via the same task → manifest →
+		// product → system inheritance chain as every other knob. Defaults
+		// are heuristic (no empirical measurements) and will be calibrated
+		// from prompt_build_stats once the instrumentation ships; see
+		// idea 019db6ba-ba0 and memory 019db6bb-a4e.
+		{Key: "prompt_max_comment_chars", Type: KnobInt, SliderMin: f(500), SliderMax: f(10000), SliderStep: f(500), Default: 2000, Description: "Max chars per comment when injected into the task-thread context block; longer comments are truncated with a pointer to the full text."},
+		{Key: "prompt_max_context_pct", Type: KnobFloat, SliderMin: f(0.1), SliderMax: f(0.9), SliderStep: f(0.05), Default: 0.4, Description: "Max fraction of the resolved model's context window that the prior-runs + other-comments block may consume; older comments drop first when over budget."},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
 			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 			// MCP tools the runner's prompt template instructs agents to call.

@@ -5,10 +5,15 @@ import (
 	"testing"
 )
 
-func TestCatalog_HasExactly12Knobs(t *testing.T) {
+func TestCatalog_HasExpectedKnobCount(t *testing.T) {
+	// 12 v1 knobs + 2 prompt-context knobs (prompt_max_comment_chars,
+	// prompt_max_context_pct) added in the runner-hardening manifest
+	// 019db6a6-72f. Both inherit via the existing task → manifest →
+	// product → system resolver.
+	const want = 14
 	got := len(Catalog())
-	if got != 12 {
-		t.Fatalf("Catalog() returned %d knobs, want 12", got)
+	if got != want {
+		t.Fatalf("Catalog() returned %d knobs, want %d", got, want)
 	}
 }
 
