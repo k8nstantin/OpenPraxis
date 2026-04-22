@@ -390,6 +390,7 @@
               : (t.status === 'scheduled'
                   ? `<button class="btn-dismiss btn-action" onclick="OL.taskAction('${esc(t.id)}','cancel')">&#10005; Cancel</button>`
                   : `<button class="btn-dismiss btn-action" onclick="OL.taskArchive('${esc(t.id)}')">&#10005; Cancel</button>`)}
+            <button class="btn-search btn-action" id="task-toolbar-dep">+ Depends On</button>
             ${taskProduct
               ? `<button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(taskProduct.id)}','${esc(taskProduct.title)}')">&#x25C8; Product DAG</button>`
               : `<button class="btn-search btn-action" disabled style="opacity:0.5" title="Task has no linked product">&#x25C8; Product DAG</button>`}
@@ -547,6 +548,17 @@
       const commentsMount = document.getElementById('task-comments-mount');
       if (commentsMount && OL.renderCommentsSection) {
         OL.renderCommentsSection(commentsMount, { type: 'task', id: t.id });
+      }
+
+      // Toolbar "+ Depends On" — scroll to the dep section + focus input.
+      const toolbarDepBtn = document.getElementById('task-toolbar-dep');
+      if (toolbarDepBtn) {
+        toolbarDepBtn.addEventListener('click', () => {
+          const section = document.getElementById('task-dependency-section');
+          const input = document.getElementById('task-dep-search');
+          if (section) section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (input) setTimeout(() => input.focus(), 250);
+        });
       }
 
       // Manifest cross-link — fetch title + wire click

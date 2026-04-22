@@ -375,6 +375,7 @@
             <button class="btn-search btn-action" onclick="OL.editProduct('${esc(p.id)}')">&#9998; Edit</button>
             <button class="btn-search btn-action" onclick="OL.createManifest({productId:'${esc(p.id)}'})">+ New Manifest</button>
             <button class="btn-search btn-action" style="background:var(--bg-input)" onclick="OL.linkManifestToProduct('${esc(p.id)}')">+ Link Manifest</button>
+            <button class="btn-search btn-action" id="product-toolbar-dep">+ Depends On</button>
             <button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(p.id)}','${esc(p.title)}')">&#x25C8; Product DAG</button>
             ${['draft','open','closed','archive'].map(s => {
               const active = p.status === s;
@@ -435,6 +436,18 @@
           }
         });
       });
+
+      // Toolbar "+ Depends On" — shortcut to the inline picker below.
+      const toolbarDepBtn = document.getElementById('product-toolbar-dep');
+      if (toolbarDepBtn) {
+        toolbarDepBtn.addEventListener('click', () => {
+          const inline = document.getElementById('product-add-dep-btn');
+          if (inline) {
+            inline.click();
+            inline.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+      }
 
       // Wire add-dep button + picker. 409 = cycle, 400 = self-loop/bad body,
       // 404 = missing product. The server error surfaces inline in red.
