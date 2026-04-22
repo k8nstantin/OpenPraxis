@@ -374,36 +374,33 @@
             <span>Created: ${new Date(t.created_at).toLocaleString()}</span>
           </div>
 
-          <!-- 2. CONTROL BAR — ALWAYS VISIBLE -->
-          <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:${isRunningOrPaused ? '0' : '12'}px">
-              ${t.status === 'pending' || t.status === 'waiting' ? `
-                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#9654; Start Now</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
-              ` : ''}
-              ${t.status === 'scheduled' ? `
-                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#9654; Start Now</button>
-                <button class="btn-dismiss" onclick="OL.taskAction('${esc(t.id)}','cancel')">&#10005; Cancel</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
-              ` : ''}
-              ${t.status === 'running' ? `
-                <button class="btn-search" style="background:var(--yellow);color:var(--bg-primary)" onclick="OL.pauseTask('${esc(t.id)}')">&#9208; Pause</button>
-                <button class="btn-confirm" onclick="OL.killTask('${esc(t.id)}')">&#9209; Stop</button>
-              ` : ''}
-              ${t.status === 'paused' ? `
-                <button class="btn-search" onclick="OL.resumeTask('${esc(t.id)}')">&#9654; Resume</button>
-                <button class="btn-search" style="background:var(--accent)" onclick="OL.editInstructions('${esc(t.id)}')">&#9998; Edit Instructions</button>
-                <button class="btn-confirm" onclick="OL.killTask('${esc(t.id)}')">&#9209; Stop</button>
-              ` : ''}
-              ${t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' ? `
-                <button class="btn-search" onclick="OL.taskStart('${esc(t.id)}')">&#128260; Restart</button>
-                <button class="btn-search" style="background:var(--bg-input)" onclick="OL.rescheduleTask('${esc(t.id)}')">&#128260; Reschedule</button>
-                <button class="btn-dismiss" onclick="OL.taskArchive('${esc(t.id)}')">Archive</button>
-              ` : ''}
-            </div>
+          <!-- 2. TOP TOOLBAR — single row for every action on the task detail panel -->
+          <div class="toolbar-row">
+            <button class="btn-search btn-action" onclick="OL.editInstructions('${esc(t.id)}')">&#9998; Edit</button>
+            ${t.status === 'running'
+              ? `<button class="btn-search btn-action" disabled style="opacity:0.5">&#9654; Start</button>`
+              : (t.status === 'paused'
+                  ? `<button class="btn-search btn-action" onclick="OL.resumeTask('${esc(t.id)}')">&#9654; Resume</button>`
+                  : `<button class="btn-search btn-action" onclick="OL.taskStart('${esc(t.id)}')">&#9654; ${t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' ? 'Restart' : 'Start'}</button>`)}
+            ${t.status === 'running'
+              ? `<button class="btn-search btn-action" style="background:var(--yellow);color:var(--bg-primary)" onclick="OL.pauseTask('${esc(t.id)}')">&#9208; Pause</button>`
+              : `<button class="btn-search btn-action" disabled style="opacity:0.5">&#9208; Pause</button>`}
+            ${t.status === 'running' || t.status === 'paused'
+              ? `<button class="btn-confirm btn-action" onclick="OL.killTask('${esc(t.id)}')">&#9209; Cancel</button>`
+              : (t.status === 'scheduled'
+                  ? `<button class="btn-dismiss btn-action" onclick="OL.taskAction('${esc(t.id)}','cancel')">&#10005; Cancel</button>`
+                  : `<button class="btn-dismiss btn-action" onclick="OL.taskArchive('${esc(t.id)}')">&#10005; Cancel</button>`)}
+            ${taskProduct
+              ? `<button class="btn-search btn-action" onclick="OL.showProductDiagram('${esc(taskProduct.id)}','${esc(taskProduct.title)}')">&#x25C8; Product DAG</button>`
+              : `<button class="btn-search btn-action" disabled style="opacity:0.5" title="Task has no linked product">&#x25C8; Product DAG</button>`}
+            ${t.status === 'completed' ? `
+              <button class="btn-search btn-action" style="background:var(--green);color:var(--bg-primary)" onclick="OL.taskApprove('${esc(t.id)}')">&#10003; Approve</button>
+              <button class="btn-dismiss btn-action" onclick="OL.taskReject('${esc(t.id)}')">&#10007; Reject</button>
+            ` : ''}
+          </div>
 
+          <!-- SCHEDULE SECTION -->
+          <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
             ${!isRunningOrPaused ? `
             <!-- 3. SCHEDULE SECTION — ALWAYS VISIBLE for non-running tasks -->
             <div style="border-top:1px solid var(--border);padding-top:12px">
@@ -896,6 +893,33 @@
     });
     OL.loadTaskDetail(id);
     OL.loadTasks();
+  };
+
+  // Approve a completed task — POST /api/tasks/:id/approve
+  OL.taskApprove = async function(id) {
+    if (!confirm('Approve this completed task?')) return;
+    const res = await fetch('/api/tasks/' + id + '/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    if (!res.ok) { alert('Approve failed: ' + res.status); return; }
+    OL.loadTaskDetail(id);
+    if (OL.loadTasks) OL.loadTasks();
+  };
+
+  // Reject a completed task — POST /api/tasks/:id/reject with required reason
+  OL.taskReject = async function(id) {
+    const reason = prompt('Rejection reason (required):');
+    if (!reason || !reason.trim()) return;
+    const res = await fetch('/api/tasks/' + id + '/reject', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reason: reason.trim()})
+    });
+    if (!res.ok) { alert('Reject failed: ' + res.status); return; }
+    OL.loadTaskDetail(id);
+    if (OL.loadTasks) OL.loadTasks();
   };
 
   // Quick schedule — one click reschedule to a preset
