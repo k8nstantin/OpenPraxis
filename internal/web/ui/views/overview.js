@@ -68,15 +68,17 @@
     }
     setText('metric-tasks-total', stats.tasks_total ?? 0);
 
-    // Top tasks panel
+    // Top tasks panel — hide when empty, but DO NOT early-return.
+    // Pending/scheduled panel below depends on the rest of this function
+    // running, so an early return swallows it (pre-existing bug since #85).
     var panel = document.getElementById('top-tasks-panel');
     var list = document.getElementById('top-tasks-list');
     var topTasks = stats.top_tasks || [];
-    if (!topTasks.length) {
-      if (panel) panel.style.display = 'none';
-      return;
-    }
-    if (panel) panel.style.display = '';
+    var hasTopTasks = topTasks.length > 0;
+    if (panel) panel.style.display = hasTopTasks ? '' : 'none';
+    if (!hasTopTasks) {
+      // Skip rendering the table; fall through to the pending-tasks render.
+    } else {
 
     // Shared status styling — see internal/web/ui/task-status.js.
     var statusColors = OL.TASK_STATUS_COLORS;
@@ -111,7 +113,8 @@
       '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--green)">$' + totalCost.toFixed(2) + '</td>' +
       '<td></td>' +
     '</tr></tfoot></table></div>';
-    if (list) list.innerHTML = html;
+      if (list) list.innerHTML = html;
+    }
 
     // Pending/scheduled tasks panel
     var pendingPanel = document.getElementById('pending-tasks-panel');
