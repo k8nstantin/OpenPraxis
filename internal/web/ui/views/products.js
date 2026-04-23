@@ -489,40 +489,55 @@
   // Product DAG overlay lives in views/product-dag.js. See OL.showProductDiagram.
 
   // Product CRUD actions
+  // Comfortable in-place editor: full panel width, tall resizable
+  // textarea, monospace body. No artificial 500px ceiling — operators
+  // edit real specs here and the cramped popover was unusable.
   OL.editProduct = function(id) {
     const titleEl = document.getElementById('product-detail-title');
     const bodyEl = document.getElementById('product-detail');
     fetchJSON('/api/products/' + id).then(p => {
       if (!p) return;
-      titleEl.textContent = 'Edit Product';
+      titleEl.textContent = 'Edit Product — ' + p.title;
       bodyEl.innerHTML = `
-        <div style="max-width:500px">
-          <div style="margin-bottom:12px">
+        <div class="product-edit-form">
+          <div class="product-edit-row">
             <label class="form-label-compact">Title</label>
-            <input id="edit-product-title" class="conv-search" style="width:100%;padding:8px 12px;font-size:14px" value="${esc(p.title)}">
+            <input id="edit-product-title" class="conv-search product-edit-input" value="${esc(p.title)}">
           </div>
-          <div style="margin-bottom:12px">
+          <div class="product-edit-row">
             <label class="form-label-compact">Description</label>
-            <textarea id="edit-product-desc" class="conv-search" style="width:100%;min-height:80px;padding:8px 12px;font-size:13px;resize:vertical">${esc(p.description)}</textarea>
+            <textarea id="edit-product-desc" class="conv-search product-edit-textarea">${esc(p.description)}</textarea>
           </div>
-          <div style="margin-bottom:16px">
+          <div class="product-edit-row">
             <label class="form-label-compact">Tags (comma-separated)</label>
-            <input id="edit-product-tags" class="conv-search" style="width:100%;padding:8px 12px;font-size:13px" value="${esc((p.tags||[]).join(', '))}">
+            <input id="edit-product-tags" class="conv-search product-edit-input" value="${esc((p.tags||[]).join(', '))}">
           </div>
-          <div class="flex-gap">
-            <button class="btn-search" id="btn-update-product" style="padding:6px 20px;font-size:13px">Save</button>
-            <button class="btn-dismiss" onclick="OL.loadProductDetail('${esc(p.id)}')" style="padding:6px 16px;font-size:13px">Cancel</button>
+          <div class="product-edit-actions">
+            <button class="btn-search" id="btn-update-product">Save</button>
+            <button class="btn-dismiss" id="btn-cancel-product">Cancel</button>
           </div>
         </div>`;
-      OL.onView(document.getElementById('btn-update-product'), 'click', async () => {
+      const cancel = () => {
+        if (editor) editor.detach();
+        OL.loadProductDetail(p.id);
+      };
+      const save = async () => {
         const title = document.getElementById('edit-product-title').value.trim();
         if (!title) { alert('Title is required'); return; }
-        const description = document.getElementById('edit-product-desc').value.trim();
+        const description = editor ? editor.value() : document.getElementById('edit-product-desc').value;
         const tags = document.getElementById('edit-product-tags').value.split(',').map(t => t.trim()).filter(Boolean);
         await fetchJSON('/api/products/' + p.id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title, description, tags}) });
+        if (editor) editor.detach();
         OL.loadProducts();
         OL.loadProductDetail(p.id);
+      };
+      const editor = OL.mountEditor(document.getElementById('edit-product-desc'), {
+        placeholder: 'Product description in markdown…',
+        onSave: save,
+        onCancel: cancel,
       });
+      OL.onView(document.getElementById('btn-cancel-product'), 'click', cancel);
+      OL.onView(document.getElementById('btn-update-product'), 'click', save);
     });
   };
 

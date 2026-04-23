@@ -154,11 +154,23 @@
 
     function bind() {
       var form = containerEl.querySelector('.comment-add-form');
+      var bodyTa = form && form.querySelector('.comment-add-body');
+      var bodyMDE = null;
+      // Mount EasyMDE on the composer textarea — compact toolbar so the
+      // composer stays small. Detached + remounted on each paint() because
+      // the form HTML is rebuilt.
+      if (bodyTa && OL.mountEditor) {
+        bodyMDE = OL.mountEditor(bodyTa, {
+          placeholder: 'Add a comment… (Markdown supported)',
+          compact: true,
+          autofocus: false,
+        });
+      }
       if (form) {
         form.onsubmit = function(ev) {
           ev.preventDefault();
           showAddError('');
-          var body = form.querySelector('.comment-add-body').value;
+          var body = bodyMDE ? bodyMDE.value() : bodyTa.value;
           var type = form.querySelector('.comment-add-type').value;
           var author = currentAuthor() || 'user';
           fetch(url(), {
@@ -177,7 +189,8 @@
             }
             // Prepend on success.
             state.comments.unshift(r.data);
-            form.querySelector('.comment-add-body').value = '';
+            if (bodyMDE) bodyMDE.setValue('');
+            else if (bodyTa) bodyTa.value = '';
             var streamEl = containerEl.querySelector('.comment-section-stream');
             if (streamEl) streamEl.innerHTML = renderStream(state.comments);
             bindStreamHandlers();

@@ -1407,3 +1407,77 @@ mark {
 .diff-line.diff-del { background: rgba(231,76,60,0.10); color: var(--red); }
 .diff-line.diff-eq { color: var(--text-muted); }
 .diff-empty { color: var(--text-muted); font-size: 12px; }
+
+/* Product Edit form — comfortable in-place editor (no cramped popover) */
+.product-edit-form { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: none; }
+.product-edit-row { display: flex; flex-direction: column; gap: 6px; }
+.product-edit-input { width: 100%; padding: 9px 12px; font-size: 14px; box-sizing: border-box; }
+.product-edit-textarea { width: 100%; min-height: 60vh; padding: 12px 14px; font-size: 13px; line-height: 1.55; font-family: var(--font-mono); resize: vertical; box-sizing: border-box; }
+.product-edit-actions { display: flex; gap: 10px; padding-top: 4px; }
+.product-edit-actions .btn-search,
+.product-edit-actions .btn-dismiss { padding: 8px 22px; font-size: 13px; }
+.product-edit-form .form-label-compact { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+
+/* EasyMDE dark-theme overrides — keep the shipped light styles isolated
+   to the editor mount and re-skin to match the dashboard palette. */
+.EasyMDEContainer { color: var(--text-primary); }
+.EasyMDEContainer .editor-toolbar {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  opacity: 1;
+}
+.EasyMDEContainer .editor-toolbar button {
+  color: var(--text-secondary) !important;
+  border-color: transparent;
+}
+.EasyMDEContainer .editor-toolbar button:hover,
+.EasyMDEContainer .editor-toolbar button.active {
+  background: var(--bg-input);
+  border-color: var(--border);
+  color: var(--text-primary) !important;
+}
+.EasyMDEContainer .editor-toolbar i.separator {
+  border-left: 1px solid var(--border);
+  border-right: none;
+}
+.EasyMDEContainer .CodeMirror {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.EasyMDEContainer .CodeMirror-cursor { border-left-color: var(--accent); }
+.EasyMDEContainer .CodeMirror-selected { background: rgba(70, 130, 240, 0.25) !important; }
+.EasyMDEContainer .CodeMirror-line { color: var(--text-primary); }
+.EasyMDEContainer .cm-header { color: var(--accent); font-weight: 700; }
+.EasyMDEContainer .cm-strong { color: var(--text-primary); font-weight: 700; }
+.EasyMDEContainer .cm-em { color: var(--yellow); font-style: italic; }
+.EasyMDEContainer .cm-link { color: var(--accent); }
+.EasyMDEContainer .cm-url { color: var(--text-muted); }
+.EasyMDEContainer .cm-comment, .EasyMDEContainer .cm-quote { color: var(--green); }
+.EasyMDEContainer .cm-formatting { color: var(--text-muted); }
+.EasyMDEContainer .cm-hr { color: var(--text-muted); }
+.EasyMDEContainer .editor-preview-side,
+.EasyMDEContainer .editor-preview {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-family: var(--font-base, system-ui, sans-serif);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.EasyMDEContainer .editor-preview pre,
+.EasyMDEContainer .editor-preview code {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.EasyMDEContainer .editor-statusbar { color: var(--text-muted); }
+.EasyMDEContainer .CodeMirror-fullscreen,
+.EasyMDEContainer .editor-preview-side { background: var(--bg-primary); }
