@@ -19,6 +19,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
+	"github.com/k8nstantin/OpenPraxis/internal/templates"
 	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 )
 
@@ -38,6 +39,8 @@ type Node struct {
 	Watcher          *watcher.Store
 	SettingsStore    *settings.Store
 	SettingsResolver *settings.Resolver
+	Templates        *templates.Store
+	TemplatesResolv  *templates.Resolver
 	Comments         *comments.Store
 	runner           *task.Runner
 	Embedder         *embedding.Engine
@@ -228,6 +231,15 @@ func New(cfg *config.Config) (*Node, error) {
 	manifestSettingsAdapter := &manifest.SettingsAdapter{Store: manifestStore}
 	settingsResolver := settings.NewResolver(settingsStore, taskSettingsAdapter, manifestSettingsAdapter)
 
+	// RC/M1: prompt_templates substrate. Schema + system seed run every
+	// boot; both are idempotent. Resolver walks task → manifest → product
+	// → agent → system using a task-scope lookup into the task store.
+	if err := templates.InitSchema(index.DB()); err != nil {
+		return nil, fmt.Errorf("init templates schema: %w", err)
+	}
+	templatesStore := templates.NewStore(index.DB())
+	templatesResolver := templates.NewResolver(templatesStore, &taskTemplatesScopeAdapter{tasks: taskStore, manifests: manifestStore}, nil)
+
 	// M4-T14: one-time migration of legacy tasks.max_turns column values into
 	// settings rows at task scope, followed by dropping the column. Both are
 	// idempotent — the migration is gated by a marker row; the drop is a
@@ -257,6 +269,8 @@ func New(cfg *config.Config) (*Node, error) {
 		Watcher:          watcherStore,
 		SettingsStore:    settingsStore,
 		SettingsResolver: settingsResolver,
+		Templates:        templatesStore,
+		TemplatesResolv:  templatesResolver,
 		Comments:         commentsStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
@@ -265,7 +279,40 @@ func New(cfg *config.Config) (*Node, error) {
 	// One-time migration: normalize source_node from hostname to UUID
 	n.migrateSourceNodeToUUID()
 
+	// RC/M1: seed the prompt_templates system rows on first boot.
+	// Idempotent — no-op if any system-scope row already exists.
+	if err := templates.Seed(context.Background(), templatesStore, n.PeerID()); err != nil {
+		return nil, fmt.Errorf("seed prompt templates: %w", err)
+	}
+
 	return n, nil
+}
+
+// taskTemplatesScopeAdapter translates a task id into its manifest and
+// product ids for the templates resolver. Kept here (not in the
+// templates package) so templates stays free of a task/manifest import.
+type taskTemplatesScopeAdapter struct {
+	tasks     *task.Store
+	manifests *manifest.Store
+}
+
+func (a *taskTemplatesScopeAdapter) ManifestAndProductForTask(ctx context.Context, taskID string) (string, string, error) {
+	if a.tasks == nil {
+		return "", "", nil
+	}
+	t, err := a.tasks.Get(taskID)
+	if err != nil || t == nil {
+		return "", "", nil
+	}
+	manifestID := t.ManifestID
+	var productID string
+	if manifestID != "" && a.manifests != nil {
+		m, err := a.manifests.Get(manifestID)
+		if err == nil && m != nil {
+			productID = m.ProjectID
+		}
+	}
+	return manifestID, productID, nil
 }
 
 // InitRunner creates and sets the task Runner using the Node's own stores.
@@ -281,6 +328,13 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// if Comments is nil — the runner treats nil as "feature off".
 	if n.Comments != nil {
 		n.runner.SetExecutionReviewChecker(&executionReviewCheckerAdapter{s: n.Comments})
+	}
+	// RC/M1: hand the prompt_templates resolver to the runner so
+	// buildPrompt walks scope tiers instead of using the in-code
+	// defaults. Nil is safe — the runner falls back to the package
+	// defaults for any section the resolver doesn't answer.
+	if n.TemplatesResolv != nil {
+		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
 	return n.runner
 }
