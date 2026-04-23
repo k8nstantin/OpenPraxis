@@ -112,56 +112,54 @@ func apiHook(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// Parse and persist session cost on Stop/SessionEnd
-		if (event.HookEventName == "Stop" || event.HookEventName == "SessionEnd") && event.TranscriptPath != "" && event.SessionID != "" {
-			cost := parseTranscriptCost(event.TranscriptPath)
+		// Heavy work goes async + only on SessionEnd. Stop fires after every
+		// turn; running the full transcript re-parse + conversation re-save
+		// per turn pegs the server at 500%+ CPU on long sessions and blanks
+		// the dashboard. The right semantics: Stop = "this turn ended" (do
+		// nothing expensive), SessionEnd = "session over" (now compute the
+		// canonical totals + save the conversation).
+		//
+		// We respond immediately — the hook is fire-and-forget for the heavy
+		// work. Operator-visible side effects land asynchronously in a
+		// goroutine.
+		if event.HookEventName != "SessionEnd" || event.TranscriptPath == "" || event.SessionID == "" {
+			writeJSON(w, map[string]string{"status": "ok"})
+			return
+		}
+
+		// Capture what we need so the goroutine doesn't reference the
+		// request-scoped variables after the response is written.
+		sessionID := event.SessionID
+		transcriptPath := event.TranscriptPath
+		cwd := event.CWD
+		writeJSON(w, map[string]string{"status": "ok"})
+
+		go func() {
+			cost := parseTranscriptCost(transcriptPath)
 			if cost.OutputTokens > 0 {
-				// Record cost as a special action for searchability and persistence
 				costJSON := fmt.Sprintf(`{"input_tokens":%d,"output_tokens":%d,"cache_read":%d,"cache_create":%d,"cost_usd":%.6f,"model":"%s"}`,
 					cost.InputTokens, cost.OutputTokens, cost.CacheReadTokens, cost.CacheCreateTokens, cost.CostUSD, cost.Model)
-				if err := n.Actions.Record(event.SessionID, n.PeerID(), "session_cost", costJSON, "", event.CWD); err != nil {
+				if err := n.Actions.Record(sessionID, n.PeerID(), "session_cost", costJSON, "", cwd); err != nil {
 					slog.Warn("record session cost failed", "error", err)
 				} else {
-					slog.Info("session cost recorded", "session_id", event.SessionID[:min(12, len(event.SessionID))],
-							"cost_usd", cost.CostUSD, "input_tokens", cost.InputTokens, "output_tokens", cost.OutputTokens,
-							"cache_read_tokens", cost.CacheReadTokens, "cache_create_tokens", cost.CacheCreateTokens, "model", cost.Model)
+					slog.Info("session cost recorded", "session_id", sessionID[:min(12, len(sessionID))],
+						"cost_usd", cost.CostUSD, "input_tokens", cost.InputTokens, "output_tokens", cost.OutputTokens,
+						"cache_read_tokens", cost.CacheReadTokens, "cache_create_tokens", cost.CacheCreateTokens, "model", cost.Model)
 				}
 			}
-		}
 
-		// Only save conversations on Stop and SessionEnd
-		if event.HookEventName != "Stop" && event.HookEventName != "SessionEnd" {
-			writeJSON(w, map[string]string{"status": "ok"})
-			return
-		}
-
-		if event.TranscriptPath == "" || event.SessionID == "" {
-			writeJSON(w, map[string]string{"status": "ok"})
-			return
-		}
-
-		// Read the transcript file directly — this is the source of truth
-		turns := readTranscript(event.TranscriptPath)
-		if len(turns) == 0 {
-			writeJSON(w, map[string]string{"status": "ok"})
-			return
-		}
-
-		bgCtx := context.Background()
-		suffix := ""
-		if event.HookEventName == "SessionEnd" {
-			suffix = " (ended)"
-		}
-		title := fmt.Sprintf("session %s%s", event.SessionID[:min(8, len(event.SessionID))], suffix)
-		convID := "hook-" + event.SessionID
-
-		if err := n.UpdateConversation(bgCtx, convID, title, "claude-code", event.CWD, turns); err != nil {
-			slog.Error("hook save failed", "error", err)
-		} else {
-			slog.Info("hook saved conversation", "title", title, "turns", len(turns))
-		}
-
-		writeJSON(w, map[string]string{"status": "ok"})
+			turns := readTranscript(transcriptPath)
+			if len(turns) == 0 {
+				return
+			}
+			title := fmt.Sprintf("session %s (ended)", sessionID[:min(8, len(sessionID))])
+			convID := "hook-" + sessionID
+			if err := n.UpdateConversation(context.Background(), convID, title, "claude-code", cwd, turns); err != nil {
+				slog.Error("hook save failed", "error", err)
+			} else {
+				slog.Info("hook saved conversation", "title", title, "turns", len(turns))
+			}
+		}()
 	}
 }
 
