@@ -517,34 +517,27 @@
             <button class="btn-dismiss" id="btn-cancel-product">Cancel</button>
           </div>
         </div>`;
-      const ta = document.getElementById('edit-product-desc');
-      if (ta) {
-        // Place caret at end of textarea + focus so user can start typing.
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-      OL.onView(document.getElementById('btn-cancel-product'), 'click', () => {
+      const cancel = () => {
+        if (editor) editor.detach();
         OL.loadProductDetail(p.id);
-      });
-      OL.onView(document.getElementById('btn-update-product'), 'click', async () => {
+      };
+      const save = async () => {
         const title = document.getElementById('edit-product-title').value.trim();
         if (!title) { alert('Title is required'); return; }
-        const description = document.getElementById('edit-product-desc').value;
+        const description = editor ? editor.value() : document.getElementById('edit-product-desc').value;
         const tags = document.getElementById('edit-product-tags').value.split(',').map(t => t.trim()).filter(Boolean);
         await fetchJSON('/api/products/' + p.id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title, description, tags}) });
+        if (editor) editor.detach();
         OL.loadProducts();
         OL.loadProductDetail(p.id);
+      };
+      const editor = OL.mountEditor(document.getElementById('edit-product-desc'), {
+        placeholder: 'Product description in markdown…',
+        onSave: save,
+        onCancel: cancel,
       });
-      // Cmd/Ctrl+Enter saves; Escape cancels.
-      bodyEl.addEventListener('keydown', function(e) {
-        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-          e.preventDefault();
-          document.getElementById('btn-update-product').click();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          OL.loadProductDetail(p.id);
-        }
-      });
+      OL.onView(document.getElementById('btn-cancel-product'), 'click', cancel);
+      OL.onView(document.getElementById('btn-update-product'), 'click', save);
     });
   };
 

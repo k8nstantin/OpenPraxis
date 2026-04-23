@@ -697,35 +697,45 @@
         });
       }
 
-      // Toolbar Edit → toggle the Spec/Content editor directly.
-      // The inline "Edit" button next to the Spec/Content heading was
-      // removed; the toolbar is the single entry point now.
+      // Toolbar Edit → mount EasyMDE on the Spec/Content textarea. The
+      // editor lives in #manifest-content-editor (hidden until Edit is
+      // clicked); we only construct it on-demand to avoid paying the
+      // setup cost for every detail render.
       const contentDisplay = document.getElementById('manifest-content-display');
       const contentEditor = document.getElementById('manifest-content-editor');
-      const openContentEditor = () => {
-        if (!contentDisplay || !contentEditor) return;
-        contentDisplay.style.display = 'none';
-        contentEditor.style.display = 'block';
-        const ta = document.getElementById('manifest-content-textarea');
-        if (ta) ta.focus();
-      };
+      let contentMDE = null;
       const closeContentEditor = () => {
+        if (contentMDE) { contentMDE.detach(); contentMDE = null; }
         if (!contentDisplay || !contentEditor) return;
         contentEditor.style.display = 'none';
         contentDisplay.style.display = '';
       };
+      const saveContent = async () => {
+        const val = contentMDE ? contentMDE.value() : document.getElementById('manifest-content-textarea').value;
+        await fetch('/api/manifests/' + m.id, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({content: val})
+        });
+        closeContentEditor();
+        OL.loadManifests();
+        OL.loadManifest(m.id);
+      };
+      const openContentEditor = () => {
+        if (!contentDisplay || !contentEditor) return;
+        contentDisplay.style.display = 'none';
+        contentEditor.style.display = 'block';
+        if (!contentMDE) {
+          contentMDE = OL.mountEditor(document.getElementById('manifest-content-textarea'), {
+            placeholder: 'Manifest spec / content in markdown…',
+            onSave: saveContent,
+            onCancel: closeContentEditor,
+          });
+        }
+      };
       if (contentDisplay && contentEditor) {
         OL.onView(document.getElementById('manifest-content-cancel'), 'click', closeContentEditor);
-        OL.onView(document.getElementById('manifest-content-save'), 'click', async () => {
-          const val = document.getElementById('manifest-content-textarea').value;
-          await fetch('/api/manifests/' + m.id, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({content: val})
-          });
-          OL.loadManifests();
-          OL.loadManifest(m.id);
-        });
+        OL.onView(document.getElementById('manifest-content-save'), 'click', saveContent);
       }
       const toolbarEdit = document.getElementById('manifest-toolbar-edit');
       if (toolbarEdit) OL.onView(toolbarEdit, 'click', openContentEditor);

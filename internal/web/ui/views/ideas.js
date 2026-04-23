@@ -178,34 +178,44 @@
         OL.renderCommentsSection(ideaCommentsMount, { type: 'idea', id: idea.id });
       }
 
-      // Toolbar Edit → toggle inline textarea; Save PUTs /api/ideas/:id
-      // which records a description_revision before the denormalised UPDATE.
+      // Toolbar Edit → mount EasyMDE on the textarea, lazily.
       var editBtn = document.getElementById('idea-toolbar-edit');
       var descDisplay = document.getElementById('idea-desc-display');
       var descEditor = document.getElementById('idea-desc-editor');
       var descTextarea = document.getElementById('idea-desc-textarea');
+      var ideaMDE = null;
+      var closeIdeaEditor = function() {
+        if (ideaMDE) { ideaMDE.detach(); ideaMDE = null; }
+        if (descEditor) descEditor.style.display = 'none';
+        if (descDisplay) descDisplay.style.display = '';
+        if (descTextarea) descTextarea.value = idea.description || '';
+      };
+      var saveIdeaDesc = async function() {
+        var val = ideaMDE ? ideaMDE.value() : (descTextarea ? descTextarea.value : '');
+        var resp = await fetch('/api/ideas/' + idea.id, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ description: val })
+        });
+        if (!resp.ok) { alert('Save failed: HTTP ' + resp.status); return; }
+        if (ideaMDE) { ideaMDE.detach(); ideaMDE = null; }
+        OL.loadIdeas();
+        OL.loadIdea(idea.id);
+      };
       if (editBtn && descDisplay && descEditor) {
         OL.onView(editBtn, 'click', function() {
           descDisplay.style.display = 'none';
           descEditor.style.display = 'block';
-          if (descTextarea) descTextarea.focus();
+          if (!ideaMDE) {
+            ideaMDE = OL.mountEditor(descTextarea, {
+              placeholder: 'Idea description in markdown…',
+              onSave: saveIdeaDesc,
+              onCancel: closeIdeaEditor,
+            });
+          }
         });
-        OL.onView(document.getElementById('idea-desc-cancel'), 'click', function() {
-          descEditor.style.display = 'none';
-          descDisplay.style.display = '';
-          if (descTextarea) descTextarea.value = idea.description || '';
-        });
-        OL.onView(document.getElementById('idea-desc-save'), 'click', async function() {
-          var val = descTextarea ? descTextarea.value : '';
-          var resp = await fetch('/api/ideas/' + idea.id, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ description: val })
-          });
-          if (!resp.ok) { alert('Save failed: HTTP ' + resp.status); return; }
-          OL.loadIdeas();
-          OL.loadIdea(idea.id);
-        });
+        OL.onView(document.getElementById('idea-desc-cancel'), 'click', closeIdeaEditor);
+        OL.onView(document.getElementById('idea-desc-save'), 'click', saveIdeaDesc);
       }
 
       // Bind manifest links — click to navigate to manifest

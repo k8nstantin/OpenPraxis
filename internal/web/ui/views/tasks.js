@@ -976,43 +976,46 @@
     }
   };
 
-  // Edit instructions — toggle editor view
+  // Edit instructions — mount EasyMDE on the textarea, on-demand.
+  // Constructed lazily so we don't pay the editor setup cost for every
+  // task detail render.
+  let _taskMDE = null;
   OL.editInstructions = function(id) {
     const display = document.getElementById('task-instructions-display');
     const editor = document.getElementById('task-instructions-editor');
-    const btn = document.getElementById('task-instructions-edit-btn');
     if (!display || !editor) return;
     display.style.display = 'none';
     editor.style.display = '';
-    if (btn) btn.style.display = 'none';
-    // Scroll to instructions section
     const section = document.getElementById('task-instructions-section');
     if (section) section.scrollIntoView({behavior: 'smooth', block: 'center'});
-    // Focus textarea
-    const ta = document.getElementById('task-instructions-textarea');
-    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    if (!_taskMDE) {
+      _taskMDE = OL.mountEditor(document.getElementById('task-instructions-textarea'), {
+        placeholder: 'Task instructions in markdown…',
+        onSave: function() { OL.saveInstructions(id); },
+        onCancel: OL.cancelEditInstructions,
+      });
+    }
   };
 
-  // Save instructions via PATCH
   OL.saveInstructions = async function(id) {
-    const ta = document.getElementById('task-instructions-textarea');
-    if (!ta) return;
+    const val = _taskMDE ? _taskMDE.value() : (document.getElementById('task-instructions-textarea') || {}).value;
+    if (val == null) return;
     await fetch('/api/tasks/' + id, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({description: ta.value})
+      body: JSON.stringify({description: val})
     });
+    if (_taskMDE) { _taskMDE.detach(); _taskMDE = null; }
     OL.loadTaskDetail(id);
   };
 
-  // Cancel edit — revert to display view
+  // Cancel edit — detach the editor + revert to display view.
   OL.cancelEditInstructions = function() {
+    if (_taskMDE) { _taskMDE.detach(); _taskMDE = null; }
     const display = document.getElementById('task-instructions-display');
     const editor = document.getElementById('task-instructions-editor');
-    const btn = document.getElementById('task-instructions-edit-btn');
     if (display) display.style.display = '';
     if (editor) editor.style.display = 'none';
-    if (btn) btn.style.display = '';
   };
 
   OL.taskArchive = async function(id) {
