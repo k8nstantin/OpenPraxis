@@ -70,14 +70,13 @@
     // can target it.
     if (!textarea.id) textarea.id = nextId('ol-md-textarea');
 
-    // Mark the textarea so our CSS can theme it consistently across
-    // the dashboard regardless of the call site's own classes.
+    // Mark the textarea so our CSS themes it consistently across the
+    // dashboard regardless of the call site's own classes. NO per-site
+    // variants — same toolbar, same height, same look everywhere.
     textarea.classList.add('ol-md-textarea');
-    if (opts.compact) textarea.classList.add('ol-md-textarea-compact');
 
-    // Build wrapper: toolbar above + textarea below.
     var wrapper = document.createElement('div');
-    wrapper.className = 'ol-md-wrapper' + (opts.compact ? ' ol-md-wrapper-compact' : '');
+    wrapper.className = 'ol-md-wrapper';
     var toolbarHTML = renderToolbar(textarea.id, ACTIONS);
     wrapper.innerHTML = toolbarHTML;
 

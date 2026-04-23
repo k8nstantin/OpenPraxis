@@ -1480,5 +1480,3 @@ mark {
 .ol-md-textarea:focus {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
-.ol-md-textarea-compact { min-height: 90px; }
-.ol-md-wrapper-compact .ol-md-toolbar { padding: 4px 6px; }
