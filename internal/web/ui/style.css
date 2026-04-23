@@ -1418,76 +1418,14 @@ mark {
 .product-edit-actions .btn-dismiss { padding: 8px 22px; font-size: 13px; }
 .product-edit-form .form-label-compact { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 
-/* EasyMDE dark-theme overrides — minimal, just enough to flip the
-   shipped light theme to dark. Crucially, EasyMDE's bundled CSS sets
-   per-token colors (cm-variable, cm-keyword, cm-string, etc.) tuned for
-   a light background — those tokens render as near-black on our dark
-   background, making the text effectively invisible (looks "blank,
-   not editable"). The catch-all `.CodeMirror *` rule below forces every
-   token to the dashboard's text-primary so content is always readable. */
+/* EasyMDE — no internal style overrides. The shipped light theme
+   inside the editor (white background, dark text) is fine — it's how
+   GitHub renders its markdown composer on dark pages. We only frame
+   the container with a dashboard-matching border + radius so it sits
+   cleanly in the dark detail panel. */
 .EasyMDEContainer {
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
-  background: var(--bg-input) !important;
-  margin-bottom: 8px !important;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
 }
-.EasyMDEContainer .editor-toolbar {
-  background: var(--bg-secondary) !important;
-  border: none !important;
-  border-bottom: 1px solid var(--border) !important;
-  border-top-left-radius: 6px !important;
-  border-top-right-radius: 6px !important;
-  opacity: 1 !important;
-  padding: 6px 8px !important;
-}
-.EasyMDEContainer .editor-toolbar button {
-  color: var(--text-secondary) !important;
-  background: transparent !important;
-  border-color: transparent !important;
-}
-.EasyMDEContainer .editor-toolbar button:hover,
-.EasyMDEContainer .editor-toolbar button.active {
-  background: var(--bg-input) !important;
-  color: var(--text-primary) !important;
-}
-.EasyMDEContainer .editor-toolbar i.separator {
-  border-left: 1px solid var(--border) !important;
-  border-right: none !important;
-}
-.EasyMDEContainer .CodeMirror {
-  background: var(--bg-input) !important;
-  color: var(--text-primary) !important;
-  font-family: var(--font-mono) !important;
-}
-/* The catch-all that fixes "blank not editable" — EasyMDE's per-token
-   classes (cm-variable, cm-keyword, cm-meta, cm-tag, cm-atom, etc.)
-   default to dark colors and become invisible on dark backgrounds. */
-.EasyMDEContainer .CodeMirror,
-.EasyMDEContainer .CodeMirror pre,
-.EasyMDEContainer .CodeMirror-line,
-.EasyMDEContainer .CodeMirror-line span { color: var(--text-primary) !important; }
-.EasyMDEContainer .CodeMirror-cursor { border-left: 2px solid var(--accent) !important; }
-.EasyMDEContainer .CodeMirror-selected { background: rgba(70, 130, 240, 0.25) !important; }
-.EasyMDEContainer .CodeMirror-gutters { background: var(--bg-secondary) !important; border-right: 1px solid var(--border) !important; }
-/* Markdown token highlights — re-applied AFTER the catch-all so they
-   actually take effect. */
-.EasyMDEContainer .CodeMirror-line .cm-header { color: var(--accent) !important; font-weight: 700; }
-.EasyMDEContainer .CodeMirror-line .cm-strong { font-weight: 700; }
-.EasyMDEContainer .CodeMirror-line .cm-em { color: var(--yellow) !important; font-style: italic; }
-.EasyMDEContainer .CodeMirror-line .cm-link,
-.EasyMDEContainer .CodeMirror-line .cm-url { color: var(--accent) !important; }
-.EasyMDEContainer .CodeMirror-line .cm-comment,
-.EasyMDEContainer .CodeMirror-line .cm-quote { color: var(--green) !important; }
-.EasyMDEContainer .CodeMirror-line .cm-formatting { color: var(--text-muted) !important; }
-.EasyMDEContainer .editor-preview,
-.EasyMDEContainer .editor-preview-side {
-  background: var(--bg-secondary) !important;
-  color: var(--text-primary) !important;
-}
-.EasyMDEContainer .editor-preview pre,
-.EasyMDEContainer .editor-preview code {
-  background: var(--bg-input) !important;
-  color: var(--text-primary) !important;
-}
-.EasyMDEContainer .editor-statusbar { background: var(--bg-secondary) !important; color: var(--text-muted) !important; }
-.EasyMDEContainer .CodeMirror-fullscreen { background: var(--bg-primary) !important; z-index: 100; }
