@@ -336,6 +336,44 @@ func apiTaskRunGet(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiTaskSetManifest swaps a task's primary manifest_id (the column on
+// tasks.manifest_id, NOT the many-to-many task_manifests join table that
+// LinkManifest writes). Used by the dashboard / MCP to re-home tasks
+// when manifests are split or merged.
+func apiTaskSetManifest(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		taskID := mux.Vars(r)["id"]
+		var req struct {
+			ManifestID string `json:"manifest_id"`
+		}
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		if req.ManifestID == "" {
+			writeError(w, "manifest_id is required", 400)
+			return
+		}
+		t, err := n.Tasks.Get(taskID)
+		if err != nil || t == nil {
+			writeError(w, "task not found", 404)
+			return
+		}
+		// Resolve marker → full UUID so the column always carries the
+		// canonical id.
+		fullID, errMsg := resolveManifestID(n, req.ManifestID)
+		if errMsg != "" {
+			writeError(w, errMsg, 404)
+			return
+		}
+		updated, err := n.Tasks.SetManifest(t.ID, fullID)
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, updated)
+	}
+}
+
 func apiTaskLinkManifest(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		taskID := mux.Vars(r)["id"]

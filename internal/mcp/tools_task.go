@@ -98,6 +98,15 @@ func (s *Server) registerTaskTools() {
 	)
 
 	s.mcp.AddTool(
+		mcplib.NewTool("task_set_manifest",
+			mcplib.WithDescription("Swap a task's PRIMARY manifest_id (the column on tasks.manifest_id, NOT the many-to-many task_manifests link table that task_link_manifest writes). Used to re-home a task when manifests are split / merged / restructured."),
+			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID or marker")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("New primary manifest ID or marker")),
+		),
+		s.handleTaskSetManifest,
+	)
+
+	s.mcp.AddTool(
 		mcplib.NewTool("task_pause",
 			mcplib.WithDescription("Pause a running task. Sends SIGSTOP to the agent process, freezing it in place. The task can be resumed later."),
 			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
@@ -400,6 +409,29 @@ func (s *Server) handleTaskLinkManifest(ctx context.Context, req mcplib.CallTool
 	}
 
 	return textResult(fmt.Sprintf("Linked: task [%s] %s → manifest [%s] %s",
+		t.Marker, t.Title, m.Marker, m.Title)), nil
+}
+
+func (s *Server) handleTaskSetManifest(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	taskID := argStr(a, "task_id")
+	manifestID := argStr(a, "manifest_id")
+
+	t, err := s.node.Tasks.Get(taskID)
+	if err != nil || t == nil {
+		return errResult("task not found: %s", taskID), nil
+	}
+
+	m, err := s.node.Manifests.Get(manifestID)
+	if err != nil || m == nil {
+		return errResult("manifest not found: %s", manifestID), nil
+	}
+
+	if _, err := s.node.Tasks.SetManifest(t.ID, m.ID); err != nil {
+		return errResult("set manifest failed: %v", err), nil
+	}
+
+	return textResult(fmt.Sprintf("Task [%s] %s primary manifest set → [%s] %s",
 		t.Marker, t.Title, m.Marker, m.Title)), nil
 }
 

@@ -186,6 +186,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/tasks/{id}/output", apiTaskOutput(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/link-manifest", apiTaskLinkManifest(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}/unlink-manifest", apiTaskUnlinkManifest(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/set-manifest", apiTaskSetManifest(n)).Methods("PUT")
 	api.HandleFunc("/tasks/{id}/manifests", apiTaskManifests(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/dependency", apiTaskSetDependency(n)).Methods("PUT")
 	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
