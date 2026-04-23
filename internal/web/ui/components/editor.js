@@ -33,7 +33,11 @@
   // tag is the markdown-toolbar element name (e.g. 'md-bold') and
   // icon is an inline SVG or unicode glyph.
   // Reference: https://github.com/github/markdown-toolbar-element
-  var FULL_ACTIONS = [
+  // One toolbar, used everywhere. Comments composer and descriptions
+  // get the same buttons in the same order — only the editor min-height
+  // differs (comments composer is smaller so it doesn't dominate the
+  // panel).
+  var ACTIONS = [
     { tag: 'md-header', title: 'Heading', glyph: 'H' },
     { tag: 'md-bold', title: 'Bold (Cmd+B)', glyph: 'B', bold: true },
     { tag: 'md-italic', title: 'Italic (Cmd+I)', glyph: 'I', italic: true },
@@ -45,15 +49,6 @@
     { tag: 'md-unordered-list', title: 'Bullet list', glyph: '• —' },
     { tag: 'md-ordered-list', title: 'Numbered list', glyph: '1.' },
     { tag: 'md-task-list', title: 'Task list', glyph: '☐' },
-  ];
-  var COMPACT_ACTIONS = [
-    { tag: 'md-bold', title: 'Bold', glyph: 'B', bold: true },
-    { tag: 'md-italic', title: 'Italic', glyph: 'I', italic: true },
-    { tag: 'md-code', title: 'Code', glyph: '<>' },
-    '|',
-    { tag: 'md-quote', title: 'Quote', glyph: '❝' },
-    { tag: 'md-link', title: 'Link', glyph: '🔗' },
-    { tag: 'md-unordered-list', title: 'List', glyph: '• —' },
   ];
 
   function renderToolbar(forID, actions) {
@@ -83,7 +78,7 @@
     // Build wrapper: toolbar above + textarea below.
     var wrapper = document.createElement('div');
     wrapper.className = 'ol-md-wrapper' + (opts.compact ? ' ol-md-wrapper-compact' : '');
-    var toolbarHTML = renderToolbar(textarea.id, opts.compact ? COMPACT_ACTIONS : FULL_ACTIONS);
+    var toolbarHTML = renderToolbar(textarea.id, ACTIONS);
     wrapper.innerHTML = toolbarHTML;
 
     // Insert the wrapper before the textarea, then move the textarea
