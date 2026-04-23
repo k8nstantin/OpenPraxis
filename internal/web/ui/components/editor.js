@@ -1,113 +1,103 @@
-// OpenPraxis — Unified markdown editor (EasyMDE wrapper)
+// OpenPraxis — Markdown editor wrapper using <markdown-toolbar>
+// (GitHub's @github/markdown-toolbar-element). Plain textarea
+// underneath — it's how every chat / issue tracker on the planet
+// renders its composer. No CodeMirror to fight, no library theme to
+// override, all the keyboard affordances and cursor-aware syntax
+// injection for free.
 //
-// Single entry point for every editable surface in the dashboard.
-// Replaces five different cramped textareas with a real markdown editor
-// (toolbar, side-by-side preview, syntax highlight, keyboard shortcuts).
+// The web component itself is registered by /vendor/markdown-toolbar-element.js
+// (loaded as type="module" in index.html). This file just provides the
+// OL.mountEditor facade so call sites don't change.
 //
 // Usage:
-//   var editor = OL.mountEditor(textareaEl, {
-//     minHeight: '40vh',
-//     placeholder: 'Write markdown…',
-//     onSave: function() { ... },   // Cmd/Ctrl+Enter
-//     onCancel: function() { ... }, // Escape
-//     compact: false,               // true = comments-style smaller toolbar
+//   var editor = OL.mountEditor(textarea, {
+//     compact: false,    // compact = comments composer, smaller toolbar
+//     onSave: fn,        // Cmd/Ctrl+Enter
+//     onCancel: fn,      // Escape
 //   });
 //   editor.value()       — current markdown
-//   editor.detach()      — convert back to plain textarea (use on Cancel)
+//   editor.setValue(s)   — replace content
+//   editor.focus()
+//   editor.detach()      — remove the toolbar wrapper, restore plain textarea
 
 (function (OL) {
   'use strict';
 
-  // The full toolbar — used on the heavyweight specs (product / manifest /
-  // task / idea descriptions). The compact toolbar drops fullscreen +
-  // side-by-side + guide so the comments composer doesn't dominate the
-  // detail panel.
-  var FULL_TOOLBAR = [
-    'bold', 'italic', 'heading', '|',
-    'quote', 'code', 'table', '|',
-    'unordered-list', 'ordered-list', '|',
-    'link', 'horizontal-rule', '|',
-    'preview', 'side-by-side', 'fullscreen', '|',
-    'guide',
+  // Generated id used by <markdown-toolbar for="..."> to associate
+  // the toolbar with its target textarea.
+  var _idSeq = 0;
+  function nextId(prefix) { _idSeq += 1; return prefix + '-' + _idSeq; }
+
+  // Toolbar action set. Each item is either a button spec or a
+  // separator '|'. The button spec is { tag, title, icon } where
+  // tag is the markdown-toolbar element name (e.g. 'md-bold') and
+  // icon is an inline SVG or unicode glyph.
+  // Reference: https://github.com/github/markdown-toolbar-element
+  var FULL_ACTIONS = [
+    { tag: 'md-header', title: 'Heading', glyph: 'H' },
+    { tag: 'md-bold', title: 'Bold (Cmd+B)', glyph: 'B', bold: true },
+    { tag: 'md-italic', title: 'Italic (Cmd+I)', glyph: 'I', italic: true },
+    '|',
+    { tag: 'md-quote', title: 'Quote', glyph: '❝' },
+    { tag: 'md-code', title: 'Code (Cmd+E)', glyph: '<>' },
+    { tag: 'md-link', title: 'Link (Cmd+K)', glyph: '🔗' },
+    '|',
+    { tag: 'md-unordered-list', title: 'Bullet list', glyph: '• —' },
+    { tag: 'md-ordered-list', title: 'Numbered list', glyph: '1.' },
+    { tag: 'md-task-list', title: 'Task list', glyph: '☐' },
   ];
-  var COMPACT_TOOLBAR = [
-    'bold', 'italic', 'code', '|',
-    'quote', 'unordered-list', 'ordered-list', '|',
-    'link', 'preview',
+  var COMPACT_ACTIONS = [
+    { tag: 'md-bold', title: 'Bold', glyph: 'B', bold: true },
+    { tag: 'md-italic', title: 'Italic', glyph: 'I', italic: true },
+    { tag: 'md-code', title: 'Code', glyph: '<>' },
+    '|',
+    { tag: 'md-quote', title: 'Quote', glyph: '❝' },
+    { tag: 'md-link', title: 'Link', glyph: '🔗' },
+    { tag: 'md-unordered-list', title: 'List', glyph: '• —' },
   ];
 
-  // mountEditor swaps a textarea for an EasyMDE instance and returns a
-  // small facade so call sites don't poke at the EasyMDE API directly.
-  // Falls back to the bare textarea (no editor) if the EasyMDE script
-  // hasn't loaded yet — keeps the dashboard usable in degraded modes.
+  function renderToolbar(forID, actions) {
+    var inner = actions.map(function (a) {
+      if (a === '|') return '<span class="ol-md-sep"></span>';
+      var styleAttr = '';
+      if (a.bold) styleAttr = ' style="font-weight:700"';
+      else if (a.italic) styleAttr = ' style="font-style:italic"';
+      return '<' + a.tag + '><button type="button" class="ol-md-btn" title="' + a.title + '" tabindex="-1"' + styleAttr + '>' + a.glyph + '</button></' + a.tag + '>';
+    }).join('');
+    return '<markdown-toolbar for="' + forID + '" class="ol-md-toolbar">' + inner + '</markdown-toolbar>';
+  }
+
   OL.mountEditor = function (textarea, opts) {
     opts = opts || {};
     if (!textarea) return null;
-    if (typeof EasyMDE === 'undefined') {
-      console.warn('OL.mountEditor: EasyMDE not loaded; using bare textarea');
-      return {
-        value: function () { return textarea.value; },
-        detach: function () {},
-        focus: function () { textarea.focus(); },
-      };
+
+    // If the textarea has no id, give it one so <markdown-toolbar for=>
+    // can target it.
+    if (!textarea.id) textarea.id = nextId('ol-md-textarea');
+
+    // Mark the textarea so our CSS can theme it consistently across
+    // the dashboard regardless of the call site's own classes.
+    textarea.classList.add('ol-md-textarea');
+    if (opts.compact) textarea.classList.add('ol-md-textarea-compact');
+
+    // Build wrapper: toolbar above + textarea below.
+    var wrapper = document.createElement('div');
+    wrapper.className = 'ol-md-wrapper' + (opts.compact ? ' ol-md-wrapper-compact' : '');
+    var toolbarHTML = renderToolbar(textarea.id, opts.compact ? COMPACT_ACTIONS : FULL_ACTIONS);
+    wrapper.innerHTML = toolbarHTML;
+
+    // Insert the wrapper before the textarea, then move the textarea
+    // into the wrapper. This keeps the textarea's content + listeners
+    // intact (no re-creation) while putting the toolbar above it.
+    var parent = textarea.parentNode;
+    if (parent) {
+      parent.insertBefore(wrapper, textarea);
+      wrapper.appendChild(textarea);
     }
 
-    // Bound the editor so it never takes over the panel. minHeight gives
-    // a comfortable default, maxHeight caps growth — content beyond that
-    // scrolls inside the editor pane, not the dashboard.
-    // Reasonable defaults — quarter-screen-ish, operators expand via
-    // the fullscreen toolbar button (F11) when they need more room.
-    var defaultMin = opts.compact ? '70px' : '150px';
-    var defaultMax = opts.compact ? '180px' : '30vh';
-
-    // Capture the textarea's current value BEFORE EasyMDE detaches it.
-    // Belt-and-suspenders so the editor never opens blank even if the
-    // EasyMDE constructor's element-binding misreads on some edge case.
-    var initialValue = textarea.value || '';
-    var instance = new EasyMDE({
-      element: textarea,
-      autofocus: opts.autofocus === true, // off by default — autofocus scrolls the page
-      placeholder: opts.placeholder || '',
-      spellChecker: opts.spellChecker === true, // off by default — too noisy on code/markers
-      status: false,
-      minHeight: opts.minHeight || defaultMin,
-      maxHeight: opts.maxHeight || defaultMax,
-      toolbar: opts.toolbar || (opts.compact ? COMPACT_TOOLBAR : FULL_TOOLBAR),
-      sideBySideFullscreen: false,
-      forceSync: true, // mirror to underlying textarea on every keystroke
-      indentWithTabs: false,
-      tabSize: 2,
-      lineWrapping: true,
-      shortcuts: {
-        toggleBold: 'Cmd-B',
-        toggleItalic: 'Cmd-I',
-        drawLink: 'Cmd-K',
-        toggleHeadingSmaller: 'Cmd-H',
-        toggleSideBySide: 'F9',
-        toggleFullScreen: 'F11',
-        togglePreview: 'Cmd-P',
-      },
-      previewClass: ['editor-preview', 'comment-body'],
-      initialValue: initialValue,
-    });
-    // Defensive re-set in case the constructor missed it.
-    if (initialValue && instance.value() !== initialValue) {
-      instance.value(initialValue);
-    }
-    // CRITICAL: EasyMDE's maxHeight option is silently dropped on some
-    // versions, so the editor renders at full content height (we measured
-    // 13,000 px on a 4 KB description, which is the "gigantic" symptom).
-    // setSize() on the underlying CodeMirror is the source of truth.
-    var sizePx = opts.compact ? 180 : 360;
-    if (instance.codemirror && instance.codemirror.setSize) {
-      instance.codemirror.setSize(null, sizePx + 'px');
-    }
-
-    // Cmd/Ctrl+Enter → onSave; Escape → onCancel. We bind on the wrapping
-    // EasyMDE container so the shortcut works whether the user is in the
-    // editor pane, the preview pane, or has focused the toolbar.
-    var wrapEl = instance.element && instance.element.nextSibling;
-    var onKey = function (e) {
+    // Cmd/Ctrl+Enter saves; Escape cancels. Bound on the textarea so
+    // the shortcut fires from inside the editor.
+    function onKey(e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         if (typeof opts.onSave === 'function') {
           e.preventDefault();
@@ -119,24 +109,23 @@
           opts.onCancel();
         }
       }
-    };
-    if (wrapEl && wrapEl.addEventListener) {
-      wrapEl.addEventListener('keydown', onKey, true);
     }
-    // Also bind to the underlying CodeMirror so the shortcut fires from
-    // inside the editor pane (which is what users will hit 99% of the time).
-    if (instance.codemirror && instance.codemirror.on) {
-      instance.codemirror.on('keydown', function (_cm, e) { onKey(e); });
-    }
+    textarea.addEventListener('keydown', onKey);
 
     return {
-      value: function () { return instance.value(); },
-      setValue: function (v) { instance.value(v); },
-      focus: function () { instance.codemirror && instance.codemirror.focus(); },
+      value: function () { return textarea.value; },
+      setValue: function (v) { textarea.value = v; },
+      focus: function () { textarea.focus(); },
       detach: function () {
-        try { instance.toTextArea(); } catch (_) {}
+        textarea.removeEventListener('keydown', onKey);
+        textarea.classList.remove('ol-md-textarea', 'ol-md-textarea-compact');
+        // Move textarea back out of the wrapper, then drop the wrapper.
+        if (wrapper.parentNode) {
+          wrapper.parentNode.insertBefore(textarea, wrapper);
+          wrapper.remove();
+        }
       },
-      instance: instance,
+      element: textarea,
     };
   };
 })(window.OL);

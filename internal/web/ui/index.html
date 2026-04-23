@@ -6,10 +6,7 @@
   <title>OpenPraxis</title>
   <link rel="icon" type="image/png" href="/assets/openpraxis-icon.png">
   <link rel="apple-touch-icon" href="/assets/openpraxis-icon.png">
-  <!-- EasyMDE first so our dark-theme overrides in style.css win the cascade. -->
-  <link rel="stylesheet" href="/vendor/easymde.min.css">
   <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/components/comments.css">
   <!-- Cytoscape + dagre served locally, not from CDN. If these fail to load
        the product DAG overlay is non-functional; the rest of the dashboard
        is unaffected. Pinned: cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0.
@@ -17,7 +14,8 @@
   <script src="/vendor/cytoscape.min.js"></script>
   <script src="/vendor/dagre.min.js"></script>
   <script src="/vendor/cytoscape-dagre.js"></script>
-  <script src="/vendor/easymde.min.js"></script>
+  <!-- GitHub's markdown-toolbar web component (registers <markdown-toolbar>). -->
+  <script type="module" src="/vendor/markdown-toolbar-element.js"></script>
 </head>
 <body>
   <div class="layout">

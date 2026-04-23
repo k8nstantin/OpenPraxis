@@ -1418,36 +1418,67 @@ mark {
 .product-edit-actions .btn-dismiss { padding: 8px 22px; font-size: 13px; }
 .product-edit-form .form-label-compact { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 
-/* EasyMDE — minimal dark-toolbar override + frame the container.
-   We deliberately do NOT touch the .CodeMirror inside (text colors,
-   syntax tokens, cursor) because over-aggressive overrides broke
-   editing in earlier rounds. The editor pane keeps its native theme;
-   only the container chrome is restyled to match the dashboard. */
-.EasyMDEContainer {
+/* OL markdown editor — plain textarea + GitHub's <markdown-toolbar>
+   web component. No CodeMirror, no library theme to fight. We own the
+   look 100%. Same pattern as GitHub / GitLab / Stack Overflow. */
+.ol-md-wrapper {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
-  margin-bottom: 8px;
   background: var(--bg-input);
+  margin-bottom: 8px;
 }
-.EasyMDEContainer .editor-toolbar {
-  background: var(--bg-secondary);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  opacity: 1;
+.ol-md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
 }
-.EasyMDEContainer .editor-toolbar button,
-.EasyMDEContainer .editor-toolbar a {
+.ol-md-toolbar .ol-md-btn {
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--text-secondary);
-  border-color: transparent;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 28px;
+  text-align: center;
 }
-.EasyMDEContainer .editor-toolbar button:hover,
-.EasyMDEContainer .editor-toolbar button.active {
+.ol-md-toolbar .ol-md-btn:hover {
   background: var(--bg-input);
   border-color: var(--border);
   color: var(--text-primary);
 }
-.EasyMDEContainer .editor-toolbar i.separator { border-left: 1px solid var(--border); border-right: none; }
-.EasyMDEContainer .editor-statusbar { background: var(--bg-secondary); color: var(--text-muted); border-top: 1px solid var(--border); }
+.ol-md-toolbar .ol-md-sep {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.ol-md-textarea {
+  width: 100%;
+  min-height: 240px;
+  padding: 12px 14px;
+  background: var(--bg-input) !important;
+  color: var(--text-primary) !important;
+  border: none !important;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  box-sizing: border-box;
+  outline: none;
+}
+.ol-md-textarea:focus {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.ol-md-textarea-compact { min-height: 90px; }
+.ol-md-wrapper-compact .ol-md-toolbar { padding: 4px 6px; }
