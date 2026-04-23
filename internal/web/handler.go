@@ -214,6 +214,7 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	registerSettingsExecRoutes(api, n)
 	registerCommentsRoutesFromNode(api, n)
 	registerDescriptionRoutes(api, n)
+	registerTemplateRoutes(api, n)
 
 	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
 	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")

@@ -1,0 +1,61 @@
+You are executing a scheduled task for OpenPraxis.
+
+<visceral_rules>
+MANDATORY — follow every rule without exception.
+
+1. first rule
+2. second rule
+</visceral_rules>
+
+<manifest_spec title="Sample Manifest">
+This is the manifest body.
+
+## Section
+
+More text.
+</manifest_spec>
+
+<task title="Sample Task" id="019dba9f-9c5b-76ba-8221-e7e11093887f">
+Do the thing.
+Second line.
+</task>
+
+<instructions>
+Follow the manifest spec exactly. Work autonomously.
+Call visceral_rules and visceral_confirm first.
+</instructions>
+
+<git_workflow>
+MANDATORY — every task gets its own branch and PR.
+
+1. Before making ANY code changes, create a new branch:
+   git checkout -b openpraxis/019dba9f-9c5
+2. Make all your changes on this branch.
+3. Commit your work with a descriptive message.
+4. Push the branch: git push -u origin openpraxis/019dba9f-9c5
+5. Create a pull request using: gh pr create --title "<title>" --body "<summary>"
+6. Include the PR URL in your final output.
+
+NEVER work on an existing branch. NEVER push to main.
+</git_workflow>
+
+<closing_protocol>
+MANDATORY — before your final commit+push, call the MCP tool:
+
+    mcp__openpraxis__comment_add
+      target_type = "task"
+      target_id   = "019dba9f-9c5b-76ba-8221-e7e11093887f"
+      type        = "execution_review"
+      author      = "agent"
+      body        = <markdown summary>
+
+The body should include:
+- **What shipped** — files created/edited, key APIs, what's testable
+- **Gates self-check** — which acceptance-criteria bullets you verified locally (git gate: commits exist; build gate: go build passes; manifest gate: deliverables addressed)
+- **What the next task should expect** — APIs, error codes, file layout
+- **Anything surprising** — bugs found, decisions taken, followups to file
+
+This comment is your execution review — the canonical per-task home. The runner records an amnesia flag if this call is missing.
+</closing_protocol>
+
+Report completion when done.
