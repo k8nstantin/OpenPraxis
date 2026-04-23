@@ -155,7 +155,12 @@ func apiSettingsCatalog() http.HandlerFunc {
 func apiScopeSettingsGet(n *node.Node, scopeType string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
-		out, err := mcp.DoSettingsGet(r.Context(), n.SettingsStore, scopeType, id)
+		fullID, err := n.ResolveScopeID(scopeType, id)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		out, err := mcp.DoSettingsGet(r.Context(), n.SettingsStore, scopeType, fullID)
 		if err != nil {
 			writeError(w, err.Error(), settingsHTTPStatus(err))
 			return
@@ -176,6 +181,14 @@ func apiScopeSettingsPut(n *node.Node, scopeType string) http.HandlerFunc {
 	loader := httpVisceralRuleLoader(n)
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
+		// Canonicalise the scope_id from short marker → full UUID up front so
+		// the row lands where the resolver can find it (visceral rule #14,
+		// issue #207).
+		fullID, err := n.ResolveScopeID(scopeType, id)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		// Body is {key: jsonRawValue} — values are kept raw so we can pass the
 		// JSON-encoded form straight into DoSettingsSet (which expects the
 		// same wire shape the MCP tool accepts).
@@ -192,7 +205,7 @@ func apiScopeSettingsPut(n *node.Node, scopeType string) http.HandlerFunc {
 		results := make([]putKeyResult, 0, len(raw))
 		for key, val := range raw {
 			out, err := mcp.DoSettingsSet(r.Context(), n.SettingsStore, loader,
-				scopeType, id, key, string(val), author)
+				scopeType, fullID, key, string(val), author)
 			if err != nil {
 				results = append(results, putKeyResult{
 					Key:   key,
@@ -249,14 +262,19 @@ func apiScopeSettingsDelete(n *node.Node, scopeType string) http.HandlerFunc {
 			writeError(w, err.Error(), settingsHTTPStatus(err))
 			return
 		}
-		if err := n.SettingsStore.Delete(r.Context(), st, id, key); err != nil {
+		fullID, err := n.ResolveScopeID(scopeType, id)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err := n.SettingsStore.Delete(r.Context(), st, fullID, key); err != nil {
 			writeError(w, err.Error(), settingsHTTPStatus(err))
 			return
 		}
 		writeJSON(w, map[string]any{
 			"ok":         true,
 			"scope_type": scopeType,
-			"scope_id":   id,
+			"scope_id":   fullID,
 			"key":        key,
 		})
 	}

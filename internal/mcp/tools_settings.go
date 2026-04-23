@@ -95,7 +95,12 @@ func (s *Server) handleSettingsCatalog(_ context.Context, _ mcplib.CallToolReque
 
 func (s *Server) handleSettingsGet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
-	out, err := DoSettingsGet(ctx, s.node.SettingsStore, argStr(a, "scope_type"), argStr(a, "scope_id"))
+	scopeType := argStr(a, "scope_type")
+	scopeID, err := s.node.ResolveScopeID(scopeType, argStr(a, "scope_id"))
+	if err != nil {
+		return errResult("settings_get: %v", err), nil
+	}
+	out, err := DoSettingsGet(ctx, s.node.SettingsStore, scopeType, scopeID)
 	if err != nil {
 		return errResult("settings_get: %v", err), nil
 	}
@@ -104,8 +109,13 @@ func (s *Server) handleSettingsGet(ctx context.Context, req mcplib.CallToolReque
 
 func (s *Server) handleSettingsSet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
+	scopeType := argStr(a, "scope_type")
+	scopeID, err := s.node.ResolveScopeID(scopeType, argStr(a, "scope_id"))
+	if err != nil {
+		return errResult("settings_set: %v", err), nil
+	}
 	out, err := DoSettingsSet(ctx, s.node.SettingsStore, s.LoadActiveVisceralRules,
-		argStr(a, "scope_type"), argStr(a, "scope_id"),
+		scopeType, scopeID,
 		argStr(a, "key"), argStr(a, "value"),
 		mcpSetAuthor(ctx))
 	if err != nil {
