@@ -63,7 +63,7 @@ func TestRunner_PromptTemplate_IncludesClosingSection(t *testing.T) {
 	task := &Task{ID: "019da142-479c-70d2-865b-d6e593883e3f", Title: "demo"}
 	got := buildPrompt(task, "Manifest X", "manifest body", "rules body")
 
-	mustContain(t, got, "## Closing the task — MANDATORY")
+	mustContain(t, got, "<closing_protocol>")
 	mustContain(t, got, "mcp__openpraxis__comment_add")
 	mustContain(t, got, `type        = "execution_review"`)
 	mustContain(t, got, `author      = "agent"`)
