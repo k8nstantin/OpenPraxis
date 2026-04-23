@@ -936,19 +936,23 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			costUSD = rt.CumulativeCostUSD
 		}
 
-		// Calibrate model pricing from the authoritative final cost so the
-		// next run's live estimate is closer to reality. We use the result
-		// event's usage if present; otherwise fall back to the summed
-		// per-message usage we tracked during the run.
-		if costUSD > 0 {
-			var finalUsage Usage
-			if ru, ok := parseFinalResultUsage(output); ok {
-				finalUsage = ru
-			} else {
-				for _, mu := range rt.usageByMessage {
-					finalUsage = finalUsage.Add(mu)
-				}
+		// Compute final per-token usage from stream-json (preferred) or
+		// the summed per-message usage we tracked during the run. Used
+		// both for pricing calibration AND for the denormalised columns
+		// on task_runs (so dashboards / future cost recompute don't
+		// re-parse the output blob).
+		var finalUsage Usage
+		if ru, ok := parseFinalResultUsage(output); ok {
+			finalUsage = ru
+		} else {
+			for _, mu := range rt.usageByMessage {
+				finalUsage = finalUsage.Add(mu)
 			}
+		}
+
+		// Calibrate model pricing from the authoritative final cost so the
+		// next run's live estimate is closer to reality.
+		if costUSD > 0 {
 			if err := r.store.CalibrateModelPricing(rt.Model, costUSD, finalUsage); err != nil {
 				slog.Warn("calibrate model pricing failed", "component", "runner",
 					"marker", marker, "model", rt.Model, "error", err)
@@ -956,7 +960,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		}
 
 		// Record the run with history — always use real status, not "scheduled"
-		if err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt); err != nil {
+		if err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model); err != nil {
 			slog.Error("record run failed", "component", "runner", "marker", marker, "error", err)
 		}
 
