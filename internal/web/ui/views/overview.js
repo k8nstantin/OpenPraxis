@@ -27,46 +27,14 @@
     }
 
     setText('metric-turns-today', stats.turns_today ?? 0);
-    var cost = stats.cost_today ?? 0;
-    var budget = stats.daily_budget ?? 0;
-    var budgetPct = stats.budget_pct ?? 0;
-
-    // Show "$X / $Y" format when budget is set, otherwise just "$X"
-    var costValEl = document.getElementById('metric-cost-today');
-    if (budget > 0) {
-      setText('metric-cost-today', '$' + cost.toFixed(2) + ' / $' + budget.toFixed(0));
-      if (costValEl) costValEl.style.fontSize = '22px';
-    } else {
-      setText('metric-cost-today', '$' + cost.toFixed(2));
-      if (costValEl) costValEl.style.fontSize = '';
-    }
-
-    // Color logic: green < 80%, yellow 80-100%, red > 100% (with pulse)
-    var costEl = document.getElementById('metric-cost-today');
-    var costCard = document.getElementById('metric-cost-card');
-    if (costEl) {
-      if (budget > 0) {
-        if (budgetPct >= 100) {
-          costEl.style.color = 'var(--red)';
-          costEl.style.animation = 'pulse 1s infinite';
-          if (costCard) costCard.style.borderColor = 'var(--red)';
-        } else if (budgetPct >= 80) {
-          costEl.style.color = 'var(--yellow)';
-          costEl.style.animation = '';
-          if (costCard) costCard.style.borderColor = 'var(--yellow)';
-        } else {
-          costEl.style.color = 'var(--green)';
-          costEl.style.animation = '';
-          if (costCard) costCard.style.borderColor = '';
-        }
-      } else {
-        // No budget set — always green
-        costEl.style.color = 'var(--green)';
-        costEl.style.animation = '';
-        if (costCard) costCard.style.borderColor = '';
-      }
-    }
     setText('metric-tasks-total', stats.tasks_total ?? 0);
+    // Cost metric removed from the overview pending the Unified Cost
+    // Tracking product (019dab45-d8f). The two-pipeline divergence
+    // (task_runs vs claude_code_session hook) made the displayed number
+    // misleading; better to show nothing than a wrong number.
+    // task_runs now persists input_tokens / output_tokens / cache_read /
+    // cache_creation / model / pricing_version, so cost is recomputable
+    // from raw signal at any time.
 
     // Top tasks panel — hide when empty, but DO NOT early-return.
     // Pending/scheduled panel below depends on the rest of this function

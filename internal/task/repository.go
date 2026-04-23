@@ -661,8 +661,19 @@ func (s *Store) ClearActionRequest(id string) error {
 	return err
 }
 
+// PricingVersion stamps the pricing table identity used to compute cost_usd
+// for a task_runs row. Increment whenever internal/task/pricing.go's rate
+// table changes so the future Unified Cost Tracking product (019dab45-d8f)
+// can re-cost historical rows under the right table — or flag drift when
+// today's rates differ from when the row was originally written.
+const PricingVersion = "v1-2026-04"
+
 // RecordRun updates run stats after a task executes and saves to run history.
-func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time) error {
+// usage carries the per-token counts parsed from the agent's stream-json
+// output; they're denormalised onto task_runs so dashboards don't have to
+// re-parse the full output blob on every read. The blob remains in
+// task_runs.output as the source of truth.
+func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	// No truncation — capture full output
 	_, err := s.db.Exec(`UPDATE tasks SET run_count = run_count + 1, last_run_at = ?, last_output = ?, status = ?, updated_at = ? WHERE id = ?`,
@@ -677,9 +688,13 @@ func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD
 		slog.Warn("query run_count failed", "task_id", id, "error", err)
 	}
 
-	// Insert into task_runs history
-	_, err = s.db.Exec(`INSERT INTO task_runs (task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now)
+	// Insert into task_runs history with full denorm (tokens + model + pricing version).
+	_, err = s.db.Exec(`INSERT INTO task_runs
+		(task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
+		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now,
+		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion)
 	return err
 }
 

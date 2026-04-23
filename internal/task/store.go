@@ -147,6 +147,17 @@ func (s *Store) init() error {
 	// Migrate: add cost_usd and turns columns to task_runs
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0`)
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN turns INTEGER NOT NULL DEFAULT 0`)
+	// Token + model + pricing-version denorm. Source of truth stays the
+	// raw stream-json in task_runs.output; these columns let dashboards
+	// avoid re-parsing on every read and let the future Unified Cost
+	// Tracking product (019dab45-d8f) recompute cost retroactively under
+	// a different pricing table.
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cache_create_tokens INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN model TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN pricing_version TEXT NOT NULL DEFAULT ''`)
 
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (
