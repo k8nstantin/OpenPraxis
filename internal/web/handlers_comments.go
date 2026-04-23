@@ -31,6 +31,30 @@ var markdownRenderer = goldmark.New(
 	),
 )
 
+// EnrichWithHTML augments an entity payload with rendered HTML fields so
+// the dashboard can show formatted markdown in product / manifest / task /
+// idea bodies — same goldmark pipeline comments already use. The caller
+// passes an entity struct + a map of {output_key: raw_markdown}; the
+// returned map carries every JSON field of the entity plus an extra
+// `<output_key>_html` key per pair.
+//
+// Example: EnrichWithHTML(product, map[string]string{"description": p.Description})
+// adds `description_html` to the response payload.
+func EnrichWithHTML(entity any, mdFields map[string]string) map[string]any {
+	data, err := json.Marshal(entity)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	for outKey, raw := range mdFields {
+		out[outKey+"_html"] = renderMarkdown(raw)
+	}
+	return out
+}
+
 // renderMarkdown converts a raw comment body to safe HTML. Returns the raw
 // body wrapped in a <p> on goldmark error so the UI always has something to
 // display.

@@ -477,7 +477,7 @@
             </div>
             <div id="task-instructions-display">
               ${t.description
-                ? `<div style="font-size:13px;color:var(--text-secondary);padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);line-height:1.5;max-height:400px;overflow-y:auto">${esc(t.description)}</div>`
+                ? `<div class="md-body" style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);max-height:400px;overflow-y:auto">${t.description_html || esc(t.description)}</div>`
                 : `<div style="font-size:12px;color:var(--text-muted);font-style:italic">No instructions</div>`}
             </div>
             <div id="task-instructions-editor" style="display:none">

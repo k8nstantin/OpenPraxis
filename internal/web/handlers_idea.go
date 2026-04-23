@@ -95,7 +95,7 @@ func apiIdeaGet(n *node.Node) http.HandlerFunc {
 			http.Error(w, "not found", 404)
 			return
 		}
-		writeJSON(w, i)
+		writeJSON(w, EnrichWithHTML(i, map[string]string{"description": i.Description}))
 	}
 }
 

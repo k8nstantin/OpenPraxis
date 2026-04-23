@@ -457,11 +457,11 @@
             <span>Created: ${new Date(m.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
           </div>
-          <div id="manifest-edit-desc" class="manifest-editable" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;padding:4px;border-radius:4px;cursor:pointer" title="Click to edit description">${esc(m.description) || '<span style="color:var(--text-muted);font-style:italic">No description — click to add</span>'}</div>
+          <div id="manifest-edit-desc" class="manifest-editable md-body" style="margin-bottom:12px;padding:4px;border-radius:4px;cursor:pointer" title="Click to edit description">${m.description_html || esc(m.description) || '<span style="color:var(--text-muted);font-style:italic">No description — click to add</span>'}</div>
           <div style="margin-bottom:4px">
             <span style="font-size:12px;color:var(--text-muted);font-weight:500">Spec / Content</span>
           </div>
-          <div id="manifest-content-display" class="manifest-content">${esc(m.content)}</div>
+          <div id="manifest-content-display" class="manifest-content md-body">${m.content_html || esc(m.content)}</div>
           <div id="manifest-content-editor" style="display:none;margin-bottom:12px">
             <textarea id="manifest-content-textarea" class="conv-search" style="width:100%;min-height:300px;font-family:monospace;font-size:13px;padding:12px;resize:vertical;line-height:1.5">${esc(m.content)}</textarea>
             <div style="margin-top:6px;display:flex;gap:8px">

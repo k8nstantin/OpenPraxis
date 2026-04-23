@@ -152,8 +152,8 @@
             '<button class="btn-dismiss btn-action" onclick="OL.archiveIdea(\'' + esc(idea.id) + '\')">Archive</button>' +
           '</div>' +
           '<div id="idea-revisions-mount" style="margin-bottom:12px"></div>' +
-          '<div id="idea-desc-display" style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:12px;white-space:pre-wrap">' +
-            (idea.description ? esc(idea.description) : '<span style="color:var(--text-muted);font-style:italic">No description — click Edit to add</span>') +
+          '<div id="idea-desc-display" class="md-body" style="margin-bottom:12px">' +
+            (idea.description ? (idea.description_html || esc(idea.description)) : '<span style="color:var(--text-muted);font-style:italic">No description — click Edit to add</span>') +
           '</div>' +
           '<div id="idea-desc-editor" style="display:none;margin-bottom:12px">' +
             '<textarea id="idea-desc-textarea" class="conv-search" style="width:100%;min-height:240px;font-family:var(--font-mono);font-size:13px;padding:10px;resize:vertical;line-height:1.5">' + esc(idea.description || '') + '</textarea>' +

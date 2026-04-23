@@ -118,7 +118,13 @@ func apiManifestGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
-		writeJSON(w, enrichManifest(n, m))
+		// Single GET enriches with rendered HTML for the body fields so
+		// the dashboard renders formatted markdown. List endpoints stay
+		// lean (no HTML render per row).
+		writeJSON(w, EnrichWithHTML(enrichManifest(n, m), map[string]string{
+			"content":     m.Content,
+			"description": m.Description,
+		}))
 	}
 }
 
