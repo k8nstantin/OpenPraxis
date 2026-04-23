@@ -101,7 +101,7 @@
           '<span class="comment-time" title="' + esc(iso) + '">' + esc(relTime) + '</span>' +
           controls +
         '</div>' +
-        '<div class="comment-body">' + (c.body_html || esc(c.body) || '') + '</div>' +
+        '<div class="md-body">' + (c.body_html || esc(c.body) || '') + '</div>' +
       '</div>'
     );
   }

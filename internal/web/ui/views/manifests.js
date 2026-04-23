@@ -116,7 +116,6 @@
           <button class="btn-copy-sm" onclick="event.stopPropagation();OL.copy('get manifest ${esc(m.marker)}')" title="Copy ref" aria-label="Copy reference">&#x2398;</button>
         </div>
         <div class="manifest-item-title">${esc(m.title)}</div>
-        <div style="font-size:12px;color:var(--text-secondary)">${esc(m.description)}</div>
         ${jira ? `<div style="font-size:11px;color:var(--accent);margin-top:4px">${esc(jira)}</div>` : ''}
       </div>`;
     }).join('');
@@ -161,12 +160,8 @@
             <input type="text" id="pm-title" class="conv-search" style="font-size:14px" value="${esc(title)}" />
           </div>
           <div style="margin-bottom:16px">
-            <label class="form-label">Description</label>
-            <input type="text" id="pm-description" class="conv-search" style="font-size:13px" value="${esc(description)}" />
-          </div>
-          <div style="margin-bottom:16px">
-            <label class="form-label">Content</label>
-            <textarea id="pm-content" class="conv-search" style="font-size:13px;height:200px;resize:vertical;font-family:var(--font-mono)">${esc(content)}</textarea>
+            <label class="form-label">Declaration (markdown)</label>
+            <textarea id="pm-content" class="conv-search" style="font-size:13px;height:240px;resize:vertical;font-family:var(--font-mono)">${esc(content)}</textarea>
           </div>
           <div style="display:flex;gap:12px;margin-bottom:16px">
             <div style="flex:1">
@@ -198,7 +193,7 @@
 
       bodyEl.querySelector('#pm-submit').onclick = async () => {
         const t = bodyEl.querySelector('#pm-title').value.trim();
-        const d = bodyEl.querySelector('#pm-description').value.trim();
+        const d = '';
         const c = bodyEl.querySelector('#pm-content').value.trim();
         const s = bodyEl.querySelector('#pm-status').value;
         const pid = bodyEl.querySelector('#pm-product-id').value;
@@ -457,9 +452,8 @@
             <span>Created: ${new Date(m.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
           </div>
-          <div id="manifest-edit-desc" class="manifest-editable md-body" style="margin-bottom:12px;padding:4px;border-radius:4px;cursor:pointer" title="Click to edit description">${m.description_html || esc(m.description) || '<span style="color:var(--text-muted);font-style:italic">No description — click to add</span>'}</div>
           <div style="margin-bottom:4px">
-            <span style="font-size:12px;color:var(--text-muted);font-weight:500">Spec / Content</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:500">Declaration</span>
           </div>
           <div id="manifest-content-display" class="manifest-content md-body">${m.content_html || esc(m.content)}</div>
           <div id="manifest-content-editor" style="display:none;margin-bottom:12px">
@@ -637,35 +631,6 @@
         });
       }
 
-      // Inline edit: Description (click to edit)
-      const descEl = document.getElementById('manifest-edit-desc');
-      if (descEl) {
-        OL.onView(descEl, 'click', () => {
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.value = m.description || '';
-          input.className = 'conv-search';
-          input.style.cssText = 'font-size:13px;padding:4px;width:100%';
-          input.placeholder = 'Enter description...';
-          descEl.replaceWith(input);
-          input.focus();
-          const save = async () => {
-            const val = input.value.trim();
-            if (val !== (m.description || '')) {
-              await fetch('/api/manifests/' + m.id, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: val})
-              });
-              OL.loadManifests();
-            }
-            OL.loadManifest(m.id);
-          };
-          OL.onView(input, 'blur', save);
-          OL.onView(input, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') OL.loadManifest(m.id); });
-        });
-      }
-
       // Inline edit: Product assignment (click to show dropdown)
       const productDisplay = document.getElementById('manifest-product-display');
       if (productDisplay) {
@@ -727,7 +692,7 @@
         contentEditor.style.display = 'block';
         if (!contentMDE) {
           contentMDE = OL.mountEditor(document.getElementById('manifest-content-textarea'), {
-            placeholder: 'Manifest spec / content in markdown…',
+            placeholder: 'Manifest declaration in markdown…',
             onSave: saveContent,
             onCancel: closeContentEditor,
           });
