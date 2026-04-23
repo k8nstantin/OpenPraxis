@@ -243,6 +243,23 @@ func (s *Store) Update(id string, title, description *string) (*Task, error) {
 	return s.Get(id)
 }
 
+// SetManifest swaps a task's primary manifest_id. Used to re-home a task
+// when an operator splits / restructures manifests after the task was
+// originally created (e.g. ELS atomic split moved 12 tasks under 6 new
+// implementation manifests). The id may be a marker or full UUID. Returns
+// the task as it stands after the update.
+func (s *Store) SetManifest(taskID, manifestID string) (*Task, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		"UPDATE tasks SET manifest_id = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''",
+		manifestID, now, taskID, taskID+"%",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set manifest: %w", err)
+	}
+	return s.Get(taskID)
+}
+
 // UpdateStatus changes a task's status, validating the transition against
 // the canonical state machine in status.go. Returns the same validation
 // error surface ValidateTransition produces when the move is illegal — the
