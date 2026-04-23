@@ -198,7 +198,7 @@ func apiTaskGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
-		writeJSON(w, t)
+		writeJSON(w, EnrichWithHTML(t, map[string]string{"description": t.Description}))
 	}
 }
 

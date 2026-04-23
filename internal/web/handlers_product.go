@@ -109,7 +109,7 @@ func apiProductGet(n *node.Node) http.HandlerFunc {
 			http.Error(w, "not found", 404)
 			return
 		}
-		writeJSON(w, p)
+		writeJSON(w, EnrichWithHTML(p, map[string]string{"description": p.Description}))
 	}
 }
 
