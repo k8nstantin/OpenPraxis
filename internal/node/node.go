@@ -494,6 +494,38 @@ func (n *Node) ReindexMemories(ids []string) {
 	}
 }
 
+// ResolveScopeID canonicalises a settings/comment scope_id from a short
+// marker to its full UUID by dispatching on scopeType. Used by every
+// settings + cross-entity write path so short markers don't end up
+// silently orphaned in the database (visceral rule #14, issue #207).
+//
+// Returns ("", nil) for an empty scope_id; returns the input unchanged
+// for unknown scope types (caller validates the type separately).
+func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
+	if scopeID == "" {
+		return "", nil
+	}
+	switch scopeType {
+	case "product":
+		return n.ResolveProductID(scopeID)
+	case "manifest":
+		return n.ResolveManifestID(scopeID)
+	case "task":
+		if n.Tasks == nil {
+			return scopeID, nil
+		}
+		t, err := n.Tasks.Get(scopeID)
+		if err != nil {
+			return "", fmt.Errorf("resolve task %q: %w", scopeID, err)
+		}
+		if t == nil {
+			return "", fmt.Errorf("task not found: %s", scopeID)
+		}
+		return t.ID, nil
+	}
+	return scopeID, nil
+}
+
 // ResolveProductID resolves a product marker or full ID to the full UUID.
 // Returns empty string if productID is empty, error if not found.
 func (n *Node) ResolveProductID(productID string) (string, error) {
