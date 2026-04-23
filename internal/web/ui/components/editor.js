@@ -52,14 +52,21 @@
       };
     }
 
+    // Bound the editor so it never takes over the panel. minHeight gives
+    // a comfortable default, maxHeight caps growth — content beyond that
+    // scrolls inside the editor pane, not the dashboard.
+    // Reasonable defaults — operators can expand via the fullscreen
+    // toolbar button (F11) or drag the editor pane via the splitter.
+    var defaultMin = opts.compact ? '80px' : '180px';
+    var defaultMax = opts.compact ? '220px' : '40vh';
     var instance = new EasyMDE({
       element: textarea,
-      autofocus: opts.autofocus !== false,
+      autofocus: opts.autofocus === true, // off by default — autofocus scrolls the page
       placeholder: opts.placeholder || '',
       spellChecker: opts.spellChecker === true, // off by default — too noisy on code/markers
-      status: opts.status === true ? ['lines', 'words'] : false,
-      minHeight: opts.minHeight || (opts.compact ? '120px' : '40vh'),
-      maxHeight: opts.maxHeight || (opts.compact ? '320px' : ''),
+      status: false,
+      minHeight: opts.minHeight || defaultMin,
+      maxHeight: opts.maxHeight || defaultMax,
       toolbar: opts.toolbar || (opts.compact ? COMPACT_TOOLBAR : FULL_TOOLBAR),
       sideBySideFullscreen: false,
       forceSync: true, // mirror to underlying textarea on every keystroke
