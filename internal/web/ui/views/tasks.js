@@ -400,6 +400,7 @@
             ` : ''}
           </div>
 
+          <div id="task-run-stats-mount" style="margin-bottom:12px"></div>
           <div id="task-revisions-mount" style="margin-bottom:12px"></div>
 
           <!-- SCHEDULE SECTION -->
@@ -536,6 +537,11 @@
       const knobMount = document.getElementById('task-knobs-mount');
       if (knobMount && OL.renderKnobSection) {
         OL.renderKnobSection(knobMount, { type: 'task', id: t.id });
+      }
+
+      const runStatsMount = document.getElementById('task-run-stats-mount');
+      if (runStatsMount && OL.renderRunStats) {
+        OL.renderRunStats(runStatsMount, t.id);
       }
 
       const revisionsMount = document.getElementById('task-revisions-mount');

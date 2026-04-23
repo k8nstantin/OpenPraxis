@@ -703,7 +703,7 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at
+	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version
 		FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
 	if err != nil {
 		return nil, err
@@ -716,8 +716,9 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 func (s *Store) GetRun(runID int) (*TaskRun, error) {
 	var r TaskRun
 	var startedStr, completedStr string
-	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at FROM task_runs WHERE id = ?`, runID).
-		Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr)
+	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version FROM task_runs WHERE id = ?`, runID).
+		Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -734,7 +735,7 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at
+	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version
 		FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
 		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {
