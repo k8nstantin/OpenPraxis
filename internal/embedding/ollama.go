@@ -7,15 +7,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
 // Engine handles embedding generation via Ollama's local API.
+// Immutable-text embedding results are cached in-memory keyed by model+text
+// so repeat calls (visceral rules + manifest titles hit on every tool-call
+// hook) don't round-trip to Ollama every time. Cached entries live until
+// the process exits; rules/manifest text are effectively immutable per
+// row-id so cache hit rate is near 100% after the first warmup.
 type Engine struct {
 	baseURL   string
 	model     string
 	dimension int
 	client    *http.Client
+
+	cacheMu sync.RWMutex
+	cache   map[string][]float32
 }
 
 // NewEngine creates an embedding engine that talks to Ollama.
@@ -27,14 +36,27 @@ func NewEngine(ollamaURL, model string, dimension int) *Engine {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		cache: make(map[string][]float32),
 	}
 }
 
-// Embed generates an embedding vector for the given text.
+// Embed generates an embedding vector for the given text, serving repeat
+// calls for the same text from an in-memory cache. Kills the "embed every
+// visceral rule / every manifest title per PostToolUse hook" pattern that
+// pegged the serve at 500%+ CPU on tool-call bursts.
 func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 	if text == "" {
 		return make([]float32, e.dimension), nil
 	}
+
+	// Cache key includes model so a model swap invalidates naturally.
+	key := e.model + "\x00" + text
+	e.cacheMu.RLock()
+	if v, ok := e.cache[key]; ok {
+		e.cacheMu.RUnlock()
+		return v, nil
+	}
+	e.cacheMu.RUnlock()
 
 	body := embedRequest{
 		Model: e.model,
@@ -80,6 +102,9 @@ func (e *Engine) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("expected %d dimensions, got %d", e.dimension, len(vec))
 	}
 
+	e.cacheMu.Lock()
+	e.cache[key] = vec
+	e.cacheMu.Unlock()
 	return vec, nil
 }
 

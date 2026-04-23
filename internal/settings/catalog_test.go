@@ -8,9 +8,10 @@ import (
 func TestCatalog_HasExpectedKnobCount(t *testing.T) {
 	// 12 v1 knobs + 2 prompt-context knobs (prompt_max_comment_chars,
 	// prompt_max_context_pct) added in the runner-hardening manifest
-	// 019db6a6-72f. Both inherit via the existing task → manifest →
-	// product → system resolver.
-	const want = 14
+	// 019db6a6-72f + 1 compliance_checks_enabled flag added after the
+	// PostToolUse embedding spam incident. Every knob inherits via the
+	// existing task → manifest → product → system resolver.
+	const want = 15
 	got := len(Catalog())
 	if got != want {
 		t.Fatalf("Catalog() returned %d knobs, want %d", got, want)
