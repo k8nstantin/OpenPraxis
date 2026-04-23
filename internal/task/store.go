@@ -40,17 +40,23 @@ type Task struct {
 
 // TaskRun represents a single execution of a task, preserving history.
 type TaskRun struct {
-	ID          int       `json:"id"`
-	TaskID      string    `json:"task_id"`
-	RunNumber   int       `json:"run_number"`
-	Output      string    `json:"output"`
-	Status      string    `json:"status"`
-	Actions     int       `json:"actions"`
-	Lines       int       `json:"lines"`
-	CostUSD     float64   `json:"cost_usd"`
-	Turns       int       `json:"turns"`
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt time.Time `json:"completed_at"`
+	ID                int       `json:"id"`
+	TaskID            string    `json:"task_id"`
+	RunNumber         int       `json:"run_number"`
+	Output            string    `json:"output"`
+	Status            string    `json:"status"`
+	Actions           int       `json:"actions"`
+	Lines             int       `json:"lines"`
+	CostUSD           float64   `json:"cost_usd"`
+	Turns             int       `json:"turns"`
+	InputTokens       int       `json:"input_tokens"`
+	OutputTokens      int       `json:"output_tokens"`
+	CacheReadTokens   int       `json:"cache_read_tokens"`
+	CacheCreateTokens int       `json:"cache_create_tokens"`
+	Model             string    `json:"model"`
+	PricingVersion    string    `json:"pricing_version"`
+	StartedAt         time.Time `json:"started_at"`
+	CompletedAt       time.Time `json:"completed_at"`
 }
 
 // Store manages task persistence.
@@ -307,7 +313,8 @@ func scanRuns(rows *sql.Rows) ([]TaskRun, error) {
 	for rows.Next() {
 		var r TaskRun
 		var startedStr, completedStr string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr); err != nil {
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion); err != nil {
 			return nil, err
 		}
 		r.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
