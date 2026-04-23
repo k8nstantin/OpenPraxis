@@ -55,10 +55,15 @@
     // Bound the editor so it never takes over the panel. minHeight gives
     // a comfortable default, maxHeight caps growth — content beyond that
     // scrolls inside the editor pane, not the dashboard.
-    // Reasonable defaults — operators can expand via the fullscreen
-    // toolbar button (F11) or drag the editor pane via the splitter.
-    var defaultMin = opts.compact ? '80px' : '180px';
-    var defaultMax = opts.compact ? '220px' : '40vh';
+    // Reasonable defaults — quarter-screen-ish, operators expand via
+    // the fullscreen toolbar button (F11) when they need more room.
+    var defaultMin = opts.compact ? '70px' : '150px';
+    var defaultMax = opts.compact ? '180px' : '30vh';
+
+    // Capture the textarea's current value BEFORE EasyMDE detaches it.
+    // Belt-and-suspenders so the editor never opens blank even if the
+    // EasyMDE constructor's element-binding misreads on some edge case.
+    var initialValue = textarea.value || '';
     var instance = new EasyMDE({
       element: textarea,
       autofocus: opts.autofocus === true, // off by default — autofocus scrolls the page
@@ -83,7 +88,12 @@
         togglePreview: 'Cmd-P',
       },
       previewClass: ['editor-preview', 'comment-body'],
+      initialValue: initialValue,
     });
+    // Defensive re-set in case the constructor missed it.
+    if (initialValue && instance.value() !== initialValue) {
+      instance.value(initialValue);
+    }
 
     // Cmd/Ctrl+Enter → onSave; Escape → onCancel. We bind on the wrapping
     // EasyMDE container so the shortcut works whether the user is in the

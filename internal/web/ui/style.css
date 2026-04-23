@@ -1418,13 +1418,14 @@ mark {
 .product-edit-actions .btn-dismiss { padding: 8px 22px; font-size: 13px; }
 .product-edit-form .form-label-compact { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 
-/* EasyMDE dark-theme overrides + visible container boundary.
-   `!important` on the toolbar/codemirror chrome because EasyMDE's bundled
-   easymde.min.css is aggressive (lots of inline styles + high-specificity
-   selectors). We keep the overrides scoped to .EasyMDEContainer so they
-   never bleed into the rest of the dashboard. */
+/* EasyMDE dark-theme overrides — minimal, just enough to flip the
+   shipped light theme to dark. Crucially, EasyMDE's bundled CSS sets
+   per-token colors (cm-variable, cm-keyword, cm-string, etc.) tuned for
+   a light background — those tokens render as near-black on our dark
+   background, making the text effectively invisible (looks "blank,
+   not editable"). The catch-all `.CodeMirror *` rule below forces every
+   token to the dashboard's text-primary so content is always readable. */
 .EasyMDEContainer {
-  color: var(--text-primary) !important;
   border: 1px solid var(--border) !important;
   border-radius: 6px !important;
   background: var(--bg-input) !important;
@@ -1441,61 +1442,52 @@ mark {
 }
 .EasyMDEContainer .editor-toolbar button {
   color: var(--text-secondary) !important;
-  border-color: transparent !important;
   background: transparent !important;
+  border-color: transparent !important;
 }
 .EasyMDEContainer .editor-toolbar button:hover,
 .EasyMDEContainer .editor-toolbar button.active {
   background: var(--bg-input) !important;
-  border-color: var(--border) !important;
   color: var(--text-primary) !important;
 }
-.EasyMDEContainer .editor-toolbar a,
-.EasyMDEContainer .editor-toolbar i { color: var(--text-secondary) !important; }
 .EasyMDEContainer .editor-toolbar i.separator {
   border-left: 1px solid var(--border) !important;
   border-right: none !important;
-  color: transparent !important;
 }
 .EasyMDEContainer .CodeMirror {
   background: var(--bg-input) !important;
   color: var(--text-primary) !important;
-  border: none !important;
-  border-bottom-left-radius: 6px !important;
-  border-bottom-right-radius: 6px !important;
   font-family: var(--font-mono) !important;
-  font-size: 13px !important;
-  line-height: 1.55 !important;
 }
-.EasyMDEContainer .CodeMirror-scroll { background: var(--bg-input) !important; }
-.EasyMDEContainer .CodeMirror-gutters { background: var(--bg-secondary) !important; border-right: 1px solid var(--border) !important; }
-.EasyMDEContainer .CodeMirror-cursor { border-left-color: var(--accent) !important; }
+/* The catch-all that fixes "blank not editable" — EasyMDE's per-token
+   classes (cm-variable, cm-keyword, cm-meta, cm-tag, cm-atom, etc.)
+   default to dark colors and become invisible on dark backgrounds. */
+.EasyMDEContainer .CodeMirror,
+.EasyMDEContainer .CodeMirror pre,
+.EasyMDEContainer .CodeMirror-line,
+.EasyMDEContainer .CodeMirror-line span { color: var(--text-primary) !important; }
+.EasyMDEContainer .CodeMirror-cursor { border-left: 2px solid var(--accent) !important; }
 .EasyMDEContainer .CodeMirror-selected { background: rgba(70, 130, 240, 0.25) !important; }
-.EasyMDEContainer .CodeMirror-line { color: var(--text-primary) !important; }
-.EasyMDEContainer .cm-header { color: var(--accent) !important; font-weight: 700; }
-.EasyMDEContainer .cm-strong { color: var(--text-primary) !important; font-weight: 700; }
-.EasyMDEContainer .cm-em { color: var(--yellow) !important; font-style: italic; }
-.EasyMDEContainer .cm-link { color: var(--accent) !important; }
-.EasyMDEContainer .cm-url { color: var(--text-muted) !important; }
-.EasyMDEContainer .cm-comment, .EasyMDEContainer .cm-quote { color: var(--green) !important; }
-.EasyMDEContainer .cm-formatting { color: var(--text-muted) !important; }
-.EasyMDEContainer .cm-hr { color: var(--text-muted) !important; }
-.EasyMDEContainer .editor-preview-side,
-.EasyMDEContainer .editor-preview {
+.EasyMDEContainer .CodeMirror-gutters { background: var(--bg-secondary) !important; border-right: 1px solid var(--border) !important; }
+/* Markdown token highlights — re-applied AFTER the catch-all so they
+   actually take effect. */
+.EasyMDEContainer .CodeMirror-line .cm-header { color: var(--accent) !important; font-weight: 700; }
+.EasyMDEContainer .CodeMirror-line .cm-strong { font-weight: 700; }
+.EasyMDEContainer .CodeMirror-line .cm-em { color: var(--yellow) !important; font-style: italic; }
+.EasyMDEContainer .CodeMirror-line .cm-link,
+.EasyMDEContainer .CodeMirror-line .cm-url { color: var(--accent) !important; }
+.EasyMDEContainer .CodeMirror-line .cm-comment,
+.EasyMDEContainer .CodeMirror-line .cm-quote { color: var(--green) !important; }
+.EasyMDEContainer .CodeMirror-line .cm-formatting { color: var(--text-muted) !important; }
+.EasyMDEContainer .editor-preview,
+.EasyMDEContainer .editor-preview-side {
   background: var(--bg-secondary) !important;
   color: var(--text-primary) !important;
-  border: none !important;
-  border-left: 1px solid var(--border) !important;
-  font-family: var(--font-base, system-ui, sans-serif) !important;
-  font-size: 14px !important;
-  line-height: 1.6 !important;
 }
 .EasyMDEContainer .editor-preview pre,
 .EasyMDEContainer .editor-preview code {
   background: var(--bg-input) !important;
   color: var(--text-primary) !important;
-  font-family: var(--font-mono) !important;
 }
-.EasyMDEContainer .editor-statusbar { color: var(--text-muted) !important; background: var(--bg-secondary) !important; }
+.EasyMDEContainer .editor-statusbar { background: var(--bg-secondary) !important; color: var(--text-muted) !important; }
 .EasyMDEContainer .CodeMirror-fullscreen { background: var(--bg-primary) !important; z-index: 100; }
-.EasyMDEContainer .editor-preview-side-onleft { border-left: none !important; border-right: 1px solid var(--border) !important; }
