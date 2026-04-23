@@ -1253,47 +1253,56 @@ func (r *Runner) GetOutput(taskID string) ([]string, bool) {
 	return rt.Output, true
 }
 
+// buildPrompt assembles the runner's task prompt. Each section is wrapped
+// in an XML tag (Anthropic's recommended pattern for delimiting prompt
+// sections to Claude — measurably improves instruction-following on long
+// contexts). The body of each section is markdown.
 func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string) string {
 	var b strings.Builder
 	b.WriteString("You are executing a scheduled task for OpenPraxis.\n\n")
 
 	if visceralRules != "" {
-		b.WriteString("## Visceral Rules (MANDATORY — follow without exception)\n")
+		b.WriteString("<visceral_rules>\n")
+		b.WriteString("MANDATORY — follow every rule without exception.\n\n")
 		b.WriteString(visceralRules)
-		b.WriteString("\n\n")
+		b.WriteString("\n</visceral_rules>\n\n")
 	}
 
-	b.WriteString(fmt.Sprintf("## Manifest: %s\n", manifestTitle))
+	b.WriteString(fmt.Sprintf("<manifest_spec title=%q>\n", manifestTitle))
 	b.WriteString(manifestContent)
-	b.WriteString("\n\n")
+	b.WriteString("\n</manifest_spec>\n\n")
 
-	b.WriteString(fmt.Sprintf("## Task: %s\n", t.Title))
+	b.WriteString(fmt.Sprintf("<task title=%q id=%q>\n", t.Title, t.ID))
 	if t.Description != "" {
 		b.WriteString(t.Description)
 		b.WriteString("\n")
 	}
+	b.WriteString("</task>\n\n")
 
-	b.WriteString("\n## Instructions\n")
+	b.WriteString("<instructions>\n")
 	b.WriteString("Follow the manifest spec exactly. Work autonomously.\n")
-	b.WriteString("Call visceral_rules and visceral_confirm first.\n\n")
+	b.WriteString("Call visceral_rules and visceral_confirm first.\n")
+	b.WriteString("</instructions>\n\n")
 
-	// Git isolation: each task gets its own branch and PR
+	// Git isolation: each task gets its own branch and PR.
 	marker := t.ID
 	if len(marker) >= 12 {
 		marker = marker[:12]
 	}
-	b.WriteString("## Git Workflow (MANDATORY)\n")
-	b.WriteString(fmt.Sprintf("1. Before making ANY code changes, create a new branch:\n"))
+	b.WriteString("<git_workflow>\n")
+	b.WriteString("MANDATORY — every task gets its own branch and PR.\n\n")
+	b.WriteString("1. Before making ANY code changes, create a new branch:\n")
 	b.WriteString(fmt.Sprintf("   git checkout -b openpraxis/%s\n", marker))
 	b.WriteString("2. Make all your changes on this branch.\n")
 	b.WriteString("3. Commit your work with a descriptive message.\n")
 	b.WriteString(fmt.Sprintf("4. Push the branch: git push -u origin openpraxis/%s\n", marker))
 	b.WriteString("5. Create a pull request using: gh pr create --title \"<title>\" --body \"<summary>\"\n")
-	b.WriteString("6. Include the PR URL in your final output.\n")
-	b.WriteString("NEVER work on an existing branch. NEVER push to main. Each task gets its own branch and PR.\n\n")
+	b.WriteString("6. Include the PR URL in your final output.\n\n")
+	b.WriteString("NEVER work on an existing branch. NEVER push to main.\n")
+	b.WriteString("</git_workflow>\n\n")
 
-	b.WriteString("## Closing the task — MANDATORY\n")
-	b.WriteString("Before your final commit+push, call the MCP tool:\n\n")
+	b.WriteString("<closing_protocol>\n")
+	b.WriteString("MANDATORY — before your final commit+push, call the MCP tool:\n\n")
 	b.WriteString("    mcp__openpraxis__comment_add\n")
 	b.WriteString(fmt.Sprintf("      target_type = \"task\"\n      target_id   = \"%s\"\n", t.ID))
 	b.WriteString("      type        = \"execution_review\"\n")
@@ -1304,7 +1313,8 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string) 
 	b.WriteString("- **Gates self-check** — which acceptance-criteria bullets you verified locally (git gate: commits exist; build gate: go build passes; manifest gate: deliverables addressed)\n")
 	b.WriteString("- **What the next task should expect** — APIs, error codes, file layout\n")
 	b.WriteString("- **Anything surprising** — bugs found, decisions taken, followups to file\n\n")
-	b.WriteString("This comment is your execution review. It becomes the canonical per-task home — no parallel memory note required unless you want a structured cross-session memory as well. The runner will record an amnesia flag if this call is missing.\n\n")
+	b.WriteString("This comment is your execution review — the canonical per-task home. The runner records an amnesia flag if this call is missing.\n")
+	b.WriteString("</closing_protocol>\n\n")
 
 	b.WriteString("Report completion when done.\n")
 
