@@ -94,6 +94,14 @@
     if (initialValue && instance.value() !== initialValue) {
       instance.value(initialValue);
     }
+    // CRITICAL: EasyMDE's maxHeight option is silently dropped on some
+    // versions, so the editor renders at full content height (we measured
+    // 13,000 px on a 4 KB description, which is the "gigantic" symptom).
+    // setSize() on the underlying CodeMirror is the source of truth.
+    var sizePx = opts.compact ? 180 : 360;
+    if (instance.codemirror && instance.codemirror.setSize) {
+      instance.codemirror.setSize(null, sizePx + 'px');
+    }
 
     // Cmd/Ctrl+Enter → onSave; Escape → onCancel. We bind on the wrapping
     // EasyMDE container so the shortcut works whether the user is in the
