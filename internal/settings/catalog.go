@@ -70,6 +70,7 @@ func Catalog() []KnobDef {
 		// idea 019db6ba-ba0 and memory 019db6bb-a4e.
 		{Key: "prompt_max_comment_chars", Type: KnobInt, SliderMin: f(500), SliderMax: f(10000), SliderStep: f(500), Default: 2000, Description: "Max chars per comment when injected into the task-thread context block; longer comments are truncated with a pointer to the full text."},
 		{Key: "prompt_max_context_pct", Type: KnobFloat, SliderMin: f(0.1), SliderMax: f(0.9), SliderStep: f(0.05), Default: 0.4, Description: "Max fraction of the resolved model's context window that the prior-runs + other-comments block may consume; older comments drop first when over budget."},
+		{Key: "compliance_checks_enabled", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "true", Description: "When true, PostToolUse hooks run visceral-compliance + manifest-delusion embedding checks per tool call. Disable for high-throughput agents — each tool call triggers up to N × M embedding calls (N rules, M open manifests) which can peg serve CPU. Defaults true; set false at product or task scope to opt out."},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
 			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 			// MCP tools the runner's prompt template instructs agents to call.

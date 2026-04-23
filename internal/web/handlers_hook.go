@@ -54,11 +54,15 @@ func apiHook(n *node.Node) http.HandlerFunc {
 					slog.Warn("record action failed", "error", err)
 				}
 
-				// Visceral compliance check — compare action against rules
-				go checkVisceralCompliance(n, event.SessionID, toolName, toolInput)
-
-				// Manifest delusion check — is the action related to any active manifest?
-				go checkManifestDelusion(n, event.SessionID, toolName, toolInput)
+				// Compliance + delusion checks go through a bounded worker
+				// pool (cap 256 in-flight) so a chatty agent can't spawn
+				// unbounded goroutines. The `compliance_checks_enabled`
+				// knob (system-scope default true) lets operators opt out
+				// entirely for high-throughput agents.
+				if complianceChecksEnabled(r.Context(), n) {
+					enqueueComplianceCheck(n, "visceral", event.SessionID, toolName, toolInput)
+					enqueueComplianceCheck(n, "delusion", event.SessionID, toolName, toolInput)
+				}
 			}
 		}
 
