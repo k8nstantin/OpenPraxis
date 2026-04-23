@@ -458,12 +458,6 @@
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
           </div>
           <div id="manifest-edit-desc" class="manifest-editable" style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;padding:4px;border-radius:4px;cursor:pointer" title="Click to edit description">${esc(m.description) || '<span style="color:var(--text-muted);font-style:italic">No description — click to add</span>'}</div>
-          ${depsHtml}
-          ${linkedIdeasHtml}
-          ${linkedTasksHtml}
-          <div id="manifest-knobs-mount" style="margin-top:16px"></div>
-          <div id="manifest-comments-mount" style="margin-top:16px"></div>
-          ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-bottom:4px">
             <span style="font-size:12px;color:var(--text-muted);font-weight:500">Spec / Content</span>
           </div>
@@ -475,6 +469,12 @@
               <button id="manifest-content-cancel" class="btn-dismiss" style="padding:4px 12px;font-size:12px">Cancel</button>
             </div>
           </div>
+          ${depsHtml}
+          ${linkedIdeasHtml}
+          ${linkedTasksHtml}
+          <div id="manifest-knobs-mount" style="margin-top:16px"></div>
+          <div id="manifest-comments-mount" style="margin-top:16px"></div>
+          ${tags ? `<div style="margin-bottom:12px">${tags}</div>` : ''}
           <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);display:flex;gap:16px">
             <span>Created: ${new Date(m.created_at).toLocaleString()}</span>
             <span>Updated: ${new Date(m.updated_at).toLocaleString()}</span>
@@ -732,6 +732,8 @@
             onCancel: closeContentEditor,
           });
         }
+        contentEditor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (contentMDE && contentMDE.focus) setTimeout(() => contentMDE.focus(), 250);
       };
       if (contentDisplay && contentEditor) {
         OL.onView(document.getElementById('manifest-content-cancel'), 'click', closeContentEditor);
