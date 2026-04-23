@@ -1364,16 +1364,8 @@ mark {
 .comment-type-link             { color: var(--text-muted); }
 .comment-type-review_rejection { color: var(--red); }
 .comment-type-review_approval  { color: var(--green); }
-.comment-body { font-size: 12px; line-height: 1.5; color: var(--text-primary); }
-.comment-body p { margin: 0 0 6px 0; }
-.comment-body p:last-child { margin-bottom: 0; }
-.comment-body pre, .comment-body code { background: var(--bg-primary); padding: 2px 4px; border-radius: 3px; font-family: var(--font-mono); }
-.comment-body pre { padding: 8px; overflow-x: auto; }
-.comment-body pre code { background: transparent; padding: 0; }
-.comment-body table { border-collapse: collapse; margin: 4px 0; }
-.comment-body th, .comment-body td { border: 1px solid var(--border); padding: 4px 8px; }
-.comment-body a { color: var(--accent); }
-.comment-body ul, .comment-body ol { margin: 4px 0 6px 20px; padding: 0; }
+/* .comment-body retired — comments now use .md-body for typography
+   parity with product / manifest / task / idea bodies. */
 
 /* DV/M5 — Description revisions */
 .revisions-section { border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--bg-secondary); }
