@@ -158,9 +158,48 @@
     }
   };
 
+  // --- Editor state (one editor in flight at a time) --------------------
+  var _editorMDE = null;
+  var _editorDraft = null;
+  var _editorTpl = null;
+
+  function closeEditor() {
+    if (_editorMDE) { try { _editorMDE.detach(); } catch (e) {} _editorMDE = null; }
+    _editorDraft = null;
+    _editorTpl = null;
+  }
+
+  // --- Restore confirm modal --------------------------------------------
+  function showRestoreConfirm(ver, ts, onConfirm) {
+    var existing = document.getElementById('runner-restore-modal');
+    if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.id = 'runner-restore-modal';
+    modal.className = 'runner-restore-confirm';
+    modal.innerHTML =
+      '<div class="runner-restore-confirm-box">' +
+        '<div class="runner-restore-confirm-title">Restore revision</div>' +
+        '<div class="runner-restore-confirm-body">This creates a new revision matching v' +
+          esc(String(ver)) + ' from ' + esc(ts) + '. Proceed?</div>' +
+        '<div class="runner-restore-confirm-actions">' +
+          '<button type="button" class="btn-secondary" data-action="cancel">Cancel</button>' +
+          '<button type="button" class="btn-primary" data-action="confirm">Confirm</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', function() {
+      modal.remove();
+    });
+    modal.querySelector('[data-action="confirm"]').addEventListener('click', function() {
+      modal.remove();
+      onConfirm();
+    });
+  }
+
   // --- Right pane: template detail + history ----------------------------
   OL.loadTemplate = async function(uid) {
     _selectedUID = uid;
+    closeEditor();
     var detailEl = document.getElementById('runner-detail');
     var titleEl  = document.getElementById('runner-detail-title');
     if (!detailEl) return;
@@ -171,15 +210,18 @@
       var results = await Promise.all([
         fetchJSON('/api/templates/' + encodeURIComponent(uid)),
         fetchJSON('/api/templates/' + encodeURIComponent(uid) + '/history'),
+        fetchJSON('/api/tasks?limit=200').catch(function() { return []; }),
       ]);
       var tpl     = results[0];
       var history = results[1] || [];
+      var tasks   = results[2] || [];
 
       if (titleEl) titleEl.textContent = tpl.title || tpl.section;
+      _editorTpl = tpl;
 
       var lastEdit = history.length > 0 ? history[0] : tpl;
 
-      // Metadata bar
+      // Metadata bar with Edit button
       var metaHtml =
         '<div class="runner-meta-bar">' +
           '<span class="runner-title">' + esc(tpl.title || tpl.section) + '</span>' +
@@ -193,14 +235,29 @@
               ? '<span class="runner-reason-inline">' + esc(lastEdit.reason) + '</span>'
               : '') +
           '</span>' +
+          '<button type="button" class="btn-secondary runner-edit-btn" data-action="edit">Edit</button>' +
         '</div>';
 
-      // Current body (rendered markdown)
+      // Current body (rendered markdown) — read-only by default
       var bodyHtml =
         '<div class="runner-section-header">Current body</div>' +
-        '<div class="md-body runner-body-block">' + mdToHtml(tpl.body) + '</div>';
+        '<div class="md-body runner-body-block" id="runner-body-block">' + mdToHtml(tpl.body) + '</div>' +
+        '<div id="runner-editor-host"></div>';
 
-      // History list newest-first
+      // Preview pane
+      var taskOpts = '<option value="">— select a task —</option>' +
+        (tasks || []).map(function(t) {
+          var label = (t.title || t.id || '').slice(0, 80);
+          return '<option value="' + esc(t.id) + '">' + esc(label) + '</option>';
+        }).join('');
+      var previewHtml =
+        '<div class="runner-section-header">Preview against task</div>' +
+        '<div class="runner-preview-row">' +
+          '<select id="runner-preview-task" class="runner-preview-select">' + taskOpts + '</select>' +
+        '</div>' +
+        '<div id="runner-preview-pane" class="runner-diff-pane runner-preview-pane"></div>';
+
+      // History list newest-first, each row with Restore button
       var total = history.length;
       var histHtml = '<div class="runner-section-header">History</div>';
       if (!total) {
@@ -208,22 +265,166 @@
       } else {
         histHtml += history.map(function(row, idx) {
           var ver = total - idx;
+          var ts  = row.valid_from || '';
           return '<div class="runner-template-row runner-history-row">' +
             '<span class="runner-ver">v' + ver + '</span>' +
             '<span class="runner-author">' + esc(row.changed_by || '—') + '</span>' +
-            '<span class="runner-time">' + (row.valid_from ? timeAgo(row.valid_from) : '—') + '</span>' +
+            '<span class="runner-time" title="' + esc(ts) + '">' +
+              (ts ? timeAgo(ts) : '—') + '</span>' +
             (row.reason
               ? '<span class="runner-reason">' + esc(row.reason) + '</span>'
               : '') +
+            (idx === 0
+              ? ''
+              : '<button type="button" class="btn-link runner-restore-btn"' +
+                  ' data-ts="' + esc(ts) + '" data-ver="' + esc(String(ver)) + '">Restore</button>') +
             '</div>';
         }).join('');
       }
 
-      detailEl.innerHTML = metaHtml + bodyHtml + histHtml;
+      detailEl.innerHTML = metaHtml + bodyHtml + previewHtml + histHtml;
+
+      // Bind Edit button
+      var editBtn = detailEl.querySelector('[data-action="edit"]');
+      if (editBtn) editBtn.addEventListener('click', function() { mountTemplateEditor(uid); });
+
+      // Bind preview select
+      var previewSel = detailEl.querySelector('#runner-preview-task');
+      if (previewSel) previewSel.addEventListener('change', function() {
+        runPreview(uid, previewSel.value);
+      });
+
+      // Bind restore buttons
+      detailEl.querySelectorAll('.runner-restore-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var ts  = btn.dataset.ts;
+          var ver = btn.dataset.ver;
+          showRestoreConfirm(ver, ts, function() { doRestore(uid, ts); });
+        });
+      });
     } catch (e) {
       detailEl.innerHTML = '<div class="empty-state">Failed to load template</div>';
       console.error('loadTemplate:', e);
     }
   };
+
+  // --- Editor mount ------------------------------------------------------
+  function mountTemplateEditor(uid) {
+    var host = document.getElementById('runner-editor-host');
+    var bodyBlock = document.getElementById('runner-body-block');
+    if (!host || !_editorTpl) return;
+    if (_editorMDE) return; // already editing
+    if (bodyBlock) bodyBlock.style.display = 'none';
+
+    host.innerHTML =
+      '<div class="runner-editor-row">' +
+        '<textarea id="runner-editor-textarea" class="runner-editor-textarea" rows="14">' +
+          escHtml(_editorTpl.body || '') +
+        '</textarea>' +
+        '<div class="runner-reason-row">' +
+          '<label class="runner-reason-label" for="runner-editor-reason">Reason</label>' +
+          '<input id="runner-editor-reason" class="runner-reason-input" type="text"' +
+            ' placeholder="Why are you changing this?" />' +
+        '</div>' +
+        '<div class="runner-editor-actions">' +
+          '<button type="button" class="btn-secondary" data-action="cancel-edit">Cancel</button>' +
+          '<button type="button" class="btn-primary" data-action="save-edit" disabled' +
+            ' title="Enter a reason to enable Save">Save</button>' +
+        '</div>' +
+      '</div>';
+
+    var ta     = document.getElementById('runner-editor-textarea');
+    var reason = document.getElementById('runner-editor-reason');
+    var save   = host.querySelector('[data-action="save-edit"]');
+    var cancel = host.querySelector('[data-action="cancel-edit"]');
+
+    _editorMDE = OL.mountEditor(ta, {
+      placeholder: 'Template body (markdown + text/template actions)…',
+      onSave: function() { if (!save.disabled) save.click(); },
+      onCancel: function() { cancel.click(); },
+    });
+    _editorMDE.focus();
+
+    function refreshSave() {
+      var has = reason.value.trim().length > 0;
+      save.disabled = !has;
+      save.title = has ? '' : 'Enter a reason to enable Save';
+    }
+    reason.addEventListener('input', refreshSave);
+    refreshSave();
+
+    cancel.addEventListener('click', function() {
+      closeEditor();
+      if (bodyBlock) bodyBlock.style.display = '';
+      host.innerHTML = '';
+    });
+
+    save.addEventListener('click', async function() {
+      var body = _editorMDE ? _editorMDE.value() : ta.value;
+      var r    = reason.value.trim();
+      if (!r) return;
+      save.disabled = true;
+      try {
+        var resp = await fetch('/api/templates/' + encodeURIComponent(uid), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: body, changed_by: 'dashboard', reason: r }),
+        });
+        if (!resp.ok) {
+          var txt = await resp.text();
+          alert('Save failed: ' + resp.status + ' ' + txt);
+          save.disabled = false;
+          return;
+        }
+        await OL.loadTemplate(uid);
+      } catch (e) {
+        alert('Save failed: ' + e.message);
+        save.disabled = false;
+      }
+    });
+  }
+
+  // --- Preview -----------------------------------------------------------
+  async function runPreview(uid, taskID) {
+    var pane = document.getElementById('runner-preview-pane');
+    if (!pane) return;
+    if (!taskID) { pane.innerHTML = ''; return; }
+    pane.textContent = 'Rendering…';
+    try {
+      var resp = await fetch('/api/templates/preview?template_uid=' +
+        encodeURIComponent(uid) + '&task_id=' + encodeURIComponent(taskID));
+      if (!resp.ok) {
+        var txt = await resp.text();
+        pane.textContent = '[render error: HTTP ' + resp.status + ' ' + txt + ']';
+        return;
+      }
+      var data = await resp.json();
+      var out = (data && data.rendered) || '';
+      var pre = document.createElement('pre');
+      pre.className = 'runner-preview-output';
+      pre.textContent = out;
+      pane.innerHTML = '';
+      pane.appendChild(pre);
+    } catch (e) {
+      pane.textContent = '[render error: ' + e.message + ']';
+    }
+  }
+
+  // --- Restore -----------------------------------------------------------
+  async function doRestore(uid, ts) {
+    try {
+      var resp = await fetch('/api/templates/' + encodeURIComponent(uid) +
+        '/restore?from_valid_from=' + encodeURIComponent(ts) +
+        '&changed_by=dashboard', { method: 'POST' });
+      if (!resp.ok) {
+        var txt = await resp.text();
+        alert('Restore failed: ' + resp.status + ' ' + txt);
+        return;
+      }
+      await OL.loadTemplate(uid);
+    } catch (e) {
+      alert('Restore failed: ' + e.message);
+    }
+  }
 
 })(window.OL);

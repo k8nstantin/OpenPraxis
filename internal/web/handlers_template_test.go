@@ -174,6 +174,101 @@ func TestTemplate_AtTime(t *testing.T) {
 	}
 }
 
+// TestTemplate_Preview covers acceptance 6: the preview endpoint renders
+// the template body against task data via text/template and returns a
+// structured error inline rather than crashing.
+func TestTemplate_Preview(t *testing.T) {
+	env := newTemplateTestEnv(t)
+	uid, err := env.store.Create(context.Background(), templates.ScopeTask, "task-xyz",
+		templates.SectionPreamble, "override", "Hello {{.Task.ID}}", "tester", "init")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// No task store wired on this env → .Task.ID is empty; render still succeeds.
+	resp, body := env.do(t, http.MethodGet,
+		"/api/templates/preview?template_uid="+uid+"&task_id=task-xyz", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d: %s", resp.StatusCode, body)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out["rendered"] != "Hello " {
+		t.Fatalf("rendered = %q, want %q", out["rendered"], "Hello ")
+	}
+
+	// Broken template → surfaces [render error:...] payload, not a 500.
+	broken, err := env.store.Create(context.Background(), templates.ScopeTask, "task-broken",
+		templates.SectionVisceralRules, "bad", "{{.Nope", "tester", "init")
+	if err != nil {
+		t.Fatalf("create broken: %v", err)
+	}
+	resp2, body2 := env.do(t, http.MethodGet,
+		"/api/templates/preview?template_uid="+broken, nil)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("broken preview status = %d: %s", resp2.StatusCode, body2)
+	}
+	var out2 map[string]string
+	if err := json.Unmarshal(body2, &out2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out2["error"] == "" {
+		t.Fatalf("expected error field populated, got %q", out2["error"])
+	}
+}
+
+// TestTemplate_Restore covers acceptances 4 + 5: POST /restore fetches
+// the body active at from_valid_from and appends a new history row with
+// reason="restored from <ts>".
+func TestTemplate_Restore(t *testing.T) {
+	env := newTemplateTestEnv(t)
+	rows, _ := env.store.List(context.Background(), templates.ScopeSystem, templates.SectionPreamble)
+	uid := rows[0].TemplateUID
+	origBody := rows[0].Body
+	origTS := rows[0].ValidFrom
+
+	// Move forward: v2.
+	resp, body := env.do(t, http.MethodPut, "/api/templates/"+uid,
+		map[string]string{"body": "v2-body", "changed_by": "tester", "reason": "v2"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT v2 status = %d: %s", resp.StatusCode, body)
+	}
+
+	// Restore the seeded v1 by its valid_from.
+	resp2, body2 := env.do(t, http.MethodPost,
+		"/api/templates/"+uid+"/restore?from_valid_from="+origTS+"&changed_by=tester", nil)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("restore status = %d: %s", resp2.StatusCode, body2)
+	}
+
+	// Current body now matches v1; history has 3 rows with the newest reason.
+	resp3, body3 := env.do(t, http.MethodGet, "/api/templates/"+uid+"/history", nil)
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("history status = %d", resp3.StatusCode)
+	}
+	var hist []*templates.Template
+	if err := json.Unmarshal(body3, &hist); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(hist) != 3 {
+		t.Fatalf("history len = %d, want 3", len(hist))
+	}
+	if hist[0].Body != origBody {
+		t.Fatalf("restored body = %q, want %q", hist[0].Body, origBody)
+	}
+	if hist[0].Reason == "" || hist[0].Reason[:8] != "restored" {
+		t.Fatalf("restored reason = %q, want prefix 'restored'", hist[0].Reason)
+	}
+
+	// Bad timestamp → 404.
+	resp4, _ := env.do(t, http.MethodPost,
+		"/api/templates/"+uid+"/restore?from_valid_from=1900-01-01T00:00:00Z", nil)
+	if resp4.StatusCode != http.StatusNotFound {
+		t.Fatalf("restore-missing status = %d, want 404", resp4.StatusCode)
+	}
+}
+
 func TestTemplate_DeleteTombstones(t *testing.T) {
 	env := newTemplateTestEnv(t)
 	uid, err := env.store.Create(context.Background(), templates.ScopeTask, "task-1",
