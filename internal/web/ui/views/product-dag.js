@@ -168,15 +168,12 @@
 
       var elements = OL.buildDagElements(data);
 
-      // Auto-pick layout direction based on graph shape. Umbrella products
-      // (sub_products present) and wide flat products (>5 manifests at the
-      // root rank) render cleaner left-to-right — TB would fan 8 siblings
-      // across the screen and force edge crossings. Deep narrow graphs stay
-      // TB (traditional top-down reading).
-      var wide = (data.sub_products && data.sub_products.length > 0) ||
-                 (data.children && data.children.length > 5);
-      var rankDir = wide ? 'LR' : 'TB';
-
+      // Top-to-bottom tree, always. Root at top, descendants below. With
+      // depth=1 hierarchy + cross-product dep filtering (PRs #224, #227),
+      // sibling sub-products no longer have edges between them, so an
+      // 8-sub umbrella renders as a clean pyramid: Agentic OS up top,
+      // 8 sub-products on rank 1, manifests on rank 2, tasks on rank 3.
+      // No spider-web — pure tree shape. Auto-LR was a 2026-04-24 mistake.
       container.innerHTML = '';
       var cy = cytoscape({
         container: container,
@@ -188,7 +185,7 @@
         // text-valign:bottom — that mode produced the 2026-04-23 regression.
         layout: {
           name: 'dagre',
-          rankDir: rankDir,
+          rankDir: 'TB',
           nodeSep: 40,
           rankSep: 90,
           edgeSep: 25,
