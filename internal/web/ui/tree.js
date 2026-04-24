@@ -143,10 +143,16 @@
         if (!expanded) html += ' style="display:none"';
         html += '>';
 
+        // renderContent + children are additive: a level can render its own
+        // body (placeholder, meta, etc.) AND nest children below. Until
+        // 2026-04-24 these were mutually exclusive (renderContent overrode
+        // children), which silently dropped umbrella sub-products from the
+        // products menu when the umbrella also rendered a content placeholder.
         if (typeof level.renderContent === 'function') {
           html += level.renderContent(item, key);
-        } else {
-          var children = typeof level.children === 'function' ? level.children(item) : [];
+        }
+        var children = typeof level.children === 'function' ? level.children(item) : [];
+        if (children && children.length) {
           html += buildLevel(children, levelIdx + 1, key);
         }
 
