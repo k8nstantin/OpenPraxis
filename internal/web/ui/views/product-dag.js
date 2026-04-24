@@ -51,96 +51,109 @@
   OL.buildDagElements = function(data) {
     var elements = [];
     if (!data) return elements;
-    var manifests = data.children || [];
 
     function shortLabel(title) {
       return title.replace(/^QA\s+/, '').replace(/^OpenPraxis\s+/, '').replace(/\s*—\s*.+$/, '');
     }
 
-    // Product node
-    elements.push({ data: {
-      id: data.id, label: data.title, title: data.title, type: 'product',
-      status: data.status, marker: data.marker,
-      meta: JSON.stringify(data.meta || {})
-    }});
+    var seenProducts = {};
 
-    // In-product manifest IDs. Used to filter cross-product depends_on
-    // refs out of the edge set (cytoscape errors hard on an edge whose
-    // source node is missing — crashed the whole render on 2026-04-24
-    // after the Agentic OS umbrella/sub-product split moved M8's deps
-    // out of AOS/Execution into AOS/Kernel).
-    var manifestIds = {};
-    for (var mx = 0; mx < manifests.length; mx++) manifestIds[manifests[mx].id] = true;
-
-    // Product → manifest ownership edges. Emit only when the manifest has
-    // no in-product dep that would otherwise connect it — else dagre draws
-    // redundant long lines (the 2026-04-23 "tangled spaghetti"). A manifest
-    // whose depends_on all point outside this product still gets an
-    // ownership edge so it stays reachable from the root.
-    for (var mi = 0; mi < manifests.length; mi++) {
-      var mown = manifests[mi];
-      var inProductDeps = 0;
-      if (mown.depends_on) {
-        var owndids = mown.depends_on.split(',').map(function(s){return s.trim();}).filter(Boolean);
-        for (var dj = 0; dj < owndids.length; dj++) if (manifestIds[owndids[dj]]) inProductDeps++;
-      }
-      if (inProductDeps === 0) {
-        elements.push({ data: { source: data.id, target: mown.id, edgeType: 'product_link' } });
-      }
-    }
-
-    for (var col = 0; col < manifests.length; col++) {
-      var m = manifests[col];
-      var tasks = m.children || [];
-      var taskCount = tasks.length;
-      var completedCount = tasks.filter(function(t) { return t.status === 'completed'; }).length;
+    // addProduct emits the product node, its manifest children (with tasks),
+    // and recursively any sub_products returned by the hierarchy endpoint.
+    // Sub-products let the umbrella product (e.g. "Agentic OS") render its
+    // 8 subsystem children as a single DAG, even though the umbrella owns
+    // no manifests directly. Cycles are rejected at AddDep time; seen-set
+    // is defense in depth.
+    function addProduct(p) {
+      if (!p || seenProducts[p.id]) return;
+      seenProducts[p.id] = true;
 
       elements.push({ data: {
-        id: m.id,
-        label: shortLabel(m.title),
-        title: m.title, type: 'manifest', status: m.status,
-        marker: m.marker, depends_on: m.depends_on || '',
-        meta: JSON.stringify(m.meta || {}),
-        taskInfo: completedCount + '/' + taskCount
+        id: p.id, label: p.title, title: p.title, type: 'product',
+        status: p.status, marker: p.marker,
+        meta: JSON.stringify(p.meta || {})
       }});
 
-      // Manifest → manifest edges (explicit depends_on). Cross-product
-      // deps are silently dropped — they belong to the product-dep layer
-      // of THIS product's view, not the manifest layer.
-      if (m.depends_on) {
-        var depIds = m.depends_on.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-        for (var di = 0; di < depIds.length; di++) {
-          if (!manifestIds[depIds[di]]) continue;
-          elements.push({ data: { source: depIds[di], target: m.id, edgeType: 'manifest_dep' } });
+      var manifests = p.children || [];
+      var manifestIds = {};
+      for (var mx = 0; mx < manifests.length; mx++) manifestIds[manifests[mx].id] = true;
+
+      // Product → manifest ownership edges. Emit only when the manifest has
+      // no in-product dep that would otherwise connect it (avoids the
+      // 2026-04-23 "tangled spaghetti"). Cross-product deps count as
+      // external, so a manifest whose deps all point outside still gets an
+      // ownership edge.
+      for (var mi = 0; mi < manifests.length; mi++) {
+        var mown = manifests[mi];
+        var inProductDeps = 0;
+        if (mown.depends_on) {
+          var owndids = mown.depends_on.split(',').map(function(s){return s.trim();}).filter(Boolean);
+          for (var dj = 0; dj < owndids.length; dj++) if (manifestIds[owndids[dj]]) inProductDeps++;
+        }
+        if (inProductDeps === 0) {
+          elements.push({ data: { source: p.id, target: mown.id, edgeType: 'product_link' } });
         }
       }
 
-      // Task nodes + edges. Each task gets an edge from its actual
-      // depends_on parent when that parent is inside the same manifest;
-      // otherwise an ownership edge from the manifest itself. Dagre
-      // handles the layout from the edge set.
-      var taskIds = {};
-      tasks.forEach(function(t) { taskIds[t.id] = true; });
+      for (var col = 0; col < manifests.length; col++) {
+        var m = manifests[col];
+        var tasks = m.children || [];
+        var taskCount = tasks.length;
+        var completedCount = tasks.filter(function(t) { return t.status === 'completed'; }).length;
 
-      for (var ti = 0; ti < tasks.length; ti++) {
-        var t = tasks[ti];
-        // Labels render inside the 120×44 node and wrap to ~2 lines at
-        // font-size 9px → ~36 chars before ellipsis kicks in.
-        var shortTitle = t.title.length > 36 ? t.title.substring(0, 35) + '…' : t.title;
         elements.push({ data: {
-          id: t.id, label: shortTitle,
-          title: t.title, type: 'task', status: t.status,
-          marker: t.marker, depends_on: t.depends_on || '',
-          meta: JSON.stringify(t.meta || {})
+          id: m.id,
+          label: shortLabel(m.title),
+          title: m.title, type: 'manifest', status: m.status,
+          marker: m.marker, depends_on: m.depends_on || '',
+          meta: JSON.stringify(m.meta || {}),
+          taskInfo: completedCount + '/' + taskCount
         }});
 
-        if (t.depends_on && taskIds[t.depends_on]) {
-          elements.push({ data: { source: t.depends_on, target: t.id, edgeType: 'task_dep' } });
-        } else {
-          elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
+        // Manifest → manifest edges (explicit depends_on). Cross-product
+        // deps dropped — they belong to the product-dep layer, not the
+        // manifest layer of THIS product's view.
+        if (m.depends_on) {
+          var depIds = m.depends_on.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+          for (var di = 0; di < depIds.length; di++) {
+            if (!manifestIds[depIds[di]]) continue;
+            elements.push({ data: { source: depIds[di], target: m.id, edgeType: 'manifest_dep' } });
+          }
+        }
+
+        var taskIds = {};
+        tasks.forEach(function(t) { taskIds[t.id] = true; });
+
+        for (var ti = 0; ti < tasks.length; ti++) {
+          var t = tasks[ti];
+          var shortTitle = t.title.length > 36 ? t.title.substring(0, 35) + '…' : t.title;
+          elements.push({ data: {
+            id: t.id, label: shortTitle,
+            title: t.title, type: 'task', status: t.status,
+            marker: t.marker, depends_on: t.depends_on || '',
+            meta: JSON.stringify(t.meta || {})
+          }});
+
+          if (t.depends_on && taskIds[t.depends_on]) {
+            elements.push({ data: { source: t.depends_on, target: t.id, edgeType: 'task_dep' } });
+          } else {
+            elements.push({ data: { source: m.id, target: t.id, edgeType: 'ownership' } });
+          }
         }
       }
+
+      // Sub-products: product→product dep edges the hierarchy endpoint
+      // exposes on the umbrella. Recurse so the full subsystem tree ranks
+      // below this product in dagre's layout.
+      var subs = p.sub_products || [];
+      for (var si = 0; si < subs.length; si++) {
+        var sub = subs[si];
+        elements.push({ data: { source: p.id, target: sub.id, edgeType: 'product_link' } });
+        addProduct(sub);
+      }
     }
+
+    addProduct(data);
     return elements;
   };
 

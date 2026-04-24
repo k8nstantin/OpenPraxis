@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -200,6 +201,106 @@ func apiProductManifests(n *node.Node) http.HandlerFunc {
 	}
 }
 
+type hierarchyTaskNode struct {
+	ID        string         `json:"id"`
+	Marker    string         `json:"marker"`
+	Title     string         `json:"title"`
+	Type      string         `json:"type"`
+	Status    string         `json:"status"`
+	DependsOn string         `json:"depends_on"`
+	Meta      map[string]any `json:"meta"`
+}
+
+type hierarchyManifestNode struct {
+	ID              string              `json:"id"`
+	Marker          string              `json:"marker"`
+	Title           string              `json:"title"`
+	Type            string              `json:"type"`
+	Status          string              `json:"status"`
+	DependsOn       string              `json:"depends_on"`
+	DependsOnTitles []string            `json:"depends_on_titles"`
+	Meta            map[string]any      `json:"meta"`
+	Children        []hierarchyTaskNode `json:"children"`
+}
+
+type hierarchyProductNode struct {
+	ID          string                  `json:"id"`
+	Marker      string                  `json:"marker"`
+	Title       string                  `json:"title"`
+	Type        string                  `json:"type"`
+	Status      string                  `json:"status"`
+	Meta        map[string]any          `json:"meta"`
+	Children    []hierarchyManifestNode `json:"children"`
+	SubProducts []hierarchyProductNode  `json:"sub_products,omitempty"`
+}
+
+// buildHierarchyProduct returns a productNode with its manifest children.
+// When depth > 0 it also recurses into product→product dep edges, exposing
+// sub-products as SubProducts so the umbrella product (which owns no manifests
+// directly) still renders its full subsystem tree in the DAG view. Cycles
+// are already rejected at AddDep time; depth cap is defense in depth.
+func buildHierarchyProduct(ctx context.Context, n *node.Node, p *product.Product, depth int, seen map[string]bool) hierarchyProductNode {
+	if seen[p.ID] {
+		return hierarchyProductNode{ID: p.ID, Marker: p.Marker, Title: p.Title, Type: "product", Status: p.Status}
+	}
+	seen[p.ID] = true
+
+	manifests, _ := n.Manifests.ListByProject(p.ID, 200)
+	mNodes := make([]hierarchyManifestNode, 0, len(manifests))
+	totalTasks := 0
+	for _, m := range manifests {
+		tasks, _ := n.Tasks.ListByManifest(m.ID, 200)
+		tNodes := make([]hierarchyTaskNode, 0, len(tasks))
+		for _, t := range tasks {
+			tNodes = append(tNodes, hierarchyTaskNode{
+				ID: t.ID, Marker: t.Marker, Title: t.Title,
+				Type: "task", Status: t.Status, DependsOn: t.DependsOn,
+				Meta: map[string]any{
+					"cost_usd":  t.TotalCost,
+					"turns":     t.TotalTurns,
+					"run_count": t.RunCount,
+				},
+			})
+		}
+		totalTasks += len(tasks)
+		mNodes = append(mNodes, hierarchyManifestNode{
+			ID: m.ID, Marker: m.Marker, Title: m.Title,
+			Type: "manifest", Status: m.Status,
+			DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn),
+			Meta: map[string]any{
+				"total_cost":  m.TotalCost,
+				"total_tasks": len(tasks),
+				"total_turns": m.TotalTurns,
+			},
+			Children: tNodes,
+		})
+	}
+
+	var subNodes []hierarchyProductNode
+	if depth > 0 {
+		deps, _ := n.Products.ListDeps(ctx, p.ID)
+		for _, d := range deps {
+			sub, err := n.Products.Get(d.ID)
+			if err != nil || sub == nil {
+				continue
+			}
+			subNodes = append(subNodes, buildHierarchyProduct(ctx, n, sub, depth-1, seen))
+		}
+	}
+
+	return hierarchyProductNode{
+		ID: p.ID, Marker: p.Marker, Title: p.Title,
+		Type: "product", Status: p.Status,
+		Meta: map[string]any{
+			"total_cost":      p.TotalCost,
+			"total_manifests": len(manifests),
+			"total_tasks":     totalTasks,
+		},
+		Children:    mNodes,
+		SubProducts: subNodes,
+	}
+}
+
 func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
@@ -208,82 +309,7 @@ func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 			http.Error(w, "product not found", 404)
 			return
 		}
-
-		type taskNode struct {
-			ID        string         `json:"id"`
-			Marker    string         `json:"marker"`
-			Title     string         `json:"title"`
-			Type      string         `json:"type"`
-			Status    string         `json:"status"`
-			DependsOn string         `json:"depends_on"`
-			Meta      map[string]any `json:"meta"`
-		}
-		type manifestNode struct {
-			ID              string         `json:"id"`
-			Marker          string         `json:"marker"`
-			Title           string         `json:"title"`
-			Type            string         `json:"type"`
-			Status          string         `json:"status"`
-			DependsOn       string         `json:"depends_on"`
-			DependsOnTitles []string       `json:"depends_on_titles"`
-			Meta            map[string]any `json:"meta"`
-			Children        []taskNode     `json:"children"`
-		}
-		type productNode struct {
-			ID       string         `json:"id"`
-			Marker   string         `json:"marker"`
-			Title    string         `json:"title"`
-			Type     string         `json:"type"`
-			Status   string         `json:"status"`
-			Meta     map[string]any `json:"meta"`
-			Children []manifestNode `json:"children"`
-		}
-
-		manifests, _ := n.Manifests.ListByProject(p.ID, 200)
-		var mNodes []manifestNode
-		totalTasks := 0
-		totalCost := 0.0
-
-		for _, m := range manifests {
-			tasks, _ := n.Tasks.ListByManifest(m.ID, 200)
-			var tNodes []taskNode
-			for _, t := range tasks {
-				tNodes = append(tNodes, taskNode{
-					ID: t.ID, Marker: t.Marker, Title: t.Title,
-					Type: "task", Status: t.Status, DependsOn: t.DependsOn,
-					Meta: map[string]any{
-						"cost_usd":  t.TotalCost,
-						"turns":     t.TotalTurns,
-						"run_count": t.RunCount,
-					},
-				})
-			}
-			totalTasks += len(tasks)
-			totalCost += m.TotalCost
-
-			mNodes = append(mNodes, manifestNode{
-				ID: m.ID, Marker: m.Marker, Title: m.Title,
-				Type: "manifest", Status: m.Status,
-				DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn),
-				Meta: map[string]any{
-					"total_cost":  m.TotalCost,
-					"total_tasks": len(tasks),
-					"total_turns": m.TotalTurns,
-				},
-				Children: tNodes,
-			})
-		}
-
-		result := productNode{
-			ID: p.ID, Marker: p.Marker, Title: p.Title,
-			Type: "product", Status: p.Status,
-			Meta: map[string]any{
-				"total_cost":      p.TotalCost,
-				"total_manifests": len(manifests),
-				"total_tasks":     totalTasks,
-			},
-			Children: mNodes,
-		}
+		result := buildHierarchyProduct(r.Context(), n, p, 2, map[string]bool{})
 		writeJSON(w, result)
 	}
 }
