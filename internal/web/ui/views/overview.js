@@ -15,8 +15,12 @@
     if (markerEl) markerEl.classList.toggle('has-markers', markerCount > 0);
   };
 
+  // updateTaskStats now consumes ONLY the cheap counters (running/turns/
+  // cost/total). The two heavy panels (top-tasks, pending) come from
+  // OL.loadTopTasks() / OL.loadPendingTasks() — called on view-show only,
+  // not on every 10s poll. This split is the dashboard-freeze fix
+  // (idea 019dbb9a-3dc).
   OL.updateTaskStats = function(stats) {
-    // Row 1: running, turns, cost, tasks
     var runningCount = stats.running ?? 0;
     setText('metric-running', runningCount);
     var runningCard = document.getElementById('metric-running-card');
@@ -25,28 +29,17 @@
       if (valEl) valEl.style.color = runningCount > 0 ? 'var(--green)' : 'var(--text-muted)';
       runningCard.style.borderColor = runningCount > 0 ? 'var(--green)' : 'var(--border)';
     }
-
     setText('metric-turns-today', stats.turns_today ?? 0);
     setText('metric-tasks-total', stats.tasks_total ?? 0);
-    // Cost metric removed from the overview pending the Unified Cost
-    // Tracking product (019dab45-d8f). The two-pipeline divergence
-    // (task_runs vs claude_code_session hook) made the displayed number
-    // misleading; better to show nothing than a wrong number.
-    // task_runs now persists input_tokens / output_tokens / cache_read /
-    // cache_creation / model / pricing_version, so cost is recomputable
-    // from raw signal at any time.
+  };
 
-    // Top tasks panel — hide when empty, but DO NOT early-return.
-    // Pending/scheduled panel below depends on the rest of this function
-    // running, so an early return swallows it (pre-existing bug since #85).
+  OL.renderTopTasks = function(topTasks) {
     var panel = document.getElementById('top-tasks-panel');
     var list = document.getElementById('top-tasks-list');
-    var topTasks = stats.top_tasks || [];
+    topTasks = topTasks || [];
     var hasTopTasks = topTasks.length > 0;
     if (panel) panel.style.display = hasTopTasks ? '' : 'none';
-    if (!hasTopTasks) {
-      // Skip rendering the table; fall through to the pending-tasks render.
-    } else {
+    if (!hasTopTasks || !list) return;
 
     // Shared status styling — see internal/web/ui/task-status.js.
     var statusColors = OL.TASK_STATUS_COLORS;
@@ -81,39 +74,54 @@
       '<td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--green)">$' + totalCost.toFixed(2) + '</td>' +
       '<td></td>' +
     '</tr></tfoot></table></div>';
-      if (list) list.innerHTML = html;
-    }
+    list.innerHTML = html;
+  };
 
-    // Pending/scheduled tasks panel
+  OL.renderPendingTasks = function(pending) {
     var pendingPanel = document.getElementById('pending-tasks-panel');
     var pendingList = document.getElementById('pending-tasks-list');
-    var pending = stats.pending_tasks || [];
+    pending = pending || [];
     if (!pending.length) {
       if (pendingPanel) pendingPanel.style.display = 'none';
-    } else {
-      if (pendingPanel) pendingPanel.style.display = '';
-      var pendingStatusColors = {scheduled:'var(--yellow)',waiting:'var(--accent)',pending:'var(--text-muted)'};
-      // Shared status icons — see internal/web/ui/task-status.js.
-      var statusIcons = OL.TASK_STATUS_ICONS;
-      var phtml = '';
-      for (var pi = 0; pi < pending.length; pi++) {
-        var pt = pending[pi];
-        var sc = pendingStatusColors[pt.status] || 'var(--text-muted)';
-        var when = '';
-        if (pt.next_run_at) {
-          var diff = Math.round((new Date(pt.next_run_at) - Date.now()) / 60000);
-          when = diff > 0 ? 'in ' + diff + 'm' : 'due';
-        }
-        if (pt.depends_on) when = 'after ' + pt.depends_on;
-        phtml += '<div class="peer-row clickable" role="button" tabindex="0" onclick="OL.switchView(\'tasks\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}" style="padding:6px 0">' +
-          '<span style="color:' + sc + ';font-size:12px">' + (statusIcons[pt.status] || '') + '</span>' +
-          '<span class="session-uuid">' + esc(pt.marker) + '</span>' +
-          '<span style="font-size:12px;flex:1">' + esc(pt.title.length > 40 ? pt.title.substring(0, 40) + '...' : pt.title) + '</span>' +
-          '<span style="font-size:11px;color:' + sc + ';font-weight:500">' + when + '</span>' +
-        '</div>';
-      }
-      if (pendingList) pendingList.innerHTML = phtml;
+      return;
     }
+    if (pendingPanel) pendingPanel.style.display = '';
+    if (!pendingList) return;
+    var pendingStatusColors = {scheduled:'var(--yellow)',waiting:'var(--accent)',pending:'var(--text-muted)'};
+    var statusIcons = OL.TASK_STATUS_ICONS;
+    var phtml = '';
+    for (var pi = 0; pi < pending.length; pi++) {
+      var pt = pending[pi];
+      var sc = pendingStatusColors[pt.status] || 'var(--text-muted)';
+      var when = '';
+      if (pt.next_run_at) {
+        var diff = Math.round((new Date(pt.next_run_at) - Date.now()) / 60000);
+        when = diff > 0 ? 'in ' + diff + 'm' : 'due';
+      }
+      if (pt.depends_on) when = 'after ' + pt.depends_on;
+      phtml += '<div class="peer-row clickable" role="button" tabindex="0" onclick="OL.switchView(\'tasks\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}" style="padding:6px 0">' +
+        '<span style="color:' + sc + ';font-size:12px">' + (statusIcons[pt.status] || '') + '</span>' +
+        '<span class="session-uuid">' + esc(pt.marker) + '</span>' +
+        '<span style="font-size:12px;flex:1">' + esc(pt.title.length > 40 ? pt.title.substring(0, 40) + '...' : pt.title) + '</span>' +
+        '<span style="font-size:11px;color:' + sc + ';font-weight:500">' + when + '</span>' +
+      '</div>';
+    }
+    pendingList.innerHTML = phtml;
+  };
+
+  // Lazy-load wrappers — call on view-show, NOT on the 10s poll.
+  OL.loadTopTasks = async function() {
+    try {
+      var data = await fetchJSON('/api/tasks/today-top');
+      OL.renderTopTasks(data || []);
+    } catch (e) {}
+  };
+
+  OL.loadPendingTasks = async function() {
+    try {
+      var data = await fetchJSON('/api/tasks/pending');
+      OL.renderPendingTasks(data || []);
+    } catch (e) {}
   };
 
   // Productivity score

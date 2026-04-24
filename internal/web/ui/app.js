@@ -167,6 +167,14 @@
     if (view === 'manifests') OL.loadManifests();
     if (view === 'ideas') OL.loadIdeas();
     if (view === 'tasks') OL.loadTasks();
+    // Heavy panels (today's per-task cost rollup, pending/scheduled list)
+    // load only when the user lands on Overview or Activity. They used to
+    // ship inside the polled stats payload — that froze the dashboard.
+    // See idea 019dbb9a-3dc.
+    if (view === 'overview' || view === 'activity') {
+      if (OL.loadTopTasks) OL.loadTopTasks();
+      if (OL.loadPendingTasks) OL.loadPendingTasks();
+    }
     if (view === 'productivity') OL.loadProductivityView();
     if (view === 'cost-history') OL.loadCostHistory();
     if (view === 'delusions') OL.loadDelusions();
@@ -446,7 +454,7 @@
       OL.renderPeers(nodes || []);
       if (currentView === 'peers') OL.renderPeersList(nodes || []);
 
-      var mems = await fetchJSON('/api/memories?prefix=/');
+      var mems = await fetchJSON('/api/memories?prefix=/&limit=10&summary=true');
       OL.renderRecentMemories(mems || []);
 
       var markers = await fetchJSON('/api/markers?status=pending');
