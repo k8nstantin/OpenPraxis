@@ -129,20 +129,45 @@
       '</div>';
   }
 
+  // Downsample an array to at most n evenly-spaced points. Preserves
+  // first + last so the sparkline endpoints reflect run start/end.
+  // Small-input pass-through — no work when len <= n.
+  function subsample(arr, n) {
+    if (!arr || arr.length <= n) return arr || [];
+    var step = (arr.length - 1) / (n - 1);
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      out.push(arr[Math.min(arr.length - 1, Math.round(i * step))]);
+    }
+    return out;
+  }
+
   // ---- entry point ---------------------------------------------------
 
   OL.renderRunStats = function (containerEl, taskID) {
     if (!containerEl || !taskID) return;
     containerEl.innerHTML = '<div class="run-stats-loading">Loading run stats…</div>';
 
-    fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs').then(function (runs) {
-      runs = runs || [];
+    Promise.all([
+      fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs'),
+      // Host samples for the latest run — fetched after we know the run id.
+      // Two separate calls are cheap (both cache at max-age=5).
+    ]).then(function (r0) {
+      var runs = r0[0] || [];
       if (runs.length === 0) {
         containerEl.innerHTML = '<div class="run-stats-card run-stats-empty-state">No runs yet. Stats will appear after the first run completes.</div>';
         return;
       }
       // ListRuns returns newest-first per repository.go.
       var latest = runs[0];
+      return fetchJSON('/api/task_runs/' + latest.id + '/host_samples').then(function (hostSamples) {
+        return { runs: runs, latest: latest, hostSamples: hostSamples || [] };
+      });
+    }).then(function (ctx) {
+      if (!ctx) return;
+      var runs = ctx.runs;
+      var latest = ctx.latest;
+      var hostSamples = ctx.hostSamples;
       // Build sparkline data oldest→newest, capped at last 10.
       var trend = runs.slice(0, 10).reverse();
       var costPts = trend.map(function (r) {
@@ -156,6 +181,18 @@
       var actionPts = trend.map(function (r) {
         return { run: r.run_number, y: r.actions || 0,
           tooltip: (r.actions || 0) + ' actions, ' + (r.turns || 0) + ' turns' };
+      });
+      // Host CPU/RSS points are a within-run time series (one per ~5s
+      // sample). Different X-axis conceptually but rendered by the same
+      // sparkline helper so the visual vocabulary is consistent.
+      // Sub-sample to 20 points so the line stays readable even on long runs.
+      var cpuPts = subsample(hostSamples, 20).map(function (s, i) {
+        return { run: i, y: s.cpu_pct || 0,
+          tooltip: (s.cpu_pct || 0).toFixed(1) + '% CPU at ' + (s.ts ? s.ts.slice(11, 19) : '') };
+      });
+      var rssPts = subsample(hostSamples, 20).map(function (s, i) {
+        return { run: i, y: s.rss_mb || 0,
+          tooltip: Math.round(s.rss_mb || 0) + ' MB RSS at ' + (s.ts ? s.ts.slice(11, 19) : '') };
       });
 
       var when = latest.completed_at ? timeAgo(latest.completed_at) : 'in progress';
@@ -180,12 +217,19 @@
               renderSparkline('cost', costPts, { color: 'var(--green)', formatLatest: fmtCost }) +
               renderSparkline('turns', turnPts, { color: 'var(--accent)' }) +
               renderSparkline('actions', actionPts, { color: 'var(--yellow)' }) +
+              // Host metrics overlay — orange CPU%, purple RSS MB. Empty
+              // arrays render as a muted "no samples" placeholder so the
+              // card layout stays stable during migrations / legacy runs.
+              renderSparkline('cpu%', cpuPts, { color: '#f59e0b', formatLatest: function (v) { return v.toFixed(0) + '%'; } }) +
+              renderSparkline('rss mb', rssPts, { color: '#a855f7', formatLatest: function (v) { return Math.round(v) + ''; } }) +
             '</div>' +
           '</div>' +
           '<div class="run-stats-footer">' +
             '<span>Turns ' + (latest.turns || 0) + '</span>' +
             '<span>Actions ' + (latest.actions || 0) + '</span>' +
             '<span>Lines ' + (latest.lines || 0) + '</span>' +
+            (latest.peak_cpu_pct > 0 ? '<span>Peak CPU ' + latest.peak_cpu_pct.toFixed(0) + '%</span>' : '') +
+            (latest.peak_rss_mb > 0 ? '<span>Peak RSS ' + Math.round(latest.peak_rss_mb) + ' MB</span>' : '') +
             '<span>' + modelLine + '</span>' +
           '</div>' +
         '</div>';

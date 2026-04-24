@@ -673,13 +673,16 @@ const PricingVersion = "v1-2026-04"
 // output; they're denormalised onto task_runs so dashboards don't have to
 // re-parse the full output blob on every read. The blob remains in
 // task_runs.output as the source of truth.
-func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) error {
+// RecordRun inserts a completed run into task_runs and returns the
+// inserted row id. Caller passes the run_id to RecordHostMetrics to
+// persist the host CPU/RSS sparkline samples + rollup columns.
+func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	// No truncation — capture full output
 	_, err := s.db.Exec(`UPDATE tasks SET run_count = run_count + 1, last_run_at = ?, last_output = ?, status = ?, updated_at = ? WHERE id = ?`,
 		now, output, status, now, id)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Get current run_count for run_number
@@ -689,13 +692,78 @@ func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD
 	}
 
 	// Insert into task_runs history with full denorm (tokens + model + pricing version).
-	_, err = s.db.Exec(`INSERT INTO task_runs
+	res, err := s.db.Exec(`INSERT INTO task_runs
 		(task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
 		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now,
 		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	runID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return runID, nil
+}
+
+// RecordHostMetrics persists the HostSampler output for a run: rollup
+// columns on task_runs + every sample into task_run_host_samples. Best-
+// effort — errors log-and-swallow because losing host metrics must not
+// fail the task completion path.
+func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metrics HostMetrics) error {
+	if runID <= 0 {
+		return nil
+	}
+	if _, err := s.db.Exec(
+		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ? WHERE id = ?`,
+		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, runID,
+	); err != nil {
+		return fmt.Errorf("update task_runs host summary: %w", err)
+	}
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin host-samples tx: %w", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples (run_id, ts, cpu_pct, rss_mb) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare host-samples insert: %w", err)
+	}
+	defer stmt.Close()
+	for _, smp := range samples {
+		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano), smp.CPUPct, smp.RSSMB); err != nil {
+			return fmt.Errorf("insert host sample: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// ListHostSamples returns the time-series host samples for a run.
+// Ordered by ts ASC so the frontend can render left-to-right directly.
+func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
+	rows, err := s.db.Query(`SELECT ts, cpu_pct, rss_mb FROM task_run_host_samples WHERE run_id = ? ORDER BY ts ASC`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HostMetricsSample
+	for rows.Next() {
+		var tsStr string
+		var smp HostMetricsSample
+		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB); err != nil {
+			return nil, err
+		}
+		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+			smp.TS = t
+		}
+		out = append(out, smp)
+	}
+	return out, rows.Err()
 }
 
 // ListRuns returns run history for a task, most recent first.
@@ -703,7 +771,7 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version
+	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
 		FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
 	if err != nil {
 		return nil, err
@@ -716,9 +784,10 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 func (s *Store) GetRun(runID int) (*TaskRun, error) {
 	var r TaskRun
 	var startedStr, completedStr string
-	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version FROM task_runs WHERE id = ?`, runID).
+	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb FROM task_runs WHERE id = ?`, runID).
 		Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
-			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion)
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion,
+			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -735,7 +804,7 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version
+	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
 		FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
 		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {

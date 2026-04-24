@@ -141,6 +141,11 @@
           <div class="metric-card metric-card-primary" style="cursor:pointer" role="button" tabindex="0" onclick="OL.switchView('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
             <div class="metric-value" id="metric-tasks-total">-</div>
             <div class="metric-label">tasks</div>
+            <!-- Node CPU/RSS chip. Populated from /api/host/stats by
+                 OL.loadHostStats on the overview refresh tick. Kept in
+                 the same card as "tasks" so operators see load+queue
+                 together at a glance. -->
+            <div class="metric-sublabel" id="metric-host-stats" style="margin-top:6px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)"></div>
           </div>
           <!-- Cost card removed pending Unified Cost Tracking product (019dab45-d8f).
                task_runs now persists input_tokens / output_tokens / cache_read_tokens /
