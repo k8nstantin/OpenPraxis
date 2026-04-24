@@ -98,9 +98,23 @@
       return '<div class="run-stats-spark-row"><span class="run-stats-spark-label">' + esc(label) + '</span><span class="run-stats-empty">—</span></div>';
     }
     if (values.length === 1) {
+      // One data point — draw a flat horizontal line at mid-height with a
+      // terminal dot, so the row looks like a sparkline even with just one
+      // value. Keeps visual parity with multi-point rows; previously this
+      // case rendered as plain text and looked like a broken layout next
+      // to populated rows on the same card.
+      var v0 = values[0];
+      var single = opts.formatLatest ? opts.formatLatest(v0.y) : String(v0.y);
+      var midY = height / 2;
+      var x1 = padX;
+      var x2 = width - padX;
       return '<div class="run-stats-spark-row">' +
         '<span class="run-stats-spark-label">' + esc(label) + '</span>' +
-        '<span class="run-stats-spark-single" title="run #' + values[0].run + ': ' + esc(values[0].tooltip) + '">' + esc(opts.formatLatest ? opts.formatLatest(values[0].y) : String(values[0].y)) + '</span>' +
+        '<svg class="run-stats-spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" width="' + width + '" height="' + height + '">' +
+          '<line x1="' + x1.toFixed(1) + '" y1="' + midY.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + midY.toFixed(1) + '" stroke="' + color + '" stroke-width="1.5" />' +
+          '<circle cx="' + x2.toFixed(1) + '" cy="' + midY.toFixed(1) + '" r="2.5" fill="' + color + '" data-run="' + v0.run + '"><title>run #' + v0.run + ': ' + v0.tooltip + '</title></circle>' +
+        '</svg>' +
+        '<span class="run-stats-spark-latest" title="latest run">' + esc(single) + '</span>' +
         '</div>';
     }
     var ys = values.map(function (v) { return v.y; });
@@ -168,20 +182,60 @@
       var runs = ctx.runs;
       var latest = ctx.latest;
       var hostSamples = ctx.hostSamples;
-      // Build sparkline data oldest→newest, capped at last 10.
+      // All 5 sparklines share the same X-axis (time-into-run) when the
+      // current run has within-run samples. Each 5-second host-sampler
+      // tick snapshots host CPU/RSS AND live task counters (cost/turns/
+      // actions) simultaneously, so lines are aligned and correlate:
+      // turn bump → cost jump; CPU spike → actions burst.
+      //
+      // Legacy-run fallback: runs captured before the sampler shipped
+      // (or before the 5-unified cost/turns/actions fields landed) have
+      // either empty samples OR samples with zero cost/turns/actions.
+      // For those rows, fall back to per-run trend (cross-run aggregate)
+      // so the chart isn't a flat-zero liar.
       var trend = runs.slice(0, 10).reverse();
-      var costPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.cost_usd || 0,
-          tooltip: fmtCost(r.cost_usd) + ', ' + (r.turns || 0) + ' turns, ' + (r.actions || 0) + ' actions' };
-      });
-      var turnPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.turns || 0,
-          tooltip: (r.turns || 0) + ' turns, ' + fmtCost(r.cost_usd) };
-      });
-      var actionPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.actions || 0,
-          tooltip: (r.actions || 0) + ' actions, ' + (r.turns || 0) + ' turns' };
-      });
+      var s20 = subsample(hostSamples, 20);
+      var tLabel = function (s) { return (s && s.ts) ? s.ts.slice(11, 19) : ''; };
+      var hasSampleVal = function (field) {
+        for (var i = 0; i < hostSamples.length; i++) {
+          if ((hostSamples[i][field] || 0) > 0) return true;
+        }
+        return false;
+      };
+      var costPts, turnPts, actionPts;
+      if (hasSampleVal('cost_usd')) {
+        costPts = s20.map(function (s, i) {
+          return { run: i, y: s.cost_usd || 0,
+            tooltip: fmtCost(s.cost_usd) + ' at ' + tLabel(s) };
+        });
+      } else {
+        costPts = trend.map(function (r) {
+          return { run: r.run_number, y: r.cost_usd || 0,
+            tooltip: fmtCost(r.cost_usd) + ', ' + (r.turns || 0) + ' turns, ' + (r.actions || 0) + ' actions' };
+        });
+      }
+      if (hasSampleVal('turns')) {
+        turnPts = s20.map(function (s, i) {
+          return { run: i, y: s.turns || 0,
+            tooltip: (s.turns || 0) + ' turns at ' + tLabel(s) };
+        });
+      } else {
+        turnPts = trend.map(function (r) {
+          return { run: r.run_number, y: r.turns || 0,
+            tooltip: (r.turns || 0) + ' turns, ' + fmtCost(r.cost_usd) };
+        });
+      }
+      if (hasSampleVal('actions')) {
+        actionPts = s20.map(function (s, i) {
+          return { run: i, y: s.actions || 0,
+            tooltip: (s.actions || 0) + ' actions at ' + tLabel(s) };
+        });
+      } else {
+        actionPts = trend.map(function (r) {
+          return { run: r.run_number, y: r.actions || 0,
+            tooltip: (r.actions || 0) + ' actions, ' + (r.turns || 0) + ' turns' };
+        });
+      }
       // Host CPU/RSS points are a within-run time series (one per ~5s
       // sample). Different X-axis conceptually but rendered by the same
       // sparkline helper so the visual vocabulary is consistent.

@@ -17,10 +17,21 @@ import (
 // per-run Run Stats card can overlay host load on the same timeline as
 // the model's own turn/cost/actions lines.
 type HostMetricsSample struct {
-	TS     time.Time `json:"ts"`
-	CPUPct float64   `json:"cpu_pct"`
-	RSSMB  float64   `json:"rss_mb"`
+	TS      time.Time `json:"ts"`
+	CPUPct  float64   `json:"cpu_pct"`
+	RSSMB   float64   `json:"rss_mb"`
+	// Live task counters captured at the same tick as host CPU/RSS.
+	// Feeds the Run Stats card's 5-aligned-sparkline layout — same X-axis
+	// as CPU/RSS. Populated by a runner-supplied TaskStatFn closure.
+	CostUSD float64 `json:"cost_usd"`
+	Turns   int     `json:"turns"`
+	Actions int     `json:"actions"`
 }
+
+// TaskStatFn pulls the attached task's live counters at sample time. The
+// runner supplies it at Attach (closes over the RunningTask pointer so
+// it sees live updates).
+type TaskStatFn func() (costUSD float64, turns int, actions int)
 
 // HostMetrics is the summary rolled up from a task's samples on Detach.
 // Persisted as denormalised columns on task_runs so dashboards can sort
@@ -38,9 +49,16 @@ type HostMetrics struct {
 //
 // Cheap by design: one `ps -o %cpu=,rss= -p <pid>` fork every Interval
 // (default 5s). Zero when no tasks are attached — fanout is a no-op.
+// attachedTask bundles the per-task sample buffer with the callback the
+// sampler invokes at each tick to read live cost/turns/actions.
+type attachedTask struct {
+	samples []HostMetricsSample
+	statFn  TaskStatFn
+}
+
 type HostSampler struct {
 	mu       sync.Mutex
-	attached map[string]*[]HostMetricsSample
+	attached map[string]*attachedTask
 
 	interval time.Duration
 	pid      int
@@ -55,7 +73,7 @@ func NewHostSampler(interval time.Duration) *HostSampler {
 		interval = 5 * time.Second
 	}
 	return &HostSampler{
-		attached: make(map[string]*[]HostMetricsSample),
+		attached: make(map[string]*attachedTask),
 		interval: interval,
 		pid:      os.Getpid(),
 		stopCh:   make(chan struct{}),
@@ -111,20 +129,31 @@ func (s *HostSampler) loop(ctx context.Context) {
 	}
 }
 
-func (s *HostSampler) fanout(sample HostMetricsSample) {
+// fanout snaps host CPU/RSS into each attached task's sample buffer,
+// enriching per-task fields from the Attach-time callback. Host values
+// are identical across all attached tasks in one tick.
+func (s *HostSampler) fanout(hostOnly HostMetricsSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, slot := range s.attached {
-		*slot = append(*slot, sample)
+	for _, at := range s.attached {
+		sample := hostOnly
+		if at.statFn != nil {
+			sample.CostUSD, sample.Turns, sample.Actions = at.statFn()
+		}
+		at.samples = append(at.samples, sample)
 	}
 }
 
-// Attach registers a task to receive samples. Starting-empty — reattach
-// clears any prior state.
-func (s *HostSampler) Attach(taskID string) {
+// Attach registers a task to receive samples + supplies a callback the
+// sampler invokes at each tick to read live cost/turns/actions.
+// statFn may be nil; per-task counters default to zero in that case.
+// Starting-empty — reattach clears prior state.
+func (s *HostSampler) Attach(taskID string, statFn TaskStatFn) {
 	s.mu.Lock()
-	buf := make([]HostMetricsSample, 0, 64)
-	s.attached[taskID] = &buf
+	s.attached[taskID] = &attachedTask{
+		samples: make([]HostMetricsSample, 0, 64),
+		statFn:  statFn,
+	}
 	s.mu.Unlock()
 }
 
@@ -133,13 +162,13 @@ func (s *HostSampler) Attach(taskID string) {
 // unknown task ID — returns empty.
 func (s *HostSampler) Detach(taskID string) ([]HostMetricsSample, HostMetrics) {
 	s.mu.Lock()
-	slot := s.attached[taskID]
+	at := s.attached[taskID]
 	delete(s.attached, taskID)
 	s.mu.Unlock()
-	if slot == nil {
+	if at == nil {
 		return nil, HostMetrics{}
 	}
-	return *slot, rollupSamples(*slot)
+	return at.samples, rollupSamples(at.samples)
 }
 
 func rollupSamples(samples []HostMetricsSample) HostMetrics {
