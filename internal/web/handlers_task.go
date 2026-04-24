@@ -18,8 +18,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Cache-Control: max-age=5 — see apiTaskStats comment.
 func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
 		tasks, err := n.Tasks.List("", 200)
 		if err != nil {
 			writeError(w, err.Error(), 500)
@@ -67,25 +69,35 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 		peers := make(map[string]*pData)
 		peerOrder := []string{}
 
-		// Cache manifest titles
+		// Bulk-fetch ALL manifests once, then look up locally. The previous
+		// implementation called n.Manifests.Get(mid) per distinct manifest_id
+		// — with 200 tasks across ~100 distinct manifests, that was 100
+		// sequential SQLite queries (~4.4s on disk-backed serve), and this
+		// endpoint is hit on every 10s dashboard poll when the user is on
+		// the tasks tab. THE freeze cause as of 2026-04-23.
 		manifestCache := make(map[string]*mData)
+		manifestCache[""] = &mData{title: "Standalone", marker: ""}
+		if all, err := n.Manifests.List("", 0); err == nil {
+			for _, m := range all {
+				marker := m.Marker
+				if marker == "" && len(m.ID) >= 12 {
+					marker = m.ID[:12]
+				}
+				manifestCache[m.ID] = &mData{title: m.Title, marker: marker}
+			}
+		}
 		getManifest := func(mid string) *mData {
 			if md, ok := manifestCache[mid]; ok {
 				return md
 			}
-			if mid == "" {
-				md := &mData{title: "Standalone", marker: ""}
-				manifestCache[mid] = md
-				return md
-			}
-			md := &mData{title: "Unknown", marker: mid}
+			// Manifest referenced by a task but not in the bulk fetch
+			// (deleted or out-of-window). Synthesise a placeholder rather
+			// than re-querying.
+			marker := mid
 			if len(mid) >= 12 {
-				md.marker = mid[:12]
+				marker = mid[:12]
 			}
-			if m, _ := n.Manifests.Get(mid); m != nil {
-				md.title = m.Title
-				md.marker = m.Marker
-			}
+			md := &mData{title: "Unknown", marker: marker}
 			manifestCache[mid] = md
 			return md
 		}
@@ -503,91 +515,36 @@ func apiRunningTasks(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiTaskStats returns ONLY the cheap header counters polled every 10s by the
+// dashboard. The two heavy panels (top-tasks today, pending/scheduled) used to
+// be embedded in this response; that turned every 10s poll into a full
+// task_runs scan + aggregation, which froze the dashboard. Those panels now
+// have their own endpoints (`/api/tasks/today-top`, `/api/tasks/pending`) and
+// the frontend loads them on view-show, not on the polling interval.
+//
+// Cache-Control: max-age=5 lets the BROWSER cache the response for 5 seconds.
+// With N dashboard tabs open, only one request per 5s per tab actually reaches
+// the server (instead of one every 10s per tab). The global no-cache middleware
+// is overridden here for this and the other heavy task-list endpoints — see
+// idea 019dbb9a-3dc.
 func apiTaskStats(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
+		var runningCount int
+		if n.GetRunner() != nil {
+			runningCount = len(n.GetRunner().ListRunning())
+		}
+
+		// tasks_total still uses List(500) for now — single indexed scan, fast.
+		// If/when the task table grows past 500 we should add a Count method.
 		tasks, err := n.Tasks.List("", 500)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
 		}
 
-		var runningCount int
-		if n.GetRunner() != nil {
-			runningCount = len(n.GetRunner().ListRunning())
-		}
-
-		// Get today's cost from task_runs DB (survives restart)
 		costToday, turnsToday, _, _ := n.Tasks.TodayCost()
 		costToday = math.Round(costToday*100) / 100
-
-		// Build top tasks from today's drill-down
-		type topTask struct {
-			Marker string  `json:"marker"`
-			Title  string  `json:"title"`
-			Turns  int     `json:"turns"`
-			Cost   float64 `json:"cost"`
-			Status string  `json:"status"`
-		}
-		var topTasks []topTask
-		today := time.Now().UTC().Format("2006-01-02")
-		drillDown, _ := n.Tasks.CostDrillDown(today, "")
-		// Aggregate by task_id for top tasks
-		type taskAgg struct {
-			marker, title, status string
-			turns                 int
-			cost                  float64
-		}
-		taskAggs := make(map[string]*taskAgg)
-		for _, d := range drillDown {
-			a, ok := taskAggs[d.TaskID]
-			if !ok {
-				a = &taskAgg{marker: d.TaskMarker, title: d.TaskTitle, status: d.Status}
-				taskAggs[d.TaskID] = a
-			}
-			a.cost += d.CostUSD
-			a.turns += d.Turns
-		}
-		for _, a := range taskAggs {
-			// Skip zero-cost/zero-turn noise (killed/failed tasks that did nothing)
-			if a.cost == 0 && a.turns == 0 {
-				continue
-			}
-			topTasks = append(topTasks, topTask{
-				Marker: a.marker, Title: a.title, Turns: a.turns,
-				Cost: math.Round(a.cost*100) / 100, Status: a.status,
-			})
-		}
-		// Sort by cost descending — no limit, show ALL tasks today
-		for i := 0; i < len(topTasks); i++ {
-			for j := i + 1; j < len(topTasks); j++ {
-				if topTasks[j].Cost > topTasks[i].Cost {
-					topTasks[i], topTasks[j] = topTasks[j], topTasks[i]
-				}
-			}
-		}
-
-		// Collect scheduled/waiting/pending tasks
-		type pendingTask struct {
-			Marker    string `json:"marker"`
-			Title     string `json:"title"`
-			Status    string `json:"status"`
-			Schedule  string `json:"schedule"`
-			NextRunAt string `json:"next_run_at"`
-			DependsOn string `json:"depends_on"`
-		}
-		var pendingTasks []pendingTask
-		for _, t := range tasks {
-			if t.Status == "scheduled" || t.Status == "waiting" || t.Status == "pending" {
-				dep := ""
-				if len(t.DependsOn) >= 12 {
-					dep = t.DependsOn[:12]
-				}
-				pendingTasks = append(pendingTasks, pendingTask{
-					Marker: t.Marker, Title: t.Title, Status: t.Status,
-					Schedule: t.Schedule, NextRunAt: t.NextRunAt, DependsOn: dep,
-				})
-			}
-		}
 
 		dailyBudget := parseDailyBudget(n)
 		budgetPct := 0
@@ -605,20 +562,119 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			"daily_budget":    dailyBudget,
 			"budget_pct":      budgetPct,
 			"budget_exceeded": budgetExceeded,
-			"top_tasks":       topTasks,
-			"pending_tasks":   pendingTasks,
 		})
+	}
+}
+
+// apiTodayTopTasks returns today's per-task cost rollup. Heavy
+// (CostDrillDown scans every task_run for today + Go-side aggregation), so
+// it's split off the polled stats endpoint and loaded on view-show only.
+func apiTodayTopTasks(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		type topTask struct {
+			Marker string  `json:"marker"`
+			Title  string  `json:"title"`
+			Turns  int     `json:"turns"`
+			Cost   float64 `json:"cost"`
+			Status string  `json:"status"`
+		}
+		today := time.Now().UTC().Format("2006-01-02")
+		drillDown, _ := n.Tasks.CostDrillDown(today, "")
+
+		type taskAgg struct {
+			marker, title, status string
+			turns                 int
+			cost                  float64
+		}
+		aggs := make(map[string]*taskAgg)
+		for _, d := range drillDown {
+			a, ok := aggs[d.TaskID]
+			if !ok {
+				a = &taskAgg{marker: d.TaskMarker, title: d.TaskTitle, status: d.Status}
+				aggs[d.TaskID] = a
+			}
+			a.cost += d.CostUSD
+			a.turns += d.Turns
+		}
+		out := make([]topTask, 0, len(aggs))
+		for _, a := range aggs {
+			if a.cost == 0 && a.turns == 0 {
+				continue
+			}
+			out = append(out, topTask{
+				Marker: a.marker, Title: a.title, Turns: a.turns,
+				Cost: math.Round(a.cost*100) / 100, Status: a.status,
+			})
+		}
+		// Sort by cost descending. O(n²) is fine — n is the count of distinct
+		// tasks that ran today, typically <50.
+		for i := 0; i < len(out); i++ {
+			for j := i + 1; j < len(out); j++ {
+				if out[j].Cost > out[i].Cost {
+					out[i], out[j] = out[j], out[i]
+				}
+			}
+		}
+		writeJSON(w, out)
+	}
+}
+
+// apiPendingTasks returns scheduled/waiting/pending tasks. Split off the
+// polled stats endpoint to keep the 10s poll cheap.
+// Cache-Control: max-age=5 — see apiTaskStats comment.
+func apiPendingTasks(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
+		type pendingTask struct {
+			Marker    string `json:"marker"`
+			Title     string `json:"title"`
+			Status    string `json:"status"`
+			Schedule  string `json:"schedule"`
+			NextRunAt string `json:"next_run_at"`
+			DependsOn string `json:"depends_on"`
+		}
+		tasks, err := n.Tasks.List("", 500)
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		out := make([]pendingTask, 0)
+		for _, t := range tasks {
+			if t.Status != "scheduled" && t.Status != "waiting" && t.Status != "pending" {
+				continue
+			}
+			dep := ""
+			if len(t.DependsOn) >= 12 {
+				dep = t.DependsOn[:12]
+			}
+			out = append(out, pendingTask{
+				Marker: t.Marker, Title: t.Title, Status: t.Status,
+				Schedule: t.Schedule, NextRunAt: t.NextRunAt, DependsOn: dep,
+			})
+		}
+		writeJSON(w, out)
 	}
 }
 
 // parseTaskResultMetrics extracts num_turns, total_cost_usd, and terminal_reason
 // from the JSON-lines output of a task.
+//
+// The Claude Code SDK emits a single `result` event at the very end of a clean
+// run with num_turns + total_cost_usd populated. When the agent gets killed
+// mid-run (cost ceiling, cancel, crash), the result event never fires and
+// turns would record as 0 even though the run executed many turns.
+//
+// Fallback: when no result event is found, count `type=assistant` events from
+// the stream — each one is one model turn. Same definition the SDK uses
+// internally for num_turns. Cost stays 0 in the fallback path because that
+// requires the SDK's final aggregation; per-run cost is recovered separately
+// from the runner's token-usage accounting (PR #205).
 func parseTaskResultMetrics(output string) (turns int, cost float64, reason string) {
 	if output == "" {
 		return 0, 0, ""
 	}
-	// Scan lines from the end — the result event is usually the last JSON object
 	lines := strings.Split(output, "\n")
+	// First pass: scan from the end for the result event (clean exit).
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
@@ -642,7 +698,24 @@ func parseTaskResultMetrics(output string) (turns int, cost float64, reason stri
 			return event.NumTurns, event.TotalCostUSD, reason
 		}
 	}
-	return 0, 0, ""
+	// Fallback: no result event (killed run). Count assistant events.
+	turnsCount := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+		if event.Type == "assistant" {
+			turnsCount++
+		}
+	}
+	return turnsCount, 0, "killed"
 }
 
 // apiProductivity returns productivity score and breakdown.

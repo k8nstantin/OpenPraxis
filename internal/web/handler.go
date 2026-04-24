@@ -160,6 +160,10 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/tasks/by-peer", apiTasksByPeer(n)).Methods("GET")
 	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
 	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
+	// Heavy panels split off the polled stats endpoint — loaded on view-show
+	// only, not on every 10s tick. See handlers_task.go for context.
+	api.HandleFunc("/tasks/today-top", apiTodayTopTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/pending", apiPendingTasks(n)).Methods("GET")
 	api.HandleFunc("/tasks/cost-history", apiCostHistory(n)).Methods("GET")
 	api.HandleFunc("/tasks/cost-agents", apiCostAgents(n)).Methods("GET")
 	api.HandleFunc("/tasks/cost-trend", apiCostTrend(n)).Methods("GET")
