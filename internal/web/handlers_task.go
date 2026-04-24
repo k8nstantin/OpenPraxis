@@ -326,6 +326,44 @@ func apiTaskRuns(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiTaskRunHostSamples returns the host CPU/RSS time-series for a run.
+// Drives the orange/purple sparklines overlaid on the Run Stats card.
+func apiTaskRunHostSamples(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
+		runIDStr := mux.Vars(r)["runId"]
+		var runID int64
+		if _, err := fmt.Sscanf(runIDStr, "%d", &runID); err != nil {
+			writeError(w, "invalid run ID", 400)
+			return
+		}
+		samples, err := n.Tasks.ListHostSamples(runID)
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		if samples == nil {
+			samples = []task.HostMetricsSample{}
+		}
+		writeJSON(w, samples)
+	}
+}
+
+// apiHostStats returns the current serve process CPU% + RSS MB — a
+// single fresh reading, cheap (one `ps` fork). Powers the live node
+// stats chip near the "Tasks" counter on the overview.
+func apiHostStats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
+		sample, err := task.ReadHostMetrics()
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, sample)
+	}
+}
+
 // apiTaskRunGet returns a single run by ID.
 func apiTaskRunGet(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

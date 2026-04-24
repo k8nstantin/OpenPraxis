@@ -124,6 +124,25 @@
     } catch (e) {}
   };
 
+  // Live node stats for the overview chip — renders "node: NN% cpu · NN MB"
+  // under the tasks counter. /api/host/stats returns a single fresh sample
+  // (cheap `ps` fork). Cached at max-age=5 so N dashboard tabs → one call
+  // per 5s per tab.
+  OL.loadHostStats = async function() {
+    try {
+      var s = await fetchJSON('/api/host/stats');
+      if (!s) return;
+      var el = document.getElementById('metric-host-stats');
+      if (!el) return;
+      var cpu = (s.cpu_pct || 0).toFixed(0);
+      var rss = Math.round(s.rss_mb || 0);
+      var cpuColor = s.cpu_pct > 80 ? 'var(--red)'
+        : s.cpu_pct > 50 ? 'var(--yellow)'
+        : 'var(--text-muted)';
+      el.innerHTML = 'node: <span style="color:' + cpuColor + '">' + cpu + '% cpu</span> · ' + rss + ' MB';
+    } catch (e) {}
+  };
+
   // Productivity score
   OL.updateProductivity = async function() {
     try {

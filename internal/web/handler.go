@@ -178,6 +178,9 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	api.HandleFunc("/tasks/{id}/delusions", apiTaskDelusions(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/runs", apiTaskRuns(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/runs/{runId}", apiTaskRunGet(n)).Methods("GET")
+	api.HandleFunc("/task_runs/{runId}/host_samples", apiTaskRunHostSamples(n)).Methods("GET")
+	// Live host CPU/RSS — feeds the node stats chip on the overview.
+	api.HandleFunc("/host/stats", apiHostStats()).Methods("GET")
 	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
 	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")

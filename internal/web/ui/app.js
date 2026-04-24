@@ -467,6 +467,7 @@
       OL.loadRunningTasks();
       OL.loadTaskStats();
       OL.updateProductivity();
+      if (OL.loadHostStats) OL.loadHostStats();
     } catch (e) {
       console.error('Refresh failed:', e);
     }

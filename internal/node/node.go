@@ -43,6 +43,7 @@ type Node struct {
 	TemplatesResolv  *templates.Resolver
 	Comments         *comments.Store
 	runner           *task.Runner
+	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine
 	StartedAt        time.Time
 }
@@ -336,6 +337,15 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	if n.TemplatesResolv != nil {
 		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
+	// Host-metrics sampler: polls the serve process's CPU/RSS every
+	// 5 seconds and attributes each sample to every currently-running
+	// task. Data lands on task_run_host_samples for the Run Stats
+	// card overlay + on task_runs rollup columns for list views.
+	// The sampler is a single shared instance on the node — starting
+	// multiple runners is not supported, so one-at-boot is fine.
+	n.hostSampler = task.NewHostSampler(5 * time.Second)
+	n.hostSampler.Start(context.Background())
+	n.runner.SetHostSampler(n.hostSampler)
 	return n.runner
 }
 
