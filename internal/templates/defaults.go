@@ -103,3 +103,132 @@ func SystemDefaultTitles() map[string]string {
 		SectionClosingProtocol: "Closing protocol + completion line",
 	}
 }
+
+// Markdown-heading frames for agents that don't parse XML well. Claude was
+// trained on <tag>…</tag> blocks and reacts to them as structural cues;
+// Codex / Cursor were tuned harder on markdown and treat unknown XML as
+// text noise. The bodies below render identical PromptData into plain
+// markdown sections (## Heading) so the sections survive the agent's
+// own summarization pass.
+//
+// Each agent has a tiny self-identifier in the preamble so resolver
+// tests (and operators reading a rendered prompt) can tell the two
+// frames apart — the rest of the body is structurally identical.
+
+const markdownVisceralRules = `{{if .VisceralRules}}## Visceral Rules — MANDATORY
+Follow every rule without exception.
+
+{{.VisceralRules}}
+
+{{end}}`
+
+const markdownManifestSpec = `## Manifest: {{.Manifest.Title}}
+
+{{.Manifest.Content}}
+
+`
+
+const markdownTask = `## Task: {{.Task.Title}} ({{.Task.ID}})
+
+{{if .Task.Description}}{{.Task.Description}}
+{{end}}
+`
+
+const markdownInstructions = `## Instructions
+
+Follow the manifest spec exactly. Work autonomously.
+Call visceral_rules and visceral_confirm first.
+
+`
+
+const markdownGitWorkflow = `## Git Workflow — MANDATORY
+
+Every task gets its own branch and PR.
+
+1. Before making ANY code changes, create a new branch:
+   ` + "`" + `git checkout -b openpraxis/{{.BranchPrefix}}` + "`" + `
+2. Make all your changes on this branch.
+3. Commit your work with a descriptive message.
+4. Push the branch: ` + "`" + `git push -u origin openpraxis/{{.BranchPrefix}}` + "`" + `
+5. Create a pull request using: ` + "`" + `gh pr create --title "<title>" --body "<summary>"` + "`" + `
+6. Include the PR URL in your final output.
+
+NEVER work on an existing branch. NEVER push to main.
+
+`
+
+const markdownClosingProtocol = `## Closing Protocol — MANDATORY
+
+Before your final commit+push, call the MCP tool:
+
+    mcp__openpraxis__comment_add
+      target_type = "task"
+      target_id   = "{{.Task.ID}}"
+      type        = "execution_review"
+      author      = "agent"
+      body        = <markdown summary>
+
+The body should include:
+- **What shipped** — files created/edited, key APIs, what's testable
+- **Gates self-check** — which acceptance-criteria bullets you verified locally
+- **What the next task should expect** — APIs, error codes, file layout
+- **Anything surprising** — bugs found, decisions taken, followups to file
+
+This comment is your execution review — the canonical per-task home. The runner records an amnesia flag if this call is missing.
+
+Report completion when done.
+`
+
+const codexPreamble = "You are executing a scheduled task for OpenPraxis (running as the Codex agent).\n\n"
+const cursorPreamble = "You are executing a scheduled task for OpenPraxis (running as the Cursor agent).\n\n"
+
+// AgentDefaults returns the default markdown-heading bodies for an agent.
+// Supported agents: "codex", "cursor". Returns nil for unknown agents so
+// the resolver falls through to the system (XML) defaults.
+func AgentDefaults(agent string) map[string]string {
+	var preamble string
+	switch agent {
+	case "codex":
+		preamble = codexPreamble
+	case "cursor":
+		preamble = cursorPreamble
+	default:
+		return nil
+	}
+	return map[string]string{
+		SectionPreamble:        preamble,
+		SectionVisceralRules:   markdownVisceralRules,
+		SectionManifestSpec:    markdownManifestSpec,
+		SectionTask:            markdownTask,
+		SectionInstructions:    markdownInstructions,
+		SectionGitWorkflow:     markdownGitWorkflow,
+		SectionClosingProtocol: markdownClosingProtocol,
+	}
+}
+
+// codexDefaults returns the markdown-heading section bodies for the
+// Codex agent. Exported indirectly via AgentDefaults("codex").
+func codexDefaults() map[string]string { return AgentDefaults("codex") }
+
+// cursorDefaults returns the markdown-heading section bodies for the
+// Cursor agent. Exported indirectly via AgentDefaults("cursor").
+func cursorDefaults() map[string]string { return AgentDefaults("cursor") }
+
+// SeededAgents is the list of agent names that ship with a built-in
+// markdown-heading override in Seed(). Keep ordered — Seed iterates it
+// to insert rows in a stable order.
+var SeededAgents = []string{"codex", "cursor"}
+
+// AgentDefaultTitles returns the title strings used for seeded agent rows.
+func AgentDefaultTitles(agent string) map[string]string {
+	prefix := agent + " "
+	return map[string]string{
+		SectionPreamble:        prefix + "preamble (markdown)",
+		SectionVisceralRules:   prefix + "visceral rules (markdown)",
+		SectionManifestSpec:    prefix + "manifest spec (markdown)",
+		SectionTask:            prefix + "task block (markdown)",
+		SectionInstructions:    prefix + "instructions (markdown)",
+		SectionGitWorkflow:     prefix + "git workflow (markdown)",
+		SectionClosingProtocol: prefix + "closing protocol (markdown)",
+	}
+}
