@@ -12,15 +12,26 @@ import (
 	"time"
 )
 
-// HostMetricsSample is one CPU/RSS reading of the serve process. The
-// sampler stamps a sample into every currently-attached task, so the
-// per-run Run Stats card can overlay host load on the same timeline as
-// the model's own turn/cost/actions lines.
+// HostMetricsSample is one sample of both host load (CPU/RSS) AND the
+// attached task's live progress counters (cost, turns, actions). All
+// fields share the same X-axis (time-into-run) so the Run Stats card
+// can render 5 aligned within-run sparklines. Per-task counters are
+// pulled from a runner-supplied callback at sample time; host fields
+// apply to whichever task is attached at that tick.
 type HostMetricsSample struct {
-	TS     time.Time `json:"ts"`
-	CPUPct float64   `json:"cpu_pct"`
-	RSSMB  float64   `json:"rss_mb"`
+	TS      time.Time `json:"ts"`
+	CPUPct  float64   `json:"cpu_pct"`
+	RSSMB   float64   `json:"rss_mb"`
+	CostUSD float64   `json:"cost_usd"`
+	Turns   int       `json:"turns"`
+	Actions int       `json:"actions"`
 }
+
+// TaskStatFn returns an attached task's live progress counters. The
+// sampler calls it at each tick. Implementers close over the task's
+// RunningTask pointer so the closure sees live updates. Returning
+// zeros is fine; the sample still records host-side CPU/RSS.
+type TaskStatFn func() (costUSD float64, turns int, actions int)
 
 // HostMetrics is the summary rolled up from a task's samples on Detach.
 // Persisted as denormalised columns on task_runs so dashboards can sort
@@ -38,9 +49,17 @@ type HostMetrics struct {
 //
 // Cheap by design: one `ps -o %cpu=,rss= -p <pid>` fork every Interval
 // (default 5s). Zero when no tasks are attached — fanout is a no-op.
+// attachedTask holds per-task sampler state: the accumulating sample
+// buffer + the callback the sampler invokes to read the task's live
+// cost/turns/actions at each tick.
+type attachedTask struct {
+	samples []HostMetricsSample
+	statFn  TaskStatFn
+}
+
 type HostSampler struct {
 	mu       sync.Mutex
-	attached map[string]*[]HostMetricsSample
+	attached map[string]*attachedTask
 
 	interval time.Duration
 	pid      int
@@ -55,7 +74,7 @@ func NewHostSampler(interval time.Duration) *HostSampler {
 		interval = 5 * time.Second
 	}
 	return &HostSampler{
-		attached: make(map[string]*[]HostMetricsSample),
+		attached: make(map[string]*attachedTask),
 		interval: interval,
 		pid:      os.Getpid(),
 		stopCh:   make(chan struct{}),
@@ -111,20 +130,31 @@ func (s *HostSampler) loop(ctx context.Context) {
 	}
 }
 
-func (s *HostSampler) fanout(sample HostMetricsSample) {
+// fanout snaps host CPU/RSS into a sample and merges per-task counters
+// from the Attach-time callback. The host values are identical across
+// all attached tasks in one tick; only the per-task fields differ.
+func (s *HostSampler) fanout(hostOnly HostMetricsSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, slot := range s.attached {
-		*slot = append(*slot, sample)
+	for _, at := range s.attached {
+		sample := hostOnly
+		if at.statFn != nil {
+			sample.CostUSD, sample.Turns, sample.Actions = at.statFn()
+		}
+		at.samples = append(at.samples, sample)
 	}
 }
 
-// Attach registers a task to receive samples. Starting-empty — reattach
-// clears any prior state.
-func (s *HostSampler) Attach(taskID string) {
+// Attach registers a task to receive samples + supplies a callback the
+// sampler invokes at each tick to read the task's live cost/turns/
+// actions. Starting-empty — reattach clears any prior state. statFn
+// may be nil; the sample will carry zeros for per-task counters.
+func (s *HostSampler) Attach(taskID string, statFn TaskStatFn) {
 	s.mu.Lock()
-	buf := make([]HostMetricsSample, 0, 64)
-	s.attached[taskID] = &buf
+	s.attached[taskID] = &attachedTask{
+		samples: make([]HostMetricsSample, 0, 64),
+		statFn:  statFn,
+	}
 	s.mu.Unlock()
 }
 
@@ -133,13 +163,13 @@ func (s *HostSampler) Attach(taskID string) {
 // unknown task ID — returns empty.
 func (s *HostSampler) Detach(taskID string) ([]HostMetricsSample, HostMetrics) {
 	s.mu.Lock()
-	slot := s.attached[taskID]
+	at := s.attached[taskID]
 	delete(s.attached, taskID)
 	s.mu.Unlock()
-	if slot == nil {
+	if at == nil {
 		return nil, HostMetrics{}
 	}
-	return *slot, rollupSamples(*slot)
+	return at.samples, rollupSamples(at.samples)
 }
 
 func rollupSamples(samples []HostMetricsSample) HostMetrics {

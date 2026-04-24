@@ -98,9 +98,22 @@
       return '<div class="run-stats-spark-row"><span class="run-stats-spark-label">' + esc(label) + '</span><span class="run-stats-empty">—</span></div>';
     }
     if (values.length === 1) {
+      // One data point — draw a flat horizontal line at the value with
+      // a terminal dot, so the row looks like a sparkline (visual parity
+      // with the multi-point CPU/RSS rows). A single point can't imply
+      // trend direction, and a flat line honestly communicates that.
+      var v0 = values[0];
+      var single = opts.formatLatest ? opts.formatLatest(v0.y) : String(v0.y);
+      var midY = height / 2;
+      var x1 = padX;
+      var x2 = width - padX;
       return '<div class="run-stats-spark-row">' +
         '<span class="run-stats-spark-label">' + esc(label) + '</span>' +
-        '<span class="run-stats-spark-single" title="run #' + values[0].run + ': ' + esc(values[0].tooltip) + '">' + esc(opts.formatLatest ? opts.formatLatest(values[0].y) : String(values[0].y)) + '</span>' +
+        '<svg class="run-stats-spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" width="' + width + '" height="' + height + '">' +
+          '<line x1="' + x1.toFixed(1) + '" y1="' + midY.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + midY.toFixed(1) + '" stroke="' + color + '" stroke-width="1.5" />' +
+          '<circle cx="' + x2.toFixed(1) + '" cy="' + midY.toFixed(1) + '" r="2.5" fill="' + color + '" data-run="' + v0.run + '"><title>run #' + v0.run + ': ' + v0.tooltip + '</title></circle>' +
+        '</svg>' +
+        '<span class="run-stats-spark-latest" title="latest run">' + esc(single) + '</span>' +
         '</div>';
     }
     var ys = values.map(function (v) { return v.y; });
@@ -148,51 +161,49 @@
     if (!containerEl || !taskID) return;
     containerEl.innerHTML = '<div class="run-stats-loading">Loading run stats…</div>';
 
-    Promise.all([
-      fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs'),
-      // Host samples for the latest run — fetched after we know the run id.
-      // Two separate calls are cheap (both cache at max-age=5).
-    ]).then(function (r0) {
-      var runs = r0[0] || [];
+    fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs').then(function (runs) {
+      runs = runs || [];
       if (runs.length === 0) {
         containerEl.innerHTML = '<div class="run-stats-card run-stats-empty-state">No runs yet. Stats will appear after the first run completes.</div>';
         return;
       }
-      // ListRuns returns newest-first per repository.go.
       var latest = runs[0];
       return fetchJSON('/api/task_runs/' + latest.id + '/host_samples').then(function (hostSamples) {
         return { runs: runs, latest: latest, hostSamples: hostSamples || [] };
       });
     }).then(function (ctx) {
       if (!ctx) return;
-      var runs = ctx.runs;
       var latest = ctx.latest;
-      var hostSamples = ctx.hostSamples;
-      // Build sparkline data oldest→newest, capped at last 10.
-      var trend = runs.slice(0, 10).reverse();
-      var costPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.cost_usd || 0,
-          tooltip: fmtCost(r.cost_usd) + ', ' + (r.turns || 0) + ' turns, ' + (r.actions || 0) + ' actions' };
+      var samples = ctx.hostSamples;
+      // ALL 5 sparklines share the same X-axis (time-into-run). Each
+      // 5-second sample snapshots host CPU/RSS + live task counters
+      // (cost/turns/actions) simultaneously, so the lines are aligned
+      // and can be read for correlation: turn spike → cost jump; CPU
+      // spike → actions burst; etc. Old runs (captured before the
+      // cost/turns/actions fields shipped) have zero for those fields
+      // and render as flat-at-0 lines — until a new run accumulates.
+      // Sub-sample to 20 points for readability on long runs.
+      var s20 = subsample(samples, 20);
+      var tLabel = function (s) { return (s && s.ts) ? s.ts.slice(11, 19) : ''; };
+      var costPts = s20.map(function (s, i) {
+        return { run: i, y: s.cost_usd || 0,
+          tooltip: fmtCost(s.cost_usd) + ' at ' + tLabel(s) };
       });
-      var turnPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.turns || 0,
-          tooltip: (r.turns || 0) + ' turns, ' + fmtCost(r.cost_usd) };
+      var turnPts = s20.map(function (s, i) {
+        return { run: i, y: s.turns || 0,
+          tooltip: (s.turns || 0) + ' turns at ' + tLabel(s) };
       });
-      var actionPts = trend.map(function (r) {
-        return { run: r.run_number, y: r.actions || 0,
-          tooltip: (r.actions || 0) + ' actions, ' + (r.turns || 0) + ' turns' };
+      var actionPts = s20.map(function (s, i) {
+        return { run: i, y: s.actions || 0,
+          tooltip: (s.actions || 0) + ' actions at ' + tLabel(s) };
       });
-      // Host CPU/RSS points are a within-run time series (one per ~5s
-      // sample). Different X-axis conceptually but rendered by the same
-      // sparkline helper so the visual vocabulary is consistent.
-      // Sub-sample to 20 points so the line stays readable even on long runs.
-      var cpuPts = subsample(hostSamples, 20).map(function (s, i) {
+      var cpuPts = s20.map(function (s, i) {
         return { run: i, y: s.cpu_pct || 0,
-          tooltip: (s.cpu_pct || 0).toFixed(1) + '% CPU at ' + (s.ts ? s.ts.slice(11, 19) : '') };
+          tooltip: (s.cpu_pct || 0).toFixed(1) + '% CPU at ' + tLabel(s) };
       });
-      var rssPts = subsample(hostSamples, 20).map(function (s, i) {
+      var rssPts = s20.map(function (s, i) {
         return { run: i, y: s.rss_mb || 0,
-          tooltip: Math.round(s.rss_mb || 0) + ' MB RSS at ' + (s.ts ? s.ts.slice(11, 19) : '') };
+          tooltip: Math.round(s.rss_mb || 0) + ' MB RSS at ' + tLabel(s) };
       });
 
       var when = latest.completed_at ? timeAgo(latest.completed_at) : 'in progress';

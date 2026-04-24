@@ -191,6 +191,14 @@ func (s *Store) init() error {
 		return fmt.Errorf("create task_run_host_samples table: %w", err)
 	}
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_run_host_samples_run ON task_run_host_samples(run_id)`)
+	// Live task counters captured at each sample tick — gives the Run
+	// Stats card 5 aligned sparklines (cpu/rss + cost/turns/actions) on
+	// the same X-axis instead of three cross-run aggregates + two
+	// within-run series. Pre-existing rows default to zero; they were
+	// captured before this migration.
+	s.db.Exec(`ALTER TABLE task_run_host_samples ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_run_host_samples ADD COLUMN turns INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_run_host_samples ADD COLUMN actions INTEGER NOT NULL DEFAULT 0`)
 
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (

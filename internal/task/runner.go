@@ -732,12 +732,15 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 	slog.Info("task started", "component", "runner", "marker", marker, "title", t.Title, "pid", cmd.Process.Pid)
 
-	// Begin host CPU/RSS sampling for this task. Samples accumulate in
-	// the sampler's per-task buffer until the completion path calls
-	// Detach + RecordHostMetrics. Nil sampler → no-op (tests + pre-wire
-	// code paths).
+	// Begin host + task sampling for this run. The callback closes over
+	// rt so each sample captures the live cost/turns/actions as they
+	// update in the reader goroutine below. All 5 sparklines on the
+	// Run Stats card share the same time axis via these samples.
 	if r.hostSampler != nil {
-		r.hostSampler.Attach(t.ID)
+		rtRef := rt
+		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
+			return rtRef.CumulativeCostUSD, len(rtRef.usageByMessage), rtRef.Actions
+		})
 	}
 
 	// Read output in background

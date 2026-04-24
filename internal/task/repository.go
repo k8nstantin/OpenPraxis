@@ -730,13 +730,14 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 		return fmt.Errorf("begin host-samples tx: %w", err)
 	}
 	defer tx.Rollback()
-	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples (run_id, ts, cpu_pct, rss_mb) VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples (run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare host-samples insert: %w", err)
 	}
 	defer stmt.Close()
 	for _, smp := range samples {
-		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano), smp.CPUPct, smp.RSSMB); err != nil {
+		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano),
+			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions); err != nil {
 			return fmt.Errorf("insert host sample: %w", err)
 		}
 	}
@@ -746,7 +747,10 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 // ListHostSamples returns the time-series host samples for a run.
 // Ordered by ts ASC so the frontend can render left-to-right directly.
 func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
-	rows, err := s.db.Query(`SELECT ts, cpu_pct, rss_mb FROM task_run_host_samples WHERE run_id = ? ORDER BY ts ASC`, runID)
+	rows, err := s.db.Query(
+		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions FROM task_run_host_samples WHERE run_id = ? ORDER BY ts ASC`,
+		runID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -755,7 +759,7 @@ func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	for rows.Next() {
 		var tsStr string
 		var smp HostMetricsSample
-		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB); err != nil {
+		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB, &smp.CostUSD, &smp.Turns, &smp.Actions); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
