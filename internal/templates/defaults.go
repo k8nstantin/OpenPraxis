@@ -43,10 +43,10 @@ const defaultGitWorkflow = `<git_workflow>
 MANDATORY — every task gets its own branch and PR.
 
 1. Before making ANY code changes, create a new branch:
-   git checkout -b openpraxis/{{.BranchPrefix}}
+   git checkout -b {{.BranchPrefix}}/{{.Marker}}
 2. Make all your changes on this branch.
 3. Commit your work with a descriptive message.
-4. Push the branch: git push -u origin openpraxis/{{.BranchPrefix}}
+4. Push the branch: git push -u origin {{.BranchPrefix}}/{{.Marker}}
 5. Create a pull request using: gh pr create --title "<title>" --body "<summary>"
 6. Include the PR URL in your final output.
 

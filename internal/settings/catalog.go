@@ -71,6 +71,13 @@ func Catalog() []KnobDef {
 		{Key: "prompt_max_comment_chars", Type: KnobInt, SliderMin: f(500), SliderMax: f(10000), SliderStep: f(500), Default: 2000, Description: "Max chars per comment when injected into the task-thread context block; longer comments are truncated with a pointer to the full text."},
 		{Key: "prompt_max_context_pct", Type: KnobFloat, SliderMin: f(0.1), SliderMax: f(0.9), SliderStep: f(0.05), Default: 0.4, Description: "Max fraction of the resolved model's context window that the prior-runs + other-comments block may consume; older comments drop first when over budget."},
 		{Key: "compliance_checks_enabled", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "true", Description: "When true, PostToolUse hooks run visceral-compliance + manifest-delusion embedding checks per tool call. Disable for high-throughput agents — each tool call triggers up to N × M embedding calls (N rules, M open manifests) which can peg serve CPU. Defaults true; set false at product or task scope to opt out."},
+		// RC/M5 operator knobs — cadence, restart behavior, branch prefix,
+		// worktree base dir. All inherit via task → manifest → product →
+		// system like every other catalog entry.
+		{Key: "scheduler_tick_seconds", Type: KnobInt, SliderMin: f(2), SliderMax: f(300), SliderStep: f(1), Default: 10, Unit: "seconds", Description: "How often the scheduler wakes to check for due tasks. Lower = more responsive, more DB load."},
+		{Key: "on_restart_behavior", Type: KnobEnum, EnumValues: []string{"restart", "stop", "fail"}, Default: "stop", Description: "What to do with tasks left in running state when serve restarts. stop=mark failed with recovery hint; restart=re-fire immediately; fail=mark failed with no auto-recovery."},
+		{Key: "branch_prefix", Type: KnobString, Default: "openpraxis", Description: "Prefix used in the agent's <git_workflow> branch name: <prefix>/<marker>. Operators can set per-product for QA/staging branches."},
+		{Key: "worktree_base_dir", Type: KnobString, Default: ".openpraxis-work", Description: "Directory under the repo root where per-task git worktrees are materialised. Absolute paths are supported for out-of-tree worktrees."},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
 			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 			// MCP tools the runner's prompt template instructs agents to call.

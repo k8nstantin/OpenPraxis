@@ -78,6 +78,49 @@ func (s *Store) ListRuntimeState() ([]RuntimeState, error) {
 	return result, rows.Err()
 }
 
+// ClearRuntimeState drops every task_runtime_state row. Used by the
+// RC/M5 RecoverInFlight path after it has classified each orphan — a
+// restarted task will re-save its own state when it fires again.
+func (s *Store) ClearRuntimeState() error {
+	_, err := s.db.Exec(`DELETE FROM task_runtime_state`)
+	return err
+}
+
+// listOrphanRunningTasks returns tasks left in running/paused status from
+// a prior serve process. Used by RecoverInFlight to catch orphans whose
+// task_runtime_state row never got written (historical crash path).
+func (s *Store) listOrphanRunningTasks() ([]*Task, error) {
+	rows, err := s.db.Query(`SELECT ` + taskColumns + ` FROM tasks WHERE status IN ('running', 'paused') AND deleted_at = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTasks(rows)
+}
+
+// RecoverAsFailed marks a task failed with last_output carrying the
+// failure reason. Called by RecoverInFlight's stop / fail branches.
+// Uses last_output (not a dedicated failure_reason column) so the
+// dashboard's existing "last output" surface renders it without a
+// schema change.
+func (s *Store) RecoverAsFailed(taskID, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE tasks SET status = 'failed', last_output = ?, updated_at = ? WHERE id = ? AND status IN ('running', 'paused')`,
+		reason, now, taskID)
+	return err
+}
+
+// RecoverAsScheduled resets a running/paused task to scheduled with
+// next_run_at=now so the scheduler picks it up on its next tick. Called
+// by RecoverInFlight's restart branch. last_output records why the reset
+// happened so the dashboard shows the operator what the runner did.
+func (s *Store) RecoverAsScheduled(taskID, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', next_run_at = ?, last_output = ?, updated_at = ? WHERE id = ? AND status IN ('running', 'paused')`,
+		now, reason, now, taskID)
+	return err
+}
+
 // CleanupOrphaned marks any tasks stuck in "running" as "failed" on startup.
 func (s *Store) CleanupOrphaned() {
 	now := time.Now().UTC().Format(time.RFC3339)

@@ -10,14 +10,18 @@ import (
 	"strings"
 )
 
-// workspaceRoot is the directory under the repo where per-task worktrees
-// live. Kept inside the repo (not /tmp) so disk layout is predictable and
-// the operator can inspect a stuck task's workspace without hunting.
+// workspaceRoot is the default directory under the repo where per-task
+// worktrees live. Kept inside the repo (not /tmp) so disk layout is
+// predictable and the operator can inspect a stuck task's workspace
+// without hunting. Overridable via the `worktree_base_dir` knob which
+// may be absolute (out-of-tree) or relative (joined onto the repo dir).
 const workspaceRoot = ".openpraxis-work"
 
 // prepareTaskWorkspace materializes a fresh git worktree for the given task
-// at `<repoDir>/.openpraxis-work/<taskID>`, checked out to a detached HEAD
-// on `<remote>/main`. The agent then creates its own task branch inside
+// at `<baseDir>/<taskID>`, checked out to a detached HEAD on `<remote>/main`.
+// baseDir defaults to `<repoDir>/.openpraxis-work` when empty; absolute
+// paths are honoured verbatim so operators can park worktrees on a
+// dedicated volume. The agent then creates its own task branch inside
 // that worktree, so:
 //
 //   - Each task starts from a clean, up-to-date copy of main — no more
@@ -30,7 +34,7 @@ const workspaceRoot = ".openpraxis-work"
 // Returns the absolute worktree path and the base commit SHA (the agent's
 // starting point — recorded for audit/debug). The caller is responsible for
 // calling cleanupTaskWorkspace after the agent exits.
-func (r *Runner) prepareTaskWorkspace(taskID string) (workDir, baseSHA string, err error) {
+func (r *Runner) prepareTaskWorkspace(taskID, baseDir string) (workDir, baseSHA string, err error) {
 	repoDir, err := r.resolveRepoDir()
 	if err != nil {
 		return "", "", err
@@ -49,7 +53,7 @@ func (r *Runner) prepareTaskWorkspace(taskID string) (workDir, baseSHA string, e
 			"component", "runner", "remote", remote, "error", ferr)
 	}
 
-	workDir = filepath.Join(repoDir, workspaceRoot, taskID)
+	workDir = resolveWorkspacePath(repoDir, baseDir, taskID)
 
 	// A stale worktree from a prior crashed run would block `worktree add`.
 	// Clean it unconditionally — if it's not registered, `worktree remove`
@@ -98,6 +102,21 @@ func (r *Runner) cleanupTaskWorkspace(workDir string) {
 		slog.Warn("worktree remove failed",
 			"component", "runner", "workdir", workDir, "error", err)
 	}
+}
+
+// resolveWorkspacePath joins baseDir + taskID into an absolute path
+// under which the task's worktree lives. baseDir defaults to
+// `<repoDir>/.openpraxis-work` when empty. Absolute baseDir values
+// are honoured verbatim so operators can park worktrees on a
+// dedicated volume outside the repo.
+func resolveWorkspacePath(repoDir, baseDir, taskID string) string {
+	if baseDir == "" {
+		baseDir = workspaceRoot
+	}
+	if filepath.IsAbs(baseDir) {
+		return filepath.Join(baseDir, taskID)
+	}
+	return filepath.Join(repoDir, baseDir, taskID)
 }
 
 // resolveRepoDir returns r.repoDir if set, otherwise falls back to the

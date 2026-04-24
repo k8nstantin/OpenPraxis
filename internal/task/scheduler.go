@@ -1,11 +1,15 @@
 package task
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/settings"
 )
 
 // ManifestDepChecker checks if a manifest's dependencies are satisfied.
@@ -23,6 +27,10 @@ type Scheduler struct {
 	stopCh   chan struct{}
 	onFire   func(t *Task) // callback when a task fires
 	depCheck ManifestDepChecker
+	// resolver is used to read the `scheduler_tick_seconds` knob at system
+	// scope each tick. Nil keeps the static interval for tests/harnesses
+	// that construct a Scheduler without a settings store.
+	resolver *settings.Resolver
 }
 
 // NewScheduler creates a task scheduler.
@@ -36,19 +44,98 @@ func NewScheduler(store *Store, checkInterval time.Duration, onFire func(t *Task
 	}
 }
 
-// Start begins the scheduler loop.
+// SetResolver wires the settings resolver used to read the
+// `scheduler_tick_seconds` knob at runtime. When nil, the scheduler uses
+// the interval passed to NewScheduler.
+func (s *Scheduler) SetResolver(r *settings.Resolver) { s.resolver = r }
+
+// schedulerTickFloor is the minimum tick duration. Matches the catalog's
+// slider min; guards against a misconfigured knob that would DoS the DB.
+const schedulerTickFloor = 2 * time.Second
+
+// resolveTick returns the current desired tick duration. Reads
+// `scheduler_tick_seconds` at system scope every call so operator
+// changes take effect within one tick of the write. Falls back to the
+// catalog default on lookup failure so a transient DB error doesn't
+// freeze the scheduler.
+//
+// The resolver walks task → manifest → product → catalog-default and
+// never consults system-scope rows, so we bypass it and read the system
+// row directly from the settings store. Missing row → catalog default.
+func (s *Scheduler) resolveTick() time.Duration {
+	if s.resolver == nil || s.resolver.Store() == nil {
+		return s.interval
+	}
+	ctx := context.Background()
+	secs, ok := readSystemIntKnob(ctx, s.resolver.Store(), "scheduler_tick_seconds")
+	if !ok {
+		return s.interval
+	}
+	if secs <= 0 {
+		return s.interval
+	}
+	d := time.Duration(secs) * time.Second
+	if d < schedulerTickFloor {
+		return schedulerTickFloor
+	}
+	return d
+}
+
+// readSystemIntKnob reads an int knob at system scope, falling back to
+// the catalog default when the row is absent or unparsable. Returns
+// (value, ok); ok=false means the caller should use its own fallback.
+func readSystemIntKnob(ctx context.Context, store *settings.Store, key string) (int64, bool) {
+	entry, err := store.Get(ctx, settings.ScopeSystem, "", key)
+	if err == nil && entry.Value != "" {
+		var n int64
+		if jerr := jsonUnmarshalNumber(entry.Value, &n); jerr == nil {
+			return n, true
+		}
+	}
+	def, defOK := settings.SystemDefault(key)
+	if !defOK {
+		return 0, false
+	}
+	switch n := def.(type) {
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	}
+	return 0, false
+}
+
+// jsonUnmarshalNumber decodes a JSON-encoded number into an int64,
+// accepting the float64 round-trip encoding/json produces for any
+// numeric input.
+func jsonUnmarshalNumber(raw string, out *int64) error {
+	var f float64
+	if err := json.Unmarshal([]byte(raw), &f); err != nil {
+		return err
+	}
+	*out = int64(f)
+	return nil
+}
+
+// Start begins the scheduler loop. The tick duration is re-read from the
+// `scheduler_tick_seconds` knob on every iteration so changes at system
+// scope take effect without a restart.
 func (s *Scheduler) Start() {
 	go func() {
 		// Initial check after short delay
-		time.Sleep(2 * time.Second)
+		select {
+		case <-time.After(2 * time.Second):
+		case <-s.stopCh:
+			return
+		}
 		s.check()
 
-		ticker := time.NewTicker(s.interval)
-		defer ticker.Stop()
-
 		for {
+			dur := s.resolveTick()
 			select {
-			case <-ticker.C:
+			case <-time.After(dur):
 				s.check()
 			case <-s.stopCh:
 				return
