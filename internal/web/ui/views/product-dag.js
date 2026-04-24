@@ -64,15 +64,28 @@
       meta: JSON.stringify(data.meta || {})
     }});
 
-    // Product → manifest ownership edges, but ONLY for root manifests (those
-    // with no depends_on). For chained manifests, the dep chain already
-    // implies reach from the product, and adding 6 product→manifest edges
-    // forces dagre to route 6 long lines that cross every task in between.
-    // This is the "tangled spaghetti" failure mode from the 2026-04-23
-    // screenshot — it wasn't dagre, it was that we fed it redundant edges.
+    // In-product manifest IDs. Used to filter cross-product depends_on
+    // refs out of the edge set (cytoscape errors hard on an edge whose
+    // source node is missing — crashed the whole render on 2026-04-24
+    // after the Agentic OS umbrella/sub-product split moved M8's deps
+    // out of AOS/Execution into AOS/Kernel).
+    var manifestIds = {};
+    for (var mx = 0; mx < manifests.length; mx++) manifestIds[manifests[mx].id] = true;
+
+    // Product → manifest ownership edges. Emit only when the manifest has
+    // no in-product dep that would otherwise connect it — else dagre draws
+    // redundant long lines (the 2026-04-23 "tangled spaghetti"). A manifest
+    // whose depends_on all point outside this product still gets an
+    // ownership edge so it stays reachable from the root.
     for (var mi = 0; mi < manifests.length; mi++) {
-      if (!manifests[mi].depends_on) {
-        elements.push({ data: { source: data.id, target: manifests[mi].id, edgeType: 'product_link' } });
+      var mown = manifests[mi];
+      var inProductDeps = 0;
+      if (mown.depends_on) {
+        var owndids = mown.depends_on.split(',').map(function(s){return s.trim();}).filter(Boolean);
+        for (var dj = 0; dj < owndids.length; dj++) if (manifestIds[owndids[dj]]) inProductDeps++;
+      }
+      if (inProductDeps === 0) {
+        elements.push({ data: { source: data.id, target: mown.id, edgeType: 'product_link' } });
       }
     }
 
@@ -91,10 +104,13 @@
         taskInfo: completedCount + '/' + taskCount
       }});
 
-      // Manifest → manifest edges (explicit depends_on)
+      // Manifest → manifest edges (explicit depends_on). Cross-product
+      // deps are silently dropped — they belong to the product-dep layer
+      // of THIS product's view, not the manifest layer.
       if (m.depends_on) {
         var depIds = m.depends_on.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
         for (var di = 0; di < depIds.length; di++) {
+          if (!manifestIds[depIds[di]]) continue;
           elements.push({ data: { source: depIds[di], target: m.id, edgeType: 'manifest_dep' } });
         }
       }
