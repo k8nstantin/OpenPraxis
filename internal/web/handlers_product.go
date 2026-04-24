@@ -14,6 +14,22 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// pItemMenu is the products-by-peer menu row. SubProducts is filled when
+// this product is detected as an umbrella (no manifests + has out-deps).
+type pItemMenu struct {
+	ID             string      `json:"id"`
+	Marker         string      `json:"marker"`
+	Title          string      `json:"title"`
+	Status         string      `json:"status"`
+	TotalManifests int         `json:"total_manifests"`
+	TotalTasks     int         `json:"total_tasks"`
+	TotalTurns     int         `json:"total_turns"`
+	TotalCost      float64     `json:"total_cost"`
+	CreatedAt      string      `json:"created_at"`
+	UpdatedAt      string      `json:"updated_at"`
+	SubProducts    []pItemMenu `json:"sub_products,omitempty"`
+}
+
 func apiProductsByPeer(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		products, err := n.Products.List("", 200)
@@ -21,26 +37,57 @@ func apiProductsByPeer(n *node.Node) http.HandlerFunc {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		type pItem struct {
-			ID             string  `json:"id"`
-			Marker         string  `json:"marker"`
-			Title          string  `json:"title"`
-			Status         string  `json:"status"`
-			TotalManifests int     `json:"total_manifests"`
-			TotalTasks     int     `json:"total_tasks"`
-			TotalTurns     int     `json:"total_turns"`
-			TotalCost      float64 `json:"total_cost"`
-			CreatedAt      string  `json:"created_at"`
-			UpdatedAt      string  `json:"updated_at"`
-		}
 		type peerGroup struct {
-			PeerID   string  `json:"peer_id"`
-			Count    int     `json:"count"`
-			Products []pItem `json:"products"`
+			PeerID   string      `json:"peer_id"`
+			Count    int         `json:"count"`
+			Products []pItemMenu `json:"products"`
 		}
-		peers := make(map[string][]pItem)
+
+		// An "umbrella" is a product with zero manifests of its own that has
+		// outgoing product_dep edges. Its dep targets render nested under it
+		// in the menu and are filtered from the top-level list. Self-
+		// documenting: anyone makes an umbrella by creating an empty product
+		// + wiring sub-products via product_dep_add. First umbrella claiming
+		// a sub wins (deterministic by product list order).
+		ctx := r.Context()
+		parentOf := map[string]string{}
+		umbrellaSubs := map[string][]string{}
+		for _, p := range products {
+			if p.TotalManifests > 0 {
+				continue
+			}
+			deps, _ := n.Products.ListDeps(ctx, p.ID)
+			if len(deps) == 0 {
+				continue
+			}
+			for _, d := range deps {
+				if _, claimed := parentOf[d.ID]; !claimed {
+					parentOf[d.ID] = p.ID
+				}
+				umbrellaSubs[p.ID] = append(umbrellaSubs[p.ID], d.ID)
+			}
+		}
+
+		itemFor := func(p *product.Product) pItemMenu {
+			return pItemMenu{
+				ID: p.ID, Marker: p.Marker, Title: p.Title, Status: p.Status,
+				TotalManifests: p.TotalManifests, TotalTasks: p.TotalTasks,
+				TotalTurns: p.TotalTurns, TotalCost: p.TotalCost,
+				CreatedAt: p.CreatedAt.Format(time.RFC3339),
+				UpdatedAt: p.UpdatedAt.Format(time.RFC3339),
+			}
+		}
+		productByID := map[string]*product.Product{}
+		for _, p := range products {
+			productByID[p.ID] = p
+		}
+
+		peers := make(map[string][]pItemMenu)
 		peerOrder := []string{}
 		for _, p := range products {
+			if _, isSub := parentOf[p.ID]; isSub {
+				continue
+			}
 			pid := p.SourceNode
 			if pid == "" {
 				pid = n.PeerID()
@@ -48,13 +95,15 @@ func apiProductsByPeer(n *node.Node) http.HandlerFunc {
 			if _, ok := peers[pid]; !ok {
 				peerOrder = append(peerOrder, pid)
 			}
-			peers[pid] = append(peers[pid], pItem{
-				ID: p.ID, Marker: p.Marker, Title: p.Title, Status: p.Status,
-				TotalManifests: p.TotalManifests, TotalTasks: p.TotalTasks,
-				TotalTurns: p.TotalTurns, TotalCost: p.TotalCost,
-				CreatedAt: p.CreatedAt.Format(time.RFC3339),
-				UpdatedAt: p.UpdatedAt.Format(time.RFC3339),
-			})
+			item := itemFor(p)
+			if subIDs, ok := umbrellaSubs[p.ID]; ok {
+				for _, sid := range subIDs {
+					if sub, ok := productByID[sid]; ok {
+						item.SubProducts = append(item.SubProducts, itemFor(sub))
+					}
+				}
+			}
+			peers[pid] = append(peers[pid], item)
 		}
 		var result []peerGroup
 		for _, pid := range peerOrder {

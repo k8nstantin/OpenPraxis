@@ -48,6 +48,48 @@
     try {
       var peerGroups = await fetchJSON('/api/products/by-peer');
 
+      // Product render config — reused for top-level products AND umbrella
+      // sub-products. An umbrella product (server-detected as "no manifests +
+      // outgoing product_dep edges") arrives with sub_products[] populated;
+      // children() returns those, the tree renders them nested. Sub-products
+      // are filtered from the top-level list server-side so each product
+      // appears in exactly one place.
+      var productLevel = {
+        label: function(p) { return esc(p.title); },
+        extra: function(p) {
+          var subCount = (p.sub_products || []).length;
+          return '<span class="session-uuid">' + esc(p.marker) + '</span>' +
+            (p.total_manifests > 0 ? '<span class="count">' + p.total_manifests + '</span>' : '') +
+            (subCount > 0 ? '<span class="count" style="background:var(--purple,#8b5cf6)">' + subCount + '</span>' : '');
+        },
+        dotColor: function(p) {
+          return p.status === 'open' ? 'green' : p.status === 'closed' ? 'red' : p.status === 'archive' ? 'red' : 'yellow';
+        },
+        expanded: false,
+        nodeAttrs: function(p) { return 'data-product-id="' + esc(p.id) + '"'; },
+        children: function(p) { return p.sub_products || []; },
+        renderContent: function(p) {
+          if ((p.sub_products || []).length > 0 && p.total_manifests === 0) return '';
+          var metaParts = [];
+          if (p.total_tasks > 0) metaParts.push(p.total_tasks + ' tasks');
+          if (p.total_turns > 0) metaParts.push(p.total_turns + ' turns');
+          if (p.total_cost > 0) metaParts.push('$' + p.total_cost.toFixed(2));
+          return '<div class="prod-manifests-placeholder" data-prod-manifests-for="' + esc(p.id) + '" style="margin-left:24px">' +
+            '<div style="padding:8px 12px;color:var(--text-muted);font-size:12px">' +
+              (metaParts.length ? metaParts.join(' &middot; ') : '') +
+              (p.total_manifests > 0 ? '<div style="margin-top:4px;font-style:italic">Loading manifests...</div>' : '<div style="margin-top:4px;font-style:italic">No manifests linked</div>') +
+            '</div>' +
+          '</div>';
+        },
+        onClick: function(node, childrenEl, nowExpanded, p) {
+          OL.loadProductDetail(p.id);
+          if (nowExpanded) {
+            var placeholder = childrenEl.querySelector('.prod-manifests-placeholder');
+            if (placeholder) loadProductManifests(p.id, placeholder);
+          }
+        },
+      };
+
       OL.renderTree(el, peerGroups, {
         prefix: 'prod',
         emptyMessage: 'No products yet. Create one to group your manifests.',
@@ -57,37 +99,8 @@
             count: function(pg) { return pg.count; },
             children: function(pg) { return pg.products; },
           },
-          {
-            label: function(p) { return esc(p.title); },
-            extra: function(p) {
-              return '<span class="session-uuid">' + esc(p.marker) + '</span>' +
-                (p.total_manifests > 0 ? '<span class="count">' + p.total_manifests + '</span>' : '');
-            },
-            dotColor: function(p) {
-              return p.status === 'open' ? 'green' : p.status === 'closed' ? 'red' : p.status === 'archive' ? 'red' : 'yellow';
-            },
-            expanded: false,
-            nodeAttrs: function(p) { return 'data-product-id="' + esc(p.id) + '"'; },
-            renderContent: function(p) {
-              var metaParts = [];
-              if (p.total_tasks > 0) metaParts.push(p.total_tasks + ' tasks');
-              if (p.total_turns > 0) metaParts.push(p.total_turns + ' turns');
-              if (p.total_cost > 0) metaParts.push('$' + p.total_cost.toFixed(2));
-              return '<div class="prod-manifests-placeholder" data-prod-manifests-for="' + esc(p.id) + '" style="margin-left:24px">' +
-                '<div style="padding:8px 12px;color:var(--text-muted);font-size:12px">' +
-                  (metaParts.length ? metaParts.join(' &middot; ') : '') +
-                  (p.total_manifests > 0 ? '<div style="margin-top:4px;font-style:italic">Loading manifests...</div>' : '<div style="margin-top:4px;font-style:italic">No manifests linked</div>') +
-                '</div>' +
-              '</div>';
-            },
-            onClick: function(node, childrenEl, nowExpanded, p) {
-              OL.loadProductDetail(p.id);
-              if (nowExpanded) {
-                var placeholder = childrenEl.querySelector('.prod-manifests-placeholder');
-                if (placeholder) loadProductManifests(p.id, placeholder);
-              }
-            },
-          }
+          productLevel,
+          productLevel,
         ],
         afterRender: function(container) {
           container.insertAdjacentHTML('afterbegin', '<div style="padding:8px 0;margin-bottom:8px"><button class="btn-search btn-action" id="btn-new-product">+ New Product</button></div>');
