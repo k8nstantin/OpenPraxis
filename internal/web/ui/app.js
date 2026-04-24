@@ -178,6 +178,7 @@
     if (view === 'recall') OL.loadRecall();
     if (view === 'chat') OL.loadChat();
     if (view === 'settings') OL.loadSettings();
+    if (view === 'runner') OL.loadRunner();
   }
   OL.switchView = switchView;
 

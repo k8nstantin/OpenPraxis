@@ -176,6 +176,129 @@ func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver,
 	}
 }
 
+// RecoverInFlight deals with tasks left in `running` or `paused` status from
+// a prior `openpraxis serve` process. For each orphan it resolves the
+// `on_restart_behavior` knob at the task's own scope (task → manifest →
+// product → system) and applies one of:
+//
+//   - stop    — mark failed with a diagnostic reason, operator re-fires manually.
+//   - restart — reset to scheduled with next_run_at=now so the scheduler picks
+//               it up on its next tick.
+//   - fail    — mark failed with no auto-recovery hint, requires explicit ack.
+//
+// Safe to call multiple times; a second call finds no rows in running/paused
+// state and returns without touching the DB. Must run before the scheduler
+// starts — otherwise a `restart`-eligible orphan races with the first tick.
+func (r *Runner) RecoverInFlight(ctx context.Context) error {
+	if r.store == nil {
+		return nil
+	}
+	states, err := r.store.ListRuntimeState()
+	if err != nil {
+		return fmt.Errorf("list runtime state: %w", err)
+	}
+
+	// Also sweep any tasks stuck in running/paused without a matching
+	// runtime_state row — historical crashes could leave that gap.
+	orphans, err := r.store.listOrphanRunningTasks()
+	if err != nil {
+		return fmt.Errorf("list orphan running tasks: %w", err)
+	}
+
+	seen := make(map[string]bool, len(states))
+	for _, rs := range states {
+		seen[rs.TaskID] = true
+		r.recoverOneOrphan(ctx, rs.TaskID, rs.Marker, rs.PID, rs.Actions, rs.Lines, rs.StartedAt.Format(time.RFC3339))
+	}
+	for _, t := range orphans {
+		if seen[t.ID] {
+			continue
+		}
+		marker := t.Marker
+		if marker == "" {
+			marker = taskMarker(t.ID)
+		}
+		r.recoverOneOrphan(ctx, t.ID, marker, 0, 0, 0, "")
+	}
+
+	// Clear runtime_state wholesale — we've made a decision on every row.
+	// A restart-ed task will re-save its state when it runs.
+	if err := r.store.ClearRuntimeState(); err != nil {
+		slog.Warn("clear runtime state after recover failed",
+			"component", "runner", "error", err)
+	}
+	return nil
+}
+
+// recoverOneOrphan resolves on_restart_behavior at the orphan's scope and
+// applies it. Errors are logged (not returned) so one corrupt row does not
+// block recovery for the rest.
+func (r *Runner) recoverOneOrphan(ctx context.Context, taskID, marker string, pid, actions, lines int, startedAt string) {
+	behavior := "stop"
+	if r.resolver != nil {
+		scope, err := r.resolver.NormalizeScope(ctx, settings.Scope{TaskID: taskID})
+		if err != nil {
+			slog.Warn("recover: normalize scope failed, defaulting to stop",
+				"component", "runner", "marker", marker, "error", err)
+		} else {
+			resolved, err := r.resolver.Resolve(ctx, scope, "on_restart_behavior")
+			if err != nil {
+				slog.Warn("recover: resolve on_restart_behavior failed, defaulting to stop",
+					"component", "runner", "marker", marker, "error", err)
+			} else if s, ok := resolved.Value.(string); ok && s != "" {
+				// The resolver does not consult system-scope rows — it
+				// falls through from product to the catalog default. If
+				// the walk ended at system (catalog default), still
+				// prefer an explicit system-scope row when present.
+				if resolved.Source == settings.ScopeSystem && r.resolver.Store() != nil {
+					if entry, gerr := r.resolver.Store().Get(ctx, settings.ScopeSystem, "", "on_restart_behavior"); gerr == nil && entry.Value != "" {
+						var v string
+						if jerr := json.Unmarshal([]byte(entry.Value), &v); jerr == nil && v != "" {
+							s = v
+						}
+					}
+				}
+				behavior = s
+			}
+		}
+	}
+
+	switch behavior {
+	case "restart":
+		reason := "serve restart, re-firing per on_restart_behavior=restart"
+		if err := r.store.RecoverAsScheduled(taskID, reason); err != nil {
+			slog.Error("recover restart failed",
+				"component", "runner", "marker", marker, "error", err)
+			return
+		}
+		slog.Info("recovered orphan task as scheduled",
+			"component", "runner", "marker", marker, "prior_pid", pid,
+			"prior_actions", actions, "prior_lines", lines)
+	case "fail":
+		reason := "serve restart, prior process killed (on_restart_behavior=fail — no auto-recovery)"
+		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
+			slog.Error("recover fail failed",
+				"component", "runner", "marker", marker, "error", err)
+			return
+		}
+		slog.Info("recovered orphan task as failed (no auto-recovery)",
+			"component", "runner", "marker", marker, "prior_pid", pid)
+	default: // "stop"
+		reason := "serve restart, prior process killed"
+		if pid > 0 {
+			reason = fmt.Sprintf("%s (PID %d, %d actions, %d lines, started %s)",
+				reason, pid, actions, lines, startedAt)
+		}
+		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
+			slog.Error("recover stop failed",
+				"component", "runner", "marker", marker, "error", err)
+			return
+		}
+		slog.Info("recovered orphan task as failed",
+			"component", "runner", "marker", marker, "prior_pid", pid)
+	}
+}
+
 // ListRunning returns currently executing tasks.
 func (r *Runner) ListRunning() []*RunningTask {
 	r.mu.RLock()
@@ -366,6 +489,8 @@ type runtimeKnobs struct {
 	RetryOnFailure  int
 	ApprovalMode    string
 	AllowedTools    []string
+	BranchPrefix    string
+	WorktreeBaseDir string
 }
 
 // decodeRuntimeKnobs pulls the 11 execution-shaping knobs out of a
@@ -409,6 +534,18 @@ func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) 
 	}
 	if k.AllowedTools, err = resolvedStrSlice(all["allowed_tools"].Value); err != nil {
 		return k, fmt.Errorf("allowed_tools: %w", err)
+	}
+	if k.BranchPrefix, err = resolvedStr(all["branch_prefix"].Value); err != nil {
+		return k, fmt.Errorf("branch_prefix: %w", err)
+	}
+	if k.BranchPrefix == "" {
+		k.BranchPrefix = "openpraxis"
+	}
+	if k.WorktreeBaseDir, err = resolvedStr(all["worktree_base_dir"].Value); err != nil {
+		return k, fmt.Errorf("worktree_base_dir: %w", err)
+	}
+	if k.WorktreeBaseDir == "" {
+		k.WorktreeBaseDir = workspaceRoot
 	}
 	return k, nil
 }
@@ -565,7 +702,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	}
 
 	// Build the prompt
-	prompt, err := buildPrompt(t, manifestTitle, manifestContent, visceralRules, r.tmpl)
+	prompt, err := buildPrompt(t, manifestTitle, manifestContent, visceralRules, knobs.BranchPrefix, r.tmpl)
 	if err != nil {
 		return fmt.Errorf("build prompt: %w", err)
 	}
@@ -656,7 +793,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// The agent runs inside it, so its branch is always based on a clean,
 	// up-to-date main — no stacking on a previous task's branch, no risk
 	// of clobbering the operator's own working copy at the repo root.
-	workDir, baseSHA, err := r.prepareTaskWorkspace(t.ID)
+	workDir, baseSHA, err := r.prepareTaskWorkspace(t.ID, knobs.WorktreeBaseDir)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("prepare task workspace: %w", err)
@@ -1282,7 +1419,10 @@ func (r *Runner) GetOutput(taskID string) ([]string, bool) {
 // in internal/templates are used so every historical test harness + the
 // snapshot test produce byte-identical output to the pre-RC/M1
 // hardcoded writer.
-func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string, tmpl *templates.Resolver) (string, error) {
+func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules, branchPfx string, tmpl *templates.Resolver) (string, error) {
+	if branchPfx == "" {
+		branchPfx = "openpraxis"
+	}
 	data := templates.PromptData{
 		Task: templates.TaskView{
 			ID:          t.ID,
@@ -1296,7 +1436,8 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string, 
 			Content: manifestContent,
 		},
 		VisceralRules: visceralRules,
-		BranchPrefix:  branchPrefix(t.ID),
+		BranchPrefix:  branchPfx,
+		Marker:        taskMarker(t.ID),
 		Now:           time.Now(),
 	}
 
@@ -1328,11 +1469,11 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string, 
 	return b.String(), nil
 }
 
-// branchPrefix mirrors the pre-RC/M1 marker rule: the first 12 chars of
-// the task id when the id is long enough, otherwise the id verbatim.
-// Kept as a helper so the template default and the runner both derive
-// the prefix the same way.
-func branchPrefix(taskID string) string {
+// taskMarker returns the short identifier used as the trailing segment
+// of the agent's branch name (first 12 chars of the task id when long
+// enough, otherwise the id verbatim). Kept as a helper so the template
+// default and the runner both derive the marker the same way.
+func taskMarker(taskID string) string {
 	if len(taskID) >= 12 {
 		return taskID[:12]
 	}

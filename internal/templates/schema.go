@@ -46,5 +46,14 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("create history index: %w", err)
 	}
 
+	// Partial UNIQUE index: at most one active row per logical template.
+	// Closes the read-modify-write window on SCD-2 update where two concurrent
+	// PUTs against the same uid could both leave valid_to='' active rows.
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_templates_one_active
+		ON prompt_templates(template_uid)
+		WHERE valid_to = ''`); err != nil {
+		return fmt.Errorf("create one-active unique index: %w", err)
+	}
+
 	return nil
 }

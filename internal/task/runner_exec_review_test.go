@@ -61,7 +61,7 @@ func openAmnesiaDB(t *testing.T) *action.Store {
 // finishing, and must interpolate the full task ID into target_id.
 func TestRunner_PromptTemplate_IncludesClosingSection(t *testing.T) {
 	task := &Task{ID: "019da142-479c-70d2-865b-d6e593883e3f", Title: "demo"}
-	got, err := buildPrompt(task, "Manifest X", "manifest body", "rules body", nil)
+	got, err := buildPrompt(task, "Manifest X", "manifest body", "rules body", "openpraxis", nil)
 	if err != nil {
 		t.Fatalf("buildPrompt: %v", err)
 	}

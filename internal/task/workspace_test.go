@@ -78,7 +78,7 @@ func TestPrepareTaskWorkspace_CreatesIsolatedWorktreeOffMain(t *testing.T) {
 	}
 
 	r := newRunnerForWorkspace(repoDir)
-	workDir, baseSHA, err := r.prepareTaskWorkspace("019da13a-f337")
+	workDir, baseSHA, err := r.prepareTaskWorkspace("019da13a-f337", "")
 	if err != nil {
 		t.Fatalf("prepareTaskWorkspace: %v", err)
 	}
@@ -126,13 +126,13 @@ func TestPrepareTaskWorkspace_StaleWorktreeReclaimed(t *testing.T) {
 	_, repoDir := initRemoteAndClone(t)
 	r := newRunnerForWorkspace(repoDir)
 
-	workDir1, _, err := r.prepareTaskWorkspace("019da13a-f337")
+	workDir1, _, err := r.prepareTaskWorkspace("019da13a-f337", "")
 	if err != nil {
 		t.Fatalf("first prepare: %v", err)
 	}
 	// Simulate a crashed task: worktree still on disk, still registered.
 
-	workDir2, _, err := r.prepareTaskWorkspace("019da13a-f337")
+	workDir2, _, err := r.prepareTaskWorkspace("019da13a-f337", "")
 	if err != nil {
 		t.Fatalf("second prepare (stale reclaim): %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCleanupTaskWorkspace_RemovesDirButKeepsBranch(t *testing.T) {
 	_, repoDir := initRemoteAndClone(t)
 	r := newRunnerForWorkspace(repoDir)
 
-	workDir, _, err := r.prepareTaskWorkspace("019da13a-f337")
+	workDir, _, err := r.prepareTaskWorkspace("019da13a-f337", "")
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

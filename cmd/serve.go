@@ -167,9 +167,14 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		// Task runner — spawns autonomous agents
-		// Cleanup orphaned tasks from previous runs
-		n.Tasks.CleanupOrphaned()
+		// Task runner — spawns autonomous agents. RecoverInFlight is the
+		// RC/M5 replacement for the blanket CleanupOrphaned sweep: it
+		// resolves `on_restart_behavior` per task and honours stop /
+		// restart / fail. Must run before the scheduler starts, otherwise
+		// a `restart`-eligible orphan races with the first tick. The
+		// legacy CleanupOrphaned sweep runs after as a defensive fallback
+		// for rows the resolver could not classify (e.g. transient DB
+		// lookup errors).
 
 		// Backfill cost_usd for existing runs that have output but no cost recorded
 		if backfilled, err := n.Tasks.BackfillCosts(); err == nil && backfilled > 0 {
@@ -243,7 +248,20 @@ var serveCmd = &cobra.Command{
 			}
 		})
 
-		// Task scheduler — checks every 10s for due tasks
+		// RC/M5 orphan recovery: resolve on_restart_behavior per task and
+		// flip stuck running/paused rows accordingly. Runs BEFORE the
+		// scheduler starts so a restart-eligible orphan is not missed by
+		// the first tick. CleanupOrphaned is kept as a defensive fallback
+		// for rows the recovery path could not classify.
+		if err := runner.RecoverInFlight(ctx); err != nil {
+			slog.Warn("recover in-flight tasks failed; falling back to blanket cleanup",
+				"error", err)
+			n.Tasks.CleanupOrphaned()
+		}
+
+		// Task scheduler — initial interval is 10s; the
+		// `scheduler_tick_seconds` knob (system scope) overrides this and
+		// is re-read on every tick so operator changes take effect live.
 		scheduler := task.NewScheduler(n.Tasks, 10*time.Second, func(t *task.Task) {
 			slog.Info("task fired", "marker", t.Marker, "title", t.Title, "manifest_id", t.ManifestID, "schedule", t.Schedule)
 
@@ -285,6 +303,7 @@ var serveCmd = &cobra.Command{
 				}})
 			}
 		}, n)
+		scheduler.SetResolver(n.SettingsResolver)
 		scheduler.Start()
 		defer scheduler.Stop()
 
