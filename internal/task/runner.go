@@ -874,7 +874,13 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// Detach + RecordHostMetrics. Nil sampler → no-op (tests + pre-wire
 	// code paths).
 	if r.hostSampler != nil {
-		r.hostSampler.Attach(t.ID)
+		// The callback closes over rt so samples capture live cost / turns
+		// (unique message ids) / actions alongside host CPU/RSS on the
+		// same 5s cadence — powers the Run Stats 5-aligned sparklines.
+		rtRef := rt
+		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
+			return rtRef.CumulativeCostUSD, len(rtRef.usageByMessage), rtRef.Actions
+		})
 	}
 
 	// Read output in background
