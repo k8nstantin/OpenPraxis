@@ -309,7 +309,14 @@ func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 			http.Error(w, "product not found", 404)
 			return
 		}
-		result := buildHierarchyProduct(r.Context(), n, p, 2, map[string]bool{})
+		// Depth 1: umbrella shows its direct sub-products; each sub-product
+		// returns only its manifests, NOT its own subsystem deps. Depth 2
+		// caused the 2026-04-24 "tangled mess" where Execution appeared as
+		// a child of both Agentic OS (rollup) AND Observability (subsystem
+		// dep), with both edges drawn on top of each other in the same
+		// product layer. Subsystem deps only render when that product is
+		// the root of the view, not when it's a nested child.
+		result := buildHierarchyProduct(r.Context(), n, p, 1, map[string]bool{})
 		writeJSON(w, result)
 	}
 }
