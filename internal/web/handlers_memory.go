@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 
@@ -14,9 +15,38 @@ func apiMemories(n *node.Node) http.HandlerFunc {
 		if prefix == "" {
 			prefix = "/"
 		}
-		mems, err := n.Index.ListByPrefix(prefix, 100)
+		// Honor ?limit (the dashboard poll only renders 10; the prior
+		// hardcoded 100 shipped 374KB on every 10s tick — freeze cause).
+		limit := 100
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 1000 {
+				limit = parsed
+			}
+		}
+		mems, err := n.Index.ListByPrefix(prefix, limit)
 		if err != nil {
 			writeError(w, err.Error(), 500)
+			return
+		}
+		// ?summary=true strips the heavy l1/l2 body fields. The recent-
+		// memories panel only renders id/type/l0/source_agent — shipping
+		// full bodies on every poll is wasteful (~3.7KB → ~200B per memory).
+		if r.URL.Query().Get("summary") == "true" {
+			type memSummary struct {
+				ID          string `json:"id"`
+				Path        string `json:"path"`
+				L0          string `json:"l0"`
+				Type        string `json:"type"`
+				SourceAgent string `json:"source_agent"`
+			}
+			out := make([]memSummary, 0, len(mems))
+			for _, m := range mems {
+				out = append(out, memSummary{
+					ID: m.ID, Path: m.Path, L0: m.L0,
+					Type: m.Type, SourceAgent: m.SourceAgent,
+				})
+			}
+			writeJSON(w, out)
 			return
 		}
 		writeJSON(w, mems)

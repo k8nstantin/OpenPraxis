@@ -64,9 +64,16 @@
       meta: JSON.stringify(data.meta || {})
     }});
 
-    // Product → manifest ownership edges
+    // Product → manifest ownership edges, but ONLY for root manifests (those
+    // with no depends_on). For chained manifests, the dep chain already
+    // implies reach from the product, and adding 6 product→manifest edges
+    // forces dagre to route 6 long lines that cross every task in between.
+    // This is the "tangled spaghetti" failure mode from the 2026-04-23
+    // screenshot — it wasn't dagre, it was that we fed it redundant edges.
     for (var mi = 0; mi < manifests.length; mi++) {
-      elements.push({ data: { source: data.id, target: manifests[mi].id, edgeType: 'product_link' } });
+      if (!manifests[mi].depends_on) {
+        elements.push({ data: { source: data.id, target: manifests[mi].id, edgeType: 'product_link' } });
+      }
     }
 
     for (var col = 0; col < manifests.length; col++) {
@@ -101,7 +108,9 @@
 
       for (var ti = 0; ti < tasks.length; ti++) {
         var t = tasks[ti];
-        var shortTitle = t.title.length > 25 ? t.title.substring(0, 23) + '…' : t.title;
+        // Labels render inside the 120×44 node and wrap to ~2 lines at
+        // font-size 9px → ~36 chars before ellipsis kicks in.
+        var shortTitle = t.title.length > 36 ? t.title.substring(0, 35) + '…' : t.title;
         elements.push({ data: {
           id: t.id, label: shortTitle,
           title: t.title, type: 'task', status: t.status,
@@ -137,11 +146,18 @@
         // rankDir=TB: product at top, flows downward through manifests + tasks.
         // nodeSep / rankSep tuned for current label sizes — if labels grow,
         // bump these rather than reintroducing manual positions.
+        // Layout invariant: ALL labels render INSIDE their node (text-valign:
+        // center, text-halign: center). That means label width is bounded by
+        // node width, and dagre's nodeSep directly controls label clearance.
+        // Sibling labels on the same rank can never overlap regardless of
+        // title length — overflow is hidden by 'text-overflow-wrap: ellipsis'.
+        // Do NOT switch any node type back to text-valign:bottom — that's the
+        // mode that produced the 2026-04-23 "tangled mess" regression.
         layout: {
           name: 'dagre',
           rankDir: 'TB',
-          nodeSep: 40,
-          rankSep: 70,
+          nodeSep: 30,
+          rankSep: 60,
           edgeSep: 20,
           padding: 24,
           fit: true,
@@ -150,34 +166,31 @@
           { selector: 'node', style: {
               'label': 'data(label)',
               'text-wrap': 'wrap',
-              'text-max-width': '140px',
+              'text-overflow-wrap': 'anywhere',
+              'text-max-width': '110px',
               'font-size': '9px',
-              'text-valign': 'bottom',
+              'text-valign': 'center',
               'text-halign': 'center',
-              'text-margin-y': 8,
-              'color': '#a1a1aa',
+              'color': '#e4e4e7',
               'background-color': '#1a1a2e',
               'border-width': 2,
               'border-color': '#71717a',
-              'width': 30, 'height': 30,
-              'shape': 'ellipse',
-              'text-outline-color': '#0a0a0f',
-              'text-outline-width': 1,
+              'width': 120, 'height': 44,
+              'shape': 'round-rectangle',
+              'padding': '6px',
           }},
           { selector: 'node[type="product"]', style: {
               'shape': 'round-rectangle',
-              'width': 70, 'height': 50,
+              'width': 180, 'height': 60,
               'font-size': '12px', 'font-weight': 'bold',
-              'text-max-width': '160px',
-              'text-valign': 'center', 'text-halign': 'center', 'text-margin-y': 0,
+              'text-max-width': '170px',
               'background-color': '#8b5cf6', 'border-color': '#8b5cf6', 'color': '#fff',
           }},
           { selector: 'node[type="manifest"]', style: {
               'shape': 'round-rectangle',
-              'width': 55, 'height': 40,
+              'width': 140, 'height': 50,
               'font-size': '10px', 'font-weight': 'bold',
-              'text-max-width': '150px',
-              'text-valign': 'center', 'text-halign': 'center', 'text-margin-y': 0,
+              'text-max-width': '130px',
               'color': '#e4e4e7',
               'background-color': '#1e3a5f',
               'border-width': 3,
