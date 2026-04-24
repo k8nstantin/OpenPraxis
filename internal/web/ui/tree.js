@@ -101,7 +101,11 @@
 
       var level = levels[levelIdx];
       var expanded = levelIdx === 0 ? (level.expanded !== false) : (level.expanded === true);
-      var indent = level.indent != null ? level.indent : (levelIdx > 0 ? 24 : 0);
+      // Cumulative indent: each nested level steps in 24px so the hierarchy
+      // is visually readable. Two-level trees behave identically (level 1 =
+      // 24px). Three+ level trees (peer → umbrella → sub-product) get a
+      // visible step at each depth instead of all flat at 24px.
+      var indent = level.indent != null ? level.indent : levelIdx * 24;
       var attrBase = prefix + '-l' + levelIdx;
       var html = '';
 
