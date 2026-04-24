@@ -70,6 +70,9 @@
           <span class="nav-icon">&#x1F6E1;</span> Watcher
           <span class="watcher-badge" id="watcher-badge" style="display:none"></span>
         </a>
+        <a href="#" class="nav-item" data-view="runner">
+          <span class="nav-icon">&#x2328;</span> Runner
+        </a>
         <div class="nav-divider">Network</div>
         <a href="#" class="nav-item" data-view="peers">
           <span class="nav-icon">&#x25C7;</span> Nodes
@@ -525,6 +528,24 @@
         </div>
       </div>
 
+      <div id="view-runner" class="view">
+        <div class="tab-hint">Prompt templates used by the runner, grouped by scope. Read-only &mdash; edit support lands in RC/M4.</div>
+        <div class="manifests-layout">
+          <div class="manifest-list-panel">
+            <div class="panel-header">Scope &amp; Templates</div>
+            <div class="panel-body" id="runner-list" style="padding:0">
+              <div class="empty-state" style="padding:16px">Loading...</div>
+            </div>
+          </div>
+          <div class="manifest-detail-panel">
+            <div class="panel-header" id="runner-detail-title">Select a template</div>
+            <div class="panel-body" id="runner-detail">
+              <div class="empty-state">Click a template to view its body and history</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="view-peers" class="view">
         <div class="tab-hint">Your local node and all active sessions. Each Claude Code session that connects shares the same memory pool. Remote peers on the network will appear here automatically.</div>
         <div class="panel">
@@ -770,6 +791,7 @@
   <script src="/views/recall.js"></script>
   <script src="/views/chat.js"></script>
   <script src="/views/settings.js"></script>
+  <script src="/views/runner.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
