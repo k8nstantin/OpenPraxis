@@ -55,8 +55,13 @@ type TaskRun struct {
 	CacheCreateTokens int       `json:"cache_create_tokens"`
 	Model             string    `json:"model"`
 	PricingVersion    string    `json:"pricing_version"`
-	StartedAt         time.Time `json:"started_at"`
-	CompletedAt       time.Time `json:"completed_at"`
+	// Host-metrics summary. Full time-series on task_run_host_samples,
+	// fetched separately for the Run Stats sparkline overlay.
+	PeakCPUPct float64   `json:"peak_cpu_pct"`
+	AvgCPUPct  float64   `json:"avg_cpu_pct"`
+	PeakRSSMB  float64   `json:"peak_rss_mb"`
+	StartedAt  time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
 }
 
 // Store manages task persistence.
@@ -164,6 +169,28 @@ func (s *Store) init() error {
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cache_create_tokens INTEGER NOT NULL DEFAULT 0`)
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN model TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN pricing_version TEXT NOT NULL DEFAULT ''`)
+
+	// Host-metrics denorm. The full time-series lives in
+	// task_run_host_samples below; these columns are the rollup used by
+	// list views and the Run Stats card summary numbers.
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN peak_cpu_pct REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN avg_cpu_pct REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN peak_rss_mb REAL NOT NULL DEFAULT 0`)
+
+	// Per-run host-metrics time-series. One row per sample (default 5s
+	// cadence). Feeds the CPU/RSS sparklines overlaid on the Run Stats
+	// card — same timeline as turn/actions/cost.
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_run_host_samples (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		run_id INTEGER NOT NULL,
+		ts TEXT NOT NULL,
+		cpu_pct REAL NOT NULL DEFAULT 0,
+		rss_mb REAL NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		return fmt.Errorf("create task_run_host_samples table: %w", err)
+	}
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_run_host_samples_run ON task_run_host_samples(run_id)`)
 
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (
@@ -314,7 +341,8 @@ func scanRuns(rows *sql.Rows) ([]TaskRun, error) {
 		var r TaskRun
 		var startedStr, completedStr string
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
-			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion); err != nil {
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion,
+			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB); err != nil {
 			return nil, err
 		}
 		r.StartedAt, _ = time.Parse(time.RFC3339, startedStr)

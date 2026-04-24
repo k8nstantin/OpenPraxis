@@ -252,7 +252,7 @@ var serveCmd = &cobra.Command{
 			if t.ManifestID != "" {
 				m, _ := n.Manifests.Get(t.ManifestID)
 				if m == nil {
-					if err := n.Tasks.RecordRun(t.ID, "manifest not found: "+t.ManifestID, "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); err != nil {
+					if _, err := n.Tasks.RecordRun(t.ID, "manifest not found: "+t.ManifestID, "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); err != nil {
 					slog.Error("record run failed", "reason", "manifest not found", "error", err)
 				}
 					return
@@ -277,7 +277,7 @@ var serveCmd = &cobra.Command{
 
 			// Spawn the agent
 			if err := runner.Execute(t, manifestTitle, manifestContent, visceralText); err != nil {
-				if recErr := n.Tasks.RecordRun(t.ID, "execution error: "+err.Error(), "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); recErr != nil {
+				if _, recErr := n.Tasks.RecordRun(t.ID, "execution error: "+err.Error(), "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); recErr != nil {
 					slog.Error("record run failed", "reason", "execution error", "error", recErr)
 				}
 				hub.Broadcast(web.Event{Type: "task_failed", Data: map[string]string{

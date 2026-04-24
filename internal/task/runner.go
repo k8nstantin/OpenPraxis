@@ -94,7 +94,18 @@ type Runner struct {
 	// package defaults (existing behaviour + every existing test harness
 	// that constructs a Runner without a DB-backed templates store).
 	tmpl *templates.Resolver
+
+	// hostSampler polls the serve process CPU/RSS and attributes each
+	// sample to every task attached during its run. Nil → host metrics
+	// are skipped (tests + pre-wire code paths). Wired via
+	// SetHostSampler from cmd/serve.go at boot.
+	hostSampler *HostSampler
 }
+
+// SetHostSampler wires a started HostSampler onto the runner. Attach is
+// called at spawn, Detach at completion; the accumulated samples land
+// on task_run_host_samples + summary columns on task_runs.
+func (r *Runner) SetHostSampler(hs *HostSampler) { r.hostSampler = hs }
 
 // SetTemplateResolver wires the RC/M1 prompt-template resolver onto
 // the runner. Nil disables scope-aware resolution — the runner uses the
@@ -721,6 +732,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 	slog.Info("task started", "component", "runner", "marker", marker, "title", t.Title, "pid", cmd.Process.Pid)
 
+	// Begin host CPU/RSS sampling for this task. Samples accumulate in
+	// the sampler's per-task buffer until the completion path calls
+	// Detach + RecordHostMetrics. Nil sampler → no-op (tests + pre-wire
+	// code paths).
+	if r.hostSampler != nil {
+		r.hostSampler.Attach(t.ID)
+	}
+
 	// Read output in background
 	maxCostCap := knobs.MaxCostUSD
 	retryCap := knobs.RetryOnFailure
@@ -976,8 +995,17 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		}
 
 		// Record the run with history — always use real status, not "scheduled"
-		if err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model); err != nil {
+		runID, err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model)
+		if err != nil {
 			slog.Error("record run failed", "component", "runner", "marker", marker, "error", err)
+		} else if r.hostSampler != nil {
+			// Host CPU/RSS samples accumulated during the run → persist them
+			// alongside the run row. Failure here is not fatal — loss of
+			// host metrics must not fail task completion.
+			samples, metrics := r.hostSampler.Detach(t.ID)
+			if err := r.store.RecordHostMetrics(runID, samples, metrics); err != nil {
+				slog.Warn("record host metrics failed", "component", "runner", "marker", marker, "error", err)
+			}
 		}
 
 		// Post-completion execution-review gate. Successful completions must
