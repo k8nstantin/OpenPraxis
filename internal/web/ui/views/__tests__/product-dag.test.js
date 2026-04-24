@@ -148,4 +148,82 @@ function edgesOfType(edges, type) {
   assert.strictEqual(edgesOfType(edges, 'manifest_dep').length, 1, 'multi-root: one chain edge M1→M2');
 }
 
-console.log('product-dag.test.js: all 6 fixtures passed');
+// ─── Fixture 7: cross-product depends_on (PR #224) ──────────────────────────
+// M2's depends_on points at a manifest NOT in this product (e.g. M2 lives
+// under AOS/Execution but depends on M6 in AOS/Kernel). Invariants:
+//   - no edge with a missing source node (would crash cytoscape)
+//   - M2 still reachable from the root via a product_link ownership edge
+//   - in-product deps (M1→M3) still emit normally
+{
+  const data = {
+    id: 'p7', title: 'P7', status: 'open', meta: {},
+    children: [
+      { id: 'm1', title: 'M1', status: 'open', meta: {}, depends_on: '', children: [] },
+      { id: 'm2', title: 'M2', status: 'open', meta: {}, depends_on: 'external-kernel-id', children: [] },
+      { id: 'm3', title: 'M3', status: 'open', meta: {}, depends_on: 'm1', children: [] },
+    ],
+  };
+  const { nodes, edges } = elementsByKind(OL.buildDagElements(data));
+  const nodeIds = new Set(nodes.map(n => n.data.id));
+  edges.forEach(e => {
+    assert.ok(nodeIds.has(e.data.source), 'cross-product: edge source must exist as node (got ' + e.data.source + ')');
+    assert.ok(nodeIds.has(e.data.target), 'cross-product: edge target must exist as node (got ' + e.data.target + ')');
+  });
+  const productLinks = edgesOfType(edges, 'product_link');
+  const targets = new Set(productLinks.map(e => e.data.target));
+  assert.ok(targets.has('m1'), 'cross-product: M1 gets product_link');
+  assert.ok(targets.has('m2'), 'cross-product: M2 with external-only deps gets product_link (keeps it reachable)');
+  assert.ok(!targets.has('m3'), 'cross-product: M3 with in-product dep does not get redundant product_link');
+  assert.strictEqual(edgesOfType(edges, 'manifest_dep').length, 1, 'cross-product: only in-product dep M1→M3 emitted');
+}
+
+// ─── Fixture 8: umbrella with sub_products (PR #225) ────────────────────────
+// Umbrella product owns zero manifests, has 2 sub-products, each with 1
+// manifest + 1 task. Invariants:
+//   - all 3 product nodes emitted (umbrella + 2 subs)
+//   - 2 product_link edges from umbrella → each sub
+//   - each sub's manifests + tasks present and correctly linked
+{
+  const data = {
+    id: 'umb', title: 'Umbrella', status: 'open', meta: {},
+    children: [],
+    sub_products: [
+      { id: 'sub1', title: 'Sub1', status: 'open', meta: {},
+        children: [{ id: 'm1', title: 'S1M1', status: 'open', meta: {}, depends_on: '',
+          children: [{ id: 't1', title: 'S1T1', status: 'waiting', meta: {}, depends_on: '' }] }] },
+      { id: 'sub2', title: 'Sub2', status: 'open', meta: {},
+        children: [{ id: 'm2', title: 'S2M1', status: 'open', meta: {}, depends_on: '',
+          children: [{ id: 't2', title: 'S2T1', status: 'waiting', meta: {}, depends_on: '' }] }] },
+    ],
+  };
+  const { nodes, edges } = elementsByKind(OL.buildDagElements(data));
+  const productNodes = nodes.filter(n => n.data.type === 'product');
+  assert.strictEqual(productNodes.length, 3, 'umbrella: 3 product nodes (umbrella + 2 subs)');
+  const umbrellaEdges = edges.filter(e => e.data.source === 'umb');
+  assert.strictEqual(umbrellaEdges.length, 2, 'umbrella: 2 outgoing edges (one per sub)');
+  const sub1ManEdges = edges.filter(e => e.data.source === 'sub1' && e.data.target === 'm1');
+  const sub2ManEdges = edges.filter(e => e.data.source === 'sub2' && e.data.target === 'm2');
+  assert.strictEqual(sub1ManEdges.length, 1, 'umbrella: sub1 → m1 ownership');
+  assert.strictEqual(sub2ManEdges.length, 1, 'umbrella: sub2 → m2 ownership');
+  assert.ok(nodes.find(n => n.data.id === 't1'), 'umbrella: t1 emitted');
+  assert.ok(nodes.find(n => n.data.id === 't2'), 'umbrella: t2 emitted');
+}
+
+// ─── Fixture 9: cyclic sub_products (defense in depth) ──────────────────────
+// Malformed payload where a sub-product references an ancestor. Seen-set
+// must prevent infinite recursion / duplicate node emission.
+{
+  const data = {
+    id: 'umb', title: 'Umb', status: 'open', meta: {},
+    children: [],
+    sub_products: [
+      { id: 'sub1', title: 'Sub1', status: 'open', meta: {}, children: [],
+        sub_products: [{ id: 'umb', title: 'Umb', status: 'open', meta: {}, children: [] }] },
+    ],
+  };
+  const { nodes } = elementsByKind(OL.buildDagElements(data));
+  const umbNodes = nodes.filter(n => n.data.id === 'umb');
+  assert.strictEqual(umbNodes.length, 1, 'cycle-defense: umbrella emitted exactly once');
+}
+
+console.log('product-dag.test.js: all 9 fixtures passed');

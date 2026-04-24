@@ -168,27 +168,31 @@
 
       var elements = OL.buildDagElements(data);
 
+      // Auto-pick layout direction based on graph shape. Umbrella products
+      // (sub_products present) and wide flat products (>5 manifests at the
+      // root rank) render cleaner left-to-right — TB would fan 8 siblings
+      // across the screen and force edge crossings. Deep narrow graphs stay
+      // TB (traditional top-down reading).
+      var wide = (data.sub_products && data.sub_products.length > 0) ||
+                 (data.children && data.children.length > 5);
+      var rankDir = wide ? 'LR' : 'TB';
+
       container.innerHTML = '';
       var cy = cytoscape({
         container: container,
         elements: elements,
-        // rankDir=TB: product at top, flows downward through manifests + tasks.
-        // nodeSep / rankSep tuned for current label sizes — if labels grow,
-        // bump these rather than reintroducing manual positions.
         // Layout invariant: ALL labels render INSIDE their node (text-valign:
-        // center, text-halign: center). That means label width is bounded by
-        // node width, and dagre's nodeSep directly controls label clearance.
-        // Sibling labels on the same rank can never overlap regardless of
-        // title length — overflow is hidden by 'text-overflow-wrap: ellipsis'.
-        // Do NOT switch any node type back to text-valign:bottom — that's the
-        // mode that produced the 2026-04-23 "tangled mess" regression.
+        // center, text-halign: center). Sibling labels on the same rank can
+        // never overlap regardless of title length — overflow hides via
+        // 'text-overflow-wrap: ellipsis'. Do NOT switch back to
+        // text-valign:bottom — that mode produced the 2026-04-23 regression.
         layout: {
           name: 'dagre',
-          rankDir: 'TB',
-          nodeSep: 30,
-          rankSep: 60,
-          edgeSep: 20,
-          padding: 24,
+          rankDir: rankDir,
+          nodeSep: 40,
+          rankSep: 90,
+          edgeSep: 25,
+          padding: 32,
           fit: true,
         },
         style: [
