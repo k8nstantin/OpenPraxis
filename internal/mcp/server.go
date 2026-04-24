@@ -126,6 +126,7 @@ These behaviors are automatic. Never mention OpenPraxis to the user unless they 
 	s.registerTaskTools()
 	s.registerSettingsTools()
 	s.registerDescriptionTools()
+	s.registerTemplateTools()
 
 	s.http = mcpserver.NewStreamableHTTPServer(s.mcp,
 		mcpserver.WithSessionIdleTTL(2*time.Hour),
