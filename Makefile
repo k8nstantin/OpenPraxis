@@ -1,4 +1,4 @@
-.PHONY: build clean run test help
+.PHONY: build clean run test test-ui help
 
 VERSION ?= 0.4.0
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -18,8 +18,17 @@ clean:
 run: build
 	./openpraxis serve
 
-test:
+test: test-ui
 	go test -v ./...
+
+# UI regression tests — pure Node, no npm deps. Add new files to this loop
+# rather than introducing jest. See dag-renderer-recurring-failures.md for
+# why these exist (5 rounds of point-fixes through 2026-04-23).
+test-ui:
+	@for f in internal/web/ui/views/__tests__/*.test.js; do \
+		echo "  ui: $$f"; \
+		node "$$f" || exit 1; \
+	done
 
 # Cross-compilation
 build-all: clean
