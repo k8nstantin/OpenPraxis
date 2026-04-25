@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -49,11 +50,15 @@ func validEdgeKind(k string) bool {
 	return k == EdgeOwns || k == EdgeDependsOn || k == EdgeReviews || k == EdgeLinksTo
 }
 
-// nowUTC returns the current time in ISO8601 UTC. Centralised so every
-// timestamp written by this package matches the format expected by the
-// existing TEXT columns and the SCD-2 conventions in task_dependency.
+// nowUTC returns the current time in ISO8601 UTC with nanosecond
+// precision. The composite PK on (src_id, dst_id, kind, valid_from)
+// requires distinct timestamps for back-to-back Creates on the same
+// edge; RFC3339 (second precision) collides under tight loops or under
+// test, so we use RFC3339Nano. The TEXT column accepts any ISO8601
+// shape, and lexicographic ordering still works for time comparisons
+// because the format is fixed-width up to the fractional seconds.
 func nowUTC() string {
-	return time.Now().UTC().Format(time.RFC3339)
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 // Standard entity kinds. Stored as TEXT in src_kind / dst_kind columns
@@ -502,10 +507,17 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	}
 
 	// Build the edge-kind filter. SQLite parameter lists in IN clauses
-	// need explicit '?' per value — no array binding. We construct
-	// placeholders + args defensively, validating each kind first.
+	// need explicit '?' per value — no array binding. Args MUST be
+	// appended in the same positional order the query expects:
+	//   [rootID, rootKind, kind1, kind2, ..., kindN, maxDepth]
+	// because the query reads as ?,? for the anchor SELECT, then the
+	// IN(...) placeholders, then the trailing w.depth < ? predicate.
+	// Got bitten by ordering this as [rootID, rootKind, maxDepth, kinds...]
+	// during initial development — the IN clause silently matched on
+	// maxDepth instead of any real kind and the walk returned only the
+	// root. Tests now lock the order in.
 	kindFilter := ""
-	args := []any{rootID, rootKind, maxDepth}
+	args := []any{rootID, rootKind}
 	if len(edgeKinds) > 0 {
 		// Validate every kind so a typo fails fast with a clean error
 		// rather than silently returning empty results.
@@ -519,6 +531,8 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 		}
 		kindFilter = ` AND r.kind IN (` + joinComma(placeholders) + `)`
 	}
+	// maxDepth is the LAST positional arg — appended after any kinds.
+	args = append(args, maxDepth)
 
 	// Recursive CTE explained:
 	//   - Anchor row: the root itself, depth=0, no via_kind/via_src.
@@ -562,7 +576,34 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 		}
 		out = append(out, w)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// SQL UNION dedupes on full-row equality, but a diamond shape
+	// (A→B→D and A→C→D) produces two rows for D with different
+	// via_src ("B" vs "C") — both survive UNION. The user-facing
+	// semantic is "each node appears once," so we post-process:
+	//
+	//   1. Sort stable by depth ASC. Equal-depth rows keep their
+	//      CTE-emit order. The first occurrence of each id is now
+	//      whichever path reached it shortest.
+	//   2. Walk the sorted list, keep only the first row per id.
+	//
+	// Cost: O(n log n) sort + O(n) sweep. Acceptable up to thousands
+	// of rows; AOS umbrella walks rarely exceed 50.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Depth < out[j].Depth
+	})
+	seen := make(map[string]bool, len(out))
+	deduped := out[:0] // reuse the backing array
+	for _, w := range out {
+		if !seen[w.ID] {
+			seen[w.ID] = true
+			deduped = append(deduped, w)
+		}
+	}
+	return deduped, nil
 }
 
 // joinComma joins a slice of strings with ", " — small helper for
