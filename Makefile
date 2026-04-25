@@ -1,6 +1,6 @@
 .PHONY: build clean run test test-ui help
 
-VERSION ?= 0.4.0
+VERSION ?= 0.4.1
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS = -ldflags "-X github.com/k8nstantin/OpenPraxis/cmd.Version=$(VERSION) \
