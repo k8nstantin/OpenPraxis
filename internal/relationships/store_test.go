@@ -153,9 +153,11 @@ func TestCreate_Replace(t *testing.T) {
 	}
 }
 
-// TestCreate_ValidationErrors — invalid kinds + self-loops fail with
-// typed errors before reaching the DB. Schema CHECK would catch them
-// too, but the Go-side validation gives clearer attribution.
+// TestCreate_ValidationErrors — every validation path that USED to be
+// enforced by DB-level CHECK constraints (now removed for portability,
+// 2026-04-25) must be caught in Go. If any of these regress, malformed
+// rows would land silently in the DB. The schema has no safety net —
+// Go is the safety net.
 func TestCreate_ValidationErrors(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -165,6 +167,21 @@ func TestCreate_ValidationErrors(t *testing.T) {
 		edge    Edge
 		wantErr error
 	}{
+		{
+			name: "empty src_id",
+			edge: Edge{SrcKind: KindManifest, SrcID: "", DstKind: KindManifest, DstID: "B", Kind: EdgeDependsOn},
+			wantErr: ErrEmptyID,
+		},
+		{
+			name: "empty dst_id",
+			edge: Edge{SrcKind: KindManifest, SrcID: "A", DstKind: KindManifest, DstID: "", Kind: EdgeDependsOn},
+			wantErr: ErrEmptyID,
+		},
+		{
+			name: "both empty (would otherwise look like self-loop)",
+			edge: Edge{SrcKind: KindManifest, SrcID: "", DstKind: KindManifest, DstID: "", Kind: EdgeDependsOn},
+			wantErr: ErrEmptyID,
+		},
 		{
 			name: "bad src_kind",
 			edge: Edge{SrcKind: "garbage", SrcID: "A", DstKind: KindManifest, DstID: "B", Kind: EdgeDependsOn},
@@ -191,6 +208,35 @@ func TestCreate_ValidationErrors(t *testing.T) {
 			err := s.Create(ctx, tc.edge)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("Create: want %v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestRemove_ValidationErrors — Remove must reject the same shapes
+// (empty IDs, bad edge kind) that Create rejects. Without these checks
+// a typo could silently no-op against the DB and the caller wouldn't
+// know.
+func TestRemove_ValidationErrors(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		srcID   string
+		dstID   string
+		kind    string
+		wantErr error
+	}{
+		{"empty src_id", "", "B", EdgeDependsOn, ErrEmptyID},
+		{"empty dst_id", "A", "", EdgeDependsOn, ErrEmptyID},
+		{"bad edge kind", "A", "B", "garbage", ErrInvalidKind},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := s.Remove(ctx, tc.srcID, tc.dstID, tc.kind, "test", "test")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Remove: want %v, got %v", tc.wantErr, err)
 			}
 		})
 	}

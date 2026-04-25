@@ -31,10 +31,14 @@ import (
 // clearer attribution than "CHECK constraint failed".
 var ErrInvalidKind = errors.New("relationships: invalid kind value")
 
-// ErrSelfLoop is returned when src_id == dst_id. Schema-level CHECK
-// enforces this too; we duplicate the check in Go for the same clearer-
-// error reason.
+// ErrSelfLoop is returned when src_id == dst_id. Per the 2026-04-25
+// portability rule, the schema no longer enforces this — Go does.
 var ErrSelfLoop = errors.New("relationships: a node cannot have an edge to itself")
+
+// ErrEmptyID is returned when src_id or dst_id is empty. An empty-ID
+// edge would silently corrupt the DAG (joins to nothing). The schema
+// has no CHECK to catch this (portability rule), so Go MUST.
+var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty")
 
 // validKinds returns true if k is one of the enumerated entity kinds.
 // Lifted to a free function so future callers (e.g. MCP tool input
@@ -113,14 +117,20 @@ func New(db *sql.DB) (*Store, error) {
 }
 
 func (s *Store) init() error {
-	// Schema invariants:
-	//   - Composite PK ensures no two rows share (src_id, dst_id, kind, valid_from);
-	//     a simultaneous duplicate Create at the same timestamp will fail at
-	//     INSERT and the caller can retry.
-	//   - CHECK constraints enforce kind enums at the DB level so a corrupt
-	//     write is impossible even if Go-side validation has a bug.
-	//   - src_id <> dst_id forbids self-loops at the relationship level
-	//     (a node depending on itself is meaningless).
+	// Schema portability constraint (2026-04-25): NO CHECK constraints,
+	// NO triggers, NO SQLite-specific dialect features. The DB must
+	// remain portable across SQL engines (SQLite today; Postgres /
+	// Iceberg-via-Trino / MySQL likely in the future for fleet-scale
+	// peers). All value-domain validation lives in Go (validKind /
+	// validEdgeKind / non-empty / self-loop checks in Create + Remove).
+	// Tests cover what CHECK constraints used to catch, so regression
+	// risk moves from "DB rejects malformed write" to "Go layer rejects
+	// it AND the test suite proves it."
+	//
+	// Composite PK on (src_id, dst_id, kind, valid_from) is portable
+	// (every SQL engine supports composite PK) and remains the only
+	// schema-level invariant — a simultaneous duplicate Create at the
+	// same timestamp will fail at INSERT and the caller can retry.
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS relationships (
 		src_kind   TEXT NOT NULL,
 		src_id     TEXT NOT NULL,
@@ -133,11 +143,7 @@ func (s *Store) init() error {
 		created_by TEXT NOT NULL DEFAULT '',
 		reason     TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
-		PRIMARY KEY (src_id, dst_id, kind, valid_from),
-		CHECK (src_id <> dst_id),
-		CHECK (src_kind IN ('product','manifest','task')),
-		CHECK (dst_kind IN ('product','manifest','task')),
-		CHECK (kind IN ('owns','depends_on','reviews','links_to'))
+		PRIMARY KEY (src_id, dst_id, kind, valid_from)
 	)`)
 	if err != nil {
 		return fmt.Errorf("create relationships table: %w", err)
@@ -207,9 +213,13 @@ func (s *Store) init() error {
 // constraint and one loses with ErrConstraint. Caller can retry; the
 // retry's nowUTC() will differ.
 func (s *Store) Create(ctx context.Context, e Edge) error {
-	// Defense-in-depth validation. Each check returns ErrInvalidKind /
-	// ErrSelfLoop with a wrapped reason rather than waiting for SQLite
-	// to reject the INSERT with a generic CHECK error.
+	// All validation lives in Go (schema is portable, no CHECK / triggers).
+	// Order: empty-ID first so a self-loop check on two empty strings
+	// doesn't fire incorrectly; kind enums next; self-loop last (it's
+	// the only check that requires both IDs to be present + valid).
+	if e.SrcID == "" || e.DstID == "" {
+		return fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, e.SrcID, e.DstID)
+	}
 	if !validKind(e.SrcKind) {
 		return fmt.Errorf("%w: src_kind=%q", ErrInvalidKind, e.SrcKind)
 	}
@@ -294,6 +304,10 @@ func (s *Store) Create(ctx context.Context, e Edge) error {
 // decides M5 no longer needs M2 as a prereq. The closing row then says
 // `valid_to=2026-04-25T...`, `created_by=alice`, `reason="M5 standalone now"`.
 func (s *Store) Remove(ctx context.Context, srcID, dstID, kind, by, reason string) error {
+	// Same Go-side validation as Create — schema is portable, no CHECK.
+	if srcID == "" || dstID == "" {
+		return fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, srcID, dstID)
+	}
 	if !validEdgeKind(kind) {
 		return fmt.Errorf("%w: kind=%q", ErrInvalidKind, kind)
 	}
