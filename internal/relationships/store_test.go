@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -921,6 +922,273 @@ func TestListOutgoingForMany_RejectsEmptyEntry(t *testing.T) {
 	_, err := s.ListOutgoingForMany(ctx, []string{"A", "", "B"}, "")
 	if !errors.Is(err, ErrEmptyID) {
 		t.Errorf("expected ErrEmptyID, got %v", err)
+	}
+}
+
+// ─── Get (single-edge lookup, C5) ──────────────────────────────────────────
+
+// TestGet_HappyPath — Create then Get returns the row + ok=true.
+func TestGet_HappyPath(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "M1", "M2", EdgeDependsOn, func(e *Edge) { e.Reason = "test" })
+
+	e, ok, err := s.Get(ctx, "M1", "M2", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true on existing edge")
+	}
+	if e.SrcID != "M1" || e.DstID != "M2" || e.Kind != EdgeDependsOn {
+		t.Errorf("wrong row returned: %+v", e)
+	}
+}
+
+// TestGet_NoEdgeReturnsFalse — non-existent edge returns ok=false, no error.
+func TestGet_NoEdgeReturnsFalse(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	_, ok, err := s.Get(ctx, "M1", "M2", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("unexpected err on missing edge: %v", err)
+	}
+	if ok {
+		t.Errorf("expected ok=false, got true")
+	}
+}
+
+// TestGet_ClosedEdgeNotReturned — Create + Remove → Get returns ok=false
+// because Get only sees CURRENT (valid_to='') rows.
+func TestGet_ClosedEdgeNotReturned(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	mustCreate(t, s, "M1", "M2", EdgeDependsOn)
+	if err := s.Remove(ctx, "M1", "M2", EdgeDependsOn, "test", "removed"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	_, ok, err := s.Get(ctx, "M1", "M2", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Error("Get should not return closed edges")
+	}
+}
+
+// TestGet_ValidationErrors — empty IDs + bad kind rejected.
+func TestGet_ValidationErrors(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	cases := []struct {
+		name              string
+		src, dst, kind    string
+		wantErr           error
+	}{
+		{"empty src", "", "M2", EdgeDependsOn, ErrEmptyID},
+		{"empty dst", "M1", "", EdgeDependsOn, ErrEmptyID},
+		{"bad kind", "M1", "M2", "garbage", ErrInvalidKind},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := s.Get(ctx, tc.src, tc.dst, tc.kind)
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("want %v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// ─── BackfillBulk (M2) ─────────────────────────────────────────────────────
+
+// TestBackfillBulk_AtomicTransaction — many rows in one tx; verify all
+// land or none do.
+func TestBackfillBulk_AtomicTransaction(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	edges := []Edge{
+		{SrcKind: KindManifest, SrcID: "M1", DstKind: KindManifest, DstID: "M2",
+			Kind: EdgeDependsOn, ValidFrom: "2025-06-01T00:00:00Z", ValidTo: "2025-09-01T00:00:00Z"},
+		{SrcKind: KindManifest, SrcID: "M3", DstKind: KindManifest, DstID: "M4",
+			Kind: EdgeDependsOn, ValidFrom: "2025-07-01T00:00:00Z"},
+		{SrcKind: KindManifest, SrcID: "M5", DstKind: KindManifest, DstID: "M6",
+			Kind: EdgeDependsOn, ValidFrom: "2025-08-01T00:00:00Z"},
+	}
+	if err := s.BackfillBulk(ctx, edges); err != nil {
+		t.Fatalf("BackfillBulk: %v", err)
+	}
+
+	h, _ := s.Health(ctx)
+	if h.TotalRows != 3 {
+		t.Errorf("expected 3 total rows after bulk insert, got %d", h.TotalRows)
+	}
+	// Two rows have valid_to='' (current); one is closed.
+	if h.CurrentEdges != 2 {
+		t.Errorf("expected 2 current edges, got %d", h.CurrentEdges)
+	}
+}
+
+// TestBackfillBulk_RollsBackOnAnyValidationFailure — one bad edge in
+// the slice means NONE land. Caller must filter before retrying.
+func TestBackfillBulk_RollsBackOnAnyValidationFailure(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	edges := []Edge{
+		{SrcKind: KindManifest, SrcID: "M1", DstKind: KindManifest, DstID: "M2",
+			Kind: EdgeDependsOn, ValidFrom: "2025-06-01T00:00:00Z"},
+		// Index 1: missing ValidFrom → entire batch rejected
+		{SrcKind: KindManifest, SrcID: "M3", DstKind: KindManifest, DstID: "M4",
+			Kind: EdgeDependsOn},
+	}
+	err := s.BackfillBulk(ctx, edges)
+	if err == nil {
+		t.Fatal("expected error on missing ValidFrom in batch, got nil")
+	}
+	h, _ := s.Health(ctx)
+	if h.TotalRows != 0 {
+		t.Errorf("expected 0 rows after rejected batch, got %d", h.TotalRows)
+	}
+}
+
+// TestBackfillBulk_EmptySlice — empty input is a no-op success.
+func TestBackfillBulk_EmptySlice(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	if err := s.BackfillBulk(ctx, nil); err != nil {
+		t.Errorf("expected no error on nil slice, got %v", err)
+	}
+	if err := s.BackfillBulk(ctx, []Edge{}); err != nil {
+		t.Errorf("expected no error on empty slice, got %v", err)
+	}
+}
+
+// ─── ListIncomingForMany (M3 from review) ──────────────────────────────────
+
+// TestListIncomingForMany_Batches — mirror of ListOutgoingForMany_Batches.
+func TestListIncomingForMany_Batches(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "X", "A", EdgeDependsOn)
+	mustCreate(t, s, "Y", "A", EdgeDependsOn)
+	mustCreate(t, s, "Z", "B", EdgeDependsOn)
+
+	got, err := s.ListIncomingForMany(ctx, []string{"A", "B", "C"}, EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("ListIncomingForMany: %v", err)
+	}
+	if len(got["A"]) != 2 {
+		t.Errorf("A should have 2 incoming, got %d", len(got["A"]))
+	}
+	if len(got["B"]) != 1 {
+		t.Errorf("B should have 1 incoming, got %d", len(got["B"]))
+	}
+	if len(got["C"]) != 0 {
+		t.Errorf("C should have 0 incoming, got %d", len(got["C"]))
+	}
+}
+
+// ─── Concurrent-write stress (C6) ──────────────────────────────────────────
+
+// TestCreate_ConcurrentSameEdge — 50 goroutines hammering Create on the
+// same edge. Verifies (a) no race detector hits, (b) exactly one row
+// has valid_to='' afterwards (the SCD-2 invariant), (c) every other row
+// is properly closed. Run with `go test -race -run TestCreate_Concurrent`.
+//
+// Behavior under SQLite WAL: writes serialize on the write lock; each
+// Create's close-then-insert tx runs to completion before the next one
+// starts. After N goroutines complete, history has N+1 rows (initial
+// row from goroutine #1 + N-1 close-then-insert pairs from #2..#N) —
+// but wait, that's wrong. Let me re-read the close logic.
+//
+// Actually each Create does: UPDATE close prior + INSERT new. So
+// goroutine #1 has no prior → just INSERT (1 row). Goroutine #2's
+// UPDATE closes #1's row; INSERT new (2 rows total). After N
+// goroutines, we have N rows: one current + (N-1) closed. Verify.
+func TestCreate_ConcurrentSameEdge(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const N = 50
+	var wg sync.WaitGroup
+	wg.Add(N)
+	errs := make(chan error, N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			err := s.Create(ctx, Edge{
+				SrcKind: KindManifest, SrcID: "M1",
+				DstKind: KindManifest, DstID: "M2",
+				Kind:      EdgeDependsOn,
+				CreatedBy: "test",
+				Reason:    "concurrent #" + string(rune('A'+i%26)),
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent Create error: %v", err)
+	}
+
+	// Invariant 1: exactly one current row.
+	current, err := s.ListOutgoing(ctx, "M1", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("ListOutgoing: %v", err)
+	}
+	if len(current) != 1 {
+		t.Errorf("SCD-2 invariant violated: expected 1 current row, got %d", len(current))
+	}
+
+	// Invariant 2: history has N rows total (1 fresh + (N-1) replacements).
+	hist, err := s.History(ctx, "M1", "M2", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if len(hist) != N {
+		t.Errorf("expected %d total versions in history, got %d", N, len(hist))
+	}
+
+	// Invariant 3: only the LAST row in chronological order has valid_to=''.
+	for i, h := range hist {
+		isLast := i == len(hist)-1
+		hasValidTo := h.ValidTo == ""
+		if isLast && !hasValidTo {
+			t.Errorf("last row should be current (valid_to=''), got %q", h.ValidTo)
+		}
+		if !isLast && hasValidTo {
+			t.Errorf("non-last row should be closed, but row %d has valid_to=''", i)
+		}
+	}
+}
+
+// ─── ListOutgoingForMany missing test (m5 from review) ────────────────────
+
+// TestListOutgoingForMany_AllKindsWhenFilterEmpty — empty edgeKind
+// returns every kind for the listed sources.
+func TestListOutgoingForMany_AllKindsWhenFilterEmpty(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn)
+	mustCreate(t, s, "A", "C", EdgeLinksTo, func(e *Edge) {
+		e.SrcKind = KindManifest
+		e.DstKind = KindTask
+	})
+
+	got, err := s.ListOutgoingForMany(ctx, []string{"A"}, "")
+	if err != nil {
+		t.Fatalf("ListOutgoingForMany: %v", err)
+	}
+	if len(got["A"]) != 2 {
+		t.Errorf("expected 2 edges (depends_on + links_to) for A with empty filter, got %d", len(got["A"]))
 	}
 }
 

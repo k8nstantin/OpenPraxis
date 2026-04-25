@@ -134,6 +134,21 @@ func (s *Server) registerRelationshipsTools() {
 	)
 
 	s.mcp.AddTool(
+		mcplib.NewTool("rel_get",
+			mcplib.WithDescription(
+				"Fetch the CURRENT edge for (src_id, dst_id, kind) if one exists. "+
+					"Returns JSON {found, edge}. Cheaper than rel_list_outgoing + filter when "+
+					"you only need to check one specific edge. Returns {found:false} cleanly "+
+					"if no current edge exists — not an error.",
+			),
+			mcplib.WithString("src_id", mcplib.Required(), mcplib.Description("Source full UUID")),
+			mcplib.WithString("dst_id", mcplib.Required(), mcplib.Description("Destination full UUID")),
+			mcplib.WithString("kind", mcplib.Required(), mcplib.Description("Edge kind")),
+		),
+		s.handleRelGet,
+	)
+
+	s.mcp.AddTool(
 		mcplib.NewTool("rel_health",
 			mcplib.WithDescription(
 				"Return current edge count + total rows (with history) for the relationships table. "+
@@ -321,6 +336,21 @@ func (s *Server) handleRelWalk(ctx context.Context, req mcplib.CallToolRequest) 
 		"count":     len(rows),
 		"nodes":     rows,
 	}), nil
+}
+
+func (s *Server) handleRelGet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	a := args(req)
+	srcID := argStr(a, "src_id")
+	dstID := argStr(a, "dst_id")
+	kind := argStr(a, "kind")
+	edge, found, err := s.node.Relationships.Get(ctx, srcID, dstID, kind)
+	if err != nil {
+		return errResult("rel_get: %v", err), nil
+	}
+	if !found {
+		return jsonResult(map[string]any{"found": false}), nil
+	}
+	return jsonResult(map[string]any{"found": true, "edge": edge}), nil
 }
 
 func (s *Server) handleRelHealth(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

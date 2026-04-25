@@ -244,6 +244,42 @@ func TestRelWalk_MaxDepthZeroReturnsRootOnly(t *testing.T) {
 	}
 }
 
+// ─── rel_get ────────────────────────────────────────────────────────
+
+func TestRelGet_FoundAndNotFound(t *testing.T) {
+	s := newTestServerWithRelationships(t)
+
+	// Initially: not found.
+	res, _ := s.handleRelGet(context.Background(), buildReq(map[string]any{
+		"src_id": "M1", "dst_id": "M2", "kind": "depends_on",
+	}))
+	out := resultJSON(t, res)
+	if out["found"] != false {
+		t.Errorf("expected found=false on missing edge, got %v", out)
+	}
+
+	// Create it; now found.
+	_, _ = s.handleRelCreate(context.Background(), buildReq(map[string]any{
+		"src_kind": "manifest", "src_id": "M1",
+		"dst_kind": "manifest", "dst_id": "M2",
+		"kind": "depends_on",
+	}))
+	res, _ = s.handleRelGet(context.Background(), buildReq(map[string]any{
+		"src_id": "M1", "dst_id": "M2", "kind": "depends_on",
+	}))
+	out = resultJSON(t, res)
+	if out["found"] != true {
+		t.Errorf("expected found=true after create, got %v", out)
+	}
+	edge, ok := out["edge"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected edge object, got %v", out["edge"])
+	}
+	if edge["SrcID"] != "M1" || edge["DstID"] != "M2" {
+		t.Errorf("wrong edge returned: %v", edge)
+	}
+}
+
 // ─── rel_health ─────────────────────────────────────────────────────
 
 func TestRelHealth_ReturnsStats(t *testing.T) {

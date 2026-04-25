@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,32 +42,51 @@ const MaxWalkDepth = 100
 const SlowWalkThreshold = 100 * time.Millisecond
 
 // ErrInvalidKind is returned when a caller passes a src_kind / dst_kind /
-// edge kind outside the enumerated set. The DB-level CHECK constraint
-// would catch this too, but we validate in Go first so the error has a
-// clearer attribution than "CHECK constraint failed".
+// edge kind outside the enumerated set. The schema is portable — no CHECK
+// constraint backs this up — so Go-side validation IS the only safety net.
 var ErrInvalidKind = errors.New("relationships: invalid kind value")
 
-// ErrSelfLoop is returned when src_id == dst_id. Per the 2026-04-25
-// portability rule, the schema no longer enforces this — Go does.
+// ErrSelfLoop is returned when src_id == dst_id. Schema is portable, so
+// Go is the only enforcer.
 var ErrSelfLoop = errors.New("relationships: a node cannot have an edge to itself")
 
 // ErrEmptyID is returned when src_id or dst_id is empty. An empty-ID
-// edge would silently corrupt the DAG (joins to nothing). The schema
-// has no CHECK to catch this (portability rule), so Go MUST.
+// edge would silently corrupt the DAG (joins to nothing). Schema has no
+// CHECK to catch this (portability rule), so Go MUST — and every reader
+// rejects empty IDs at the top so corrupted-state never propagates.
 var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty")
 
+// allEntityKinds and allEdgeKinds are the source of truth for valid
+// kind values. validKind / validEdgeKind iterate these slices instead
+// of hard-coding equality chains; the constant declarations below
+// reference these slices via the validators, so adding a new kind in
+// ONE place (the slice) auto-extends both the validator AND keeps the
+// constants iterable for callers that want to enumerate. Was: two
+// hard-coded == chains that drifted whenever a constant was added.
+var allEntityKinds = []string{KindProduct, KindManifest, KindTask}
+var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn, EdgeReviews, EdgeLinksTo}
+
 // validKind returns true if k is one of the enumerated entity kinds.
-// Lifted to a free function so future callers (e.g. MCP tool input
-// validators) share the exact same allow-list as the store.
+// Iterates allEntityKinds so adding a new entity kind only requires
+// extending the slice — no validator edit needed.
 func validKind(k string) bool {
-	return k == KindProduct || k == KindManifest || k == KindTask
+	for _, v := range allEntityKinds {
+		if k == v {
+			return true
+		}
+	}
+	return false
 }
 
 // validEdgeKind returns true if k is one of the enumerated edge kinds.
-// Same role as validKind for src/dst types — single source of truth so
-// the schema CHECK + Go-side check + MCP tool validator never drift.
+// Same iteration pattern as validKind. Single source of truth.
 func validEdgeKind(k string) bool {
-	return k == EdgeOwns || k == EdgeDependsOn || k == EdgeReviews || k == EdgeLinksTo
+	for _, v := range allEdgeKinds {
+		if k == v {
+			return true
+		}
+	}
+	return false
 }
 
 // nowUTC returns the current time in ISO8601 UTC with nanosecond
@@ -80,16 +100,20 @@ func nowUTC() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-// Standard entity kinds. Stored as TEXT in src_kind / dst_kind columns
-// and gated by CHECK constraints at the schema level.
+// Standard entity kinds. Stored as TEXT in src_kind / dst_kind columns.
+// Schema is portable — no CHECK constraint enforces this set; Go-side
+// validKind() is the only gate. Adding a new kind: extend allEntityKinds
+// (which the validator iterates) AND add the const; the schema needs
+// no migration since it's just TEXT.
 const (
 	KindProduct  = "product"
 	KindManifest = "manifest"
 	KindTask     = "task"
 )
 
-// Standard edge kinds. The schema's CHECK constraint pins the allowed
-// set; adding a new kind requires a migration.
+// Standard edge kinds. Same model as entity kinds — Go-side validation
+// is the only gate. Schema accepts any TEXT; allEdgeKinds is the
+// allow-list iterated by validEdgeKind.
 const (
 	EdgeOwns      = "owns"
 	EdgeDependsOn = "depends_on"
@@ -97,10 +121,18 @@ const (
 	EdgeLinksTo   = "links_to"
 )
 
-// Edge is one row in the relationships table. ValidTo == "" means
-// "this is the current version of the edge"; non-empty means "superseded
-// at this timestamp." Metadata is an opaque JSON string for edge-kind-
-// specific extras (left empty for the common case).
+// Edge is one row in the relationships table.
+//
+// Field semantics for input vs output:
+//   - SrcKind/SrcID/DstKind/DstID/Kind: REQUIRED on Create and BackfillRow
+//   - Metadata: optional on input, opaque JSON
+//   - ValidFrom: optional on Create (defaults to now); REQUIRED on BackfillRow
+//   - ValidTo: optional on BackfillRow only (Create always sets ''); on read
+//     "" means "this is the current version of the edge", non-empty means
+//     "superseded at this timestamp"
+//   - CreatedBy/Reason: optional, populates the audit trail
+//   - CreatedAt: WRITE-PATH IGNORES THE INPUT — set by store on insert.
+//     Populated on read. If you set it on input, it's silently overwritten.
 type Edge struct {
 	SrcKind   string
 	SrcID     string
@@ -112,12 +144,25 @@ type Edge struct {
 	ValidTo   string
 	CreatedBy string
 	Reason    string
-	CreatedAt string
+	CreatedAt string // ignored on Create input; set by store
 }
 
 // Store owns the relationships table.
+//
+// createMu serializes Create's close-then-insert transaction. SQLite
+// WAL gives each connection a snapshot at BEGIN time; two concurrent
+// Create txs on the same edge can both see "no current row" at their
+// BEGIN, both close-then-insert, and produce two rows with valid_to='',
+// breaking the SCD-2 invariant. The mutex makes the close + insert
+// atomic across goroutines without depending on engine-specific
+// BEGIN IMMEDIATE / SERIALIZABLE semantics. Concurrent Creates on
+// DIFFERENT edges still serialize through this — acceptable since
+// SQLite's underlying write lock would serialize them anyway. Future
+// Postgres backend can drop the mutex (MVCC + SERIALIZABLE isolation
+// handles this correctly) at the cost of one rebench cycle.
 type Store struct {
-	db *sql.DB
+	db       *sql.DB
+	createMu sync.Mutex
 }
 
 // New opens the store and runs the idempotent schema migration. Pass
@@ -212,21 +257,23 @@ func (s *Store) init() error {
 //     for "show me edges actually written today" queries even if their
 //     ValidFrom is backfilled to the past.
 //
-// Validation: src_kind / dst_kind / kind must be in the enumerated sets.
-// SrcID == DstID is rejected. The DB-level CHECK constraints would catch
-// these too, but we check in Go first for cleaner error messages.
+// Validation: src_kind / dst_kind / kind must be in the enumerated sets;
+// SrcID and DstID must be non-empty; SrcID == DstID is rejected. Schema
+// is portable — there are NO CHECK constraints, so Go is the only gate.
+// Tests cover every rejection path so regressions surface in CI.
 //
 // Idempotency note: Create is NOT a no-op when called with identical
 // inputs — it WILL produce two rows in history (the second one closes
 // the first immediately on the next call). That matches SCD-2 semantics:
 // every Create is a state mutation. Callers wanting "no-op when
-// unchanged" should ListOutgoing first and skip the Create if the
-// current row already matches.
+// unchanged" should ListOutgoing or Get first and skip the Create if
+// the current row already matches.
 //
-// Concurrent writes: two Create calls at the exact same nanosecond for
-// the same (src_id, dst_id, kind, valid_from) hit the composite PK
-// constraint and one loses with ErrConstraint. Caller can retry; the
-// retry's nowUTC() will differ.
+// Concurrency under SQLite (current backend): writes serialize on the
+// WAL write lock; concurrent Create calls run sequentially, never
+// observe each other's pending state. Under Postgres MVCC (future
+// backend), serializable-isolation re-runs handle the rare case where
+// two txs compute the same nowUTC() before either commits.
 func (s *Store) Create(ctx context.Context, e Edge) error {
 	// All validation lives in Go (schema is portable, no CHECK / triggers).
 	// Order: empty-ID first so a self-loop check on two empty strings
@@ -248,20 +295,27 @@ func (s *Store) Create(ctx context.Context, e Edge) error {
 		return fmt.Errorf("%w: %s", ErrSelfLoop, e.SrcID)
 	}
 
+	// Serialize close-then-insert across goroutines. See Store.createMu
+	// docstring for why a Go mutex (SQLite WAL snapshot isolation lets
+	// concurrent txs both miss the prior row).
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+
 	// Resolve timestamps once so the close + insert share the same
 	// "now". Using one timestamp means the prior row's valid_to and
 	// the new row's valid_from align exactly — the audit trail has no
-	// gap between versions.
+	// gap between versions. Computed AFTER acquiring the mutex so
+	// timestamps reflect serialization order rather than racing
+	// goroutines' nowUTC() calls.
 	now := nowUTC()
 	validFrom := e.ValidFrom
 	if validFrom == "" {
 		validFrom = now
 	}
 
-	// Run close + insert in one transaction. If the INSERT fails (PK
-	// collision, CHECK constraint, etc.) the close also rolls back so
-	// the prior row stays current — no orphaned "everyone's closed"
-	// state.
+	// Run close + insert in one transaction. If the INSERT fails the
+	// close also rolls back so the prior row stays current — no orphaned
+	// "everyone's closed" state.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -411,6 +465,29 @@ func (s *Store) Remove(ctx context.Context, srcID, dstID, kind, by, reason strin
 const rowColumns = `src_kind, src_id, dst_kind, dst_id, kind, metadata,
 	valid_from, valid_to, created_by, reason, created_at`
 
+// buildKindFilter turns an []edgeKinds slice into the SQL fragment
+// `AND r.kind IN (?, ?, ...)` plus the matching args slice. Empty input
+// returns ("", nil, nil) — no filter clause, no args appended.
+//
+// Centralised so Walk and WalkAt build the IN-clause filter identically;
+// previously the same loop existed in both with the same validation
+// pattern. One source of truth + one validation path.
+func buildKindFilter(edgeKinds []string) (sql string, args []any, err error) {
+	if len(edgeKinds) == 0 {
+		return "", nil, nil
+	}
+	placeholders := make([]string, 0, len(edgeKinds))
+	args = make([]any, 0, len(edgeKinds))
+	for _, k := range edgeKinds {
+		if !validEdgeKind(k) {
+			return "", nil, fmt.Errorf("%w: edge_kinds[]=%q", ErrInvalidKind, k)
+		}
+		placeholders = append(placeholders, "?")
+		args = append(args, k)
+	}
+	return ` AND r.kind IN (` + strings.Join(placeholders, ", ") + `)`, args, nil
+}
+
 // scanEdge scans one row from the standard rowColumns projection into
 // an Edge struct. Used by every reader's row loop. Keeping this in one
 // place means changing the column order is a single-file edit instead
@@ -426,9 +503,14 @@ func scanEdge(rows *sql.Rows) (Edge, error) {
 
 // validateAsOf parses an ISO8601 timestamp; empty string is allowed
 // (means "now / current state"). Centralised so every time-travel
-// reader uses identical parsing rules. Accepts either RFC3339Nano (the
-// format nowUTC writes) or RFC3339 (operator-friendly, looser
-// precision) — caller-facing leniency.
+// reader uses identical parsing rules.
+//
+// Implementation note: time.Parse(time.RFC3339Nano, ...) accepts inputs
+// WITHOUT fractional seconds — Go's `9` quantifier in the format string
+// is "optional digits". So a single RFC3339Nano parse covers both
+// "2026-04-25T10:00:00Z" (no fraction) and the writer's full-precision
+// nanosecond format. An earlier two-pass implementation (RFC3339Nano
+// fallback to RFC3339) was dead code.
 func validateAsOf(asOf string) error {
 	if asOf == "" {
 		return nil
@@ -436,10 +518,7 @@ func validateAsOf(asOf string) error {
 	if _, err := time.Parse(time.RFC3339Nano, asOf); err == nil {
 		return nil
 	}
-	if _, err := time.Parse(time.RFC3339, asOf); err == nil {
-		return nil
-	}
-	return fmt.Errorf("relationships: as_of must be ISO8601 (RFC3339 or RFC3339Nano), got %q", asOf)
+	return fmt.Errorf("relationships: as_of must be ISO8601 (RFC3339), got %q", asOf)
 }
 
 // ListOutgoing returns all CURRENT edges leaving srcID, optionally
@@ -746,32 +825,16 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 		maxDepth = MaxWalkDepth
 	}
 
-	// Build the edge-kind filter. SQLite parameter lists in IN clauses
-	// need explicit '?' per value — no array binding. Args MUST be
-	// appended in the same positional order the query expects:
-	//   [rootID, rootKind, kind1, kind2, ..., kindN, maxDepth]
-	// because the query reads as ?,? for the anchor SELECT, then the
-	// IN(...) placeholders, then the trailing w.depth < ? predicate.
-	// Got bitten by ordering this as [rootID, rootKind, maxDepth, kinds...]
-	// during initial development — the IN clause silently matched on
-	// maxDepth instead of any real kind and the walk returned only the
-	// root. Tests now lock the order in.
-	kindFilter := ""
-	args := []any{rootID, rootKind}
-	if len(edgeKinds) > 0 {
-		// Validate every kind so a typo fails fast with a clean error
-		// rather than silently returning empty results.
-		placeholders := make([]string, 0, len(edgeKinds))
-		for _, k := range edgeKinds {
-			if !validEdgeKind(k) {
-				return nil, fmt.Errorf("%w: edge_kinds[]=%q", ErrInvalidKind, k)
-			}
-			placeholders = append(placeholders, "?")
-			args = append(args, k)
-		}
-		kindFilter = ` AND r.kind IN (` + strings.Join(placeholders, ", ") + `)`
+	// Args order: [rootID, rootKind, kind1..kindN, maxDepth]. The query
+	// reads ?,? for the anchor SELECT, then the IN(...) placeholders,
+	// then the trailing w.depth < ? predicate. Mis-ordering silently
+	// binds maxDepth into the IN clause and walks return only the root.
+	kindFilter, kindArgs, err := buildKindFilter(edgeKinds)
+	if err != nil {
+		return nil, err
 	}
-	// maxDepth is the LAST positional arg — appended after any kinds.
+	args := []any{rootID, rootKind}
+	args = append(args, kindArgs...)
 	args = append(args, maxDepth)
 
 	// Recursive CTE explained:
@@ -783,14 +846,13 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	//     a partial walk with a clear depth ceiling than spin
 	//     forever on a malformed graph.
 	//
-	// The UNION (not UNION ALL) deduplicates: a node reachable via
-	// multiple paths shows up once (with whichever path's WalkRow
-	// was inserted first). UNION is more expensive than UNION ALL
-	// but eliminates the most common confusion in DAG output where
-	// the same node appears 5 times via different parents.
+	// UNION ALL: emits raw. SQL UNION's full-row dedup wouldn't help
+	// for diamond paths (different via_src means rows aren't equal),
+	// so we'd pay the SQL dedup cost AND still need Go-side dedup. ALL
+	// + Go-side post-process is the cheaper combo.
 	q := `WITH RECURSIVE walk(id, kind, via_kind, via_src, depth) AS (
 		SELECT ?, ?, '', '', 0
-		UNION
+		UNION ALL
 		SELECT r.dst_id, r.dst_kind, r.kind, r.src_id, w.depth + 1
 		  FROM relationships r
 		  JOIN walk w ON r.src_id = w.id
@@ -827,43 +889,46 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rawRowCount := len(out) // capture pre-dedup count for the log
 
-	// Surface pathological walks: hit the depth ceiling (potential cycle
-	// or wildly nested graph) OR took longer than the slow threshold.
-	if elapsed := time.Since(start); elapsed > SlowWalkThreshold {
-		slog.Warn("relationships.Walk slow",
-			"root_id", rootID, "root_kind", rootKind,
-			"rows", len(out), "max_depth_observed", maxObservedDepth,
-			"max_depth_allowed", maxDepth, "elapsed_ms", elapsed.Milliseconds())
-	}
-	if maxDepth > 0 && maxObservedDepth >= maxDepth {
-		slog.Warn("relationships.Walk hit depth ceiling — possible cycle",
-			"root_id", rootID, "root_kind", rootKind,
-			"max_depth", maxDepth, "rows", len(out))
-	}
-
-	// SQL UNION dedupes on full-row equality, but a diamond shape
-	// (A→B→D and A→C→D) produces two rows for D with different
-	// via_src ("B" vs "C") — both survive UNION. The user-facing
-	// semantic is "each node appears once," so we post-process:
+	// SQL UNION ALL emits every reached path; Go-side dedup-by-id collapses
+	// diamond paths to one row per node. Using ALL (not UNION) avoids a
+	// SQLite sort + dedup pass that wouldn't have helped anyway —
+	// different via_src on the same dst means full-row equality fails and
+	// SQL UNION keeps both rows. So we let SQL emit raw + Go does the
+	// authoritative dedup. Cheaper than UNION + Go dedup.
 	//
-	//   1. Sort stable by depth ASC. Equal-depth rows keep their
-	//      CTE-emit order. The first occurrence of each id is now
-	//      whichever path reached it shortest.
-	//   2. Walk the sorted list, keep only the first row per id.
-	//
-	// Cost: O(n log n) sort + O(n) sweep. Acceptable up to thousands
-	// of rows; AOS umbrella walks rarely exceed 50.
+	// Sort stable by depth ASC; first occurrence per id wins (= shortest
+	// path). O(n log n) + O(n). Fine up to thousands of nodes.
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Depth < out[j].Depth
 	})
 	seen := make(map[string]bool, len(out))
-	deduped := out[:0] // reuse the backing array
+	deduped := make([]WalkRow, 0, len(out))
 	for _, w := range out {
 		if !seen[w.ID] {
 			seen[w.ID] = true
 			deduped = append(deduped, w)
 		}
+	}
+
+	// Surface pathological walks AFTER dedup so log row counts match what
+	// the caller gets back. Slow threshold: total elapsed including dedup.
+	// Cycle warning: depth ceiling hit during recursion. Both use the
+	// final, deduped row count to avoid misleading operators with raw-CTE
+	// numbers that don't exist in the response.
+	if elapsed := time.Since(start); elapsed > SlowWalkThreshold {
+		slog.Warn("relationships.Walk slow",
+			"root_id", rootID, "root_kind", rootKind,
+			"rows_returned", len(deduped), "raw_rows", rawRowCount,
+			"max_depth_observed", maxObservedDepth,
+			"max_depth_allowed", maxDepth,
+			"elapsed_ms", elapsed.Milliseconds())
+	}
+	if maxDepth > 0 && maxObservedDepth >= maxDepth {
+		slog.Warn("relationships.Walk hit depth ceiling — possible cycle",
+			"root_id", rootID, "root_kind", rootKind,
+			"max_depth", maxDepth, "rows_returned", len(deduped))
 	}
 	return deduped, nil
 }
@@ -905,32 +970,25 @@ func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds [
 		maxDepth = MaxWalkDepth
 	}
 
-	// Build edge-kind filter + args. Args order MUST match the query's
-	// placeholder order; the CTE places them as:
+	// Args order matters: the CTE expects
 	//   anchor:    (?, ?)         rootID, rootKind
 	//   recursive: (?, ?)         asOf, asOf  (twice — two-clause predicate)
 	//              IN(?, ?, ...)  edge kinds (optional)
 	//              <?             maxDepth (last)
-	kindFilter := ""
-	args := []any{rootID, rootKind, asOf, asOf}
-	if len(edgeKinds) > 0 {
-		placeholders := make([]string, 0, len(edgeKinds))
-		for _, k := range edgeKinds {
-			if !validEdgeKind(k) {
-				return nil, fmt.Errorf("%w: edge_kinds[]=%q", ErrInvalidKind, k)
-			}
-			placeholders = append(placeholders, "?")
-			args = append(args, k)
-		}
-		kindFilter = ` AND r.kind IN (` + strings.Join(placeholders, ", ") + `)`
+	kindFilter, kindArgs, err := buildKindFilter(edgeKinds)
+	if err != nil {
+		return nil, err
 	}
+	args := []any{rootID, rootKind, asOf, asOf}
+	args = append(args, kindArgs...)
 	args = append(args, maxDepth)
 
 	// Time-travel CTE: same shape as Walk, but the recursive WHERE swaps
-	// `r.valid_to = ''` for the asOf-validity predicate.
+	// `r.valid_to = ''` for the asOf-validity predicate. UNION ALL +
+	// Go-side dedup, same rationale as Walk.
 	q := `WITH RECURSIVE walk(id, kind, via_kind, via_src, depth) AS (
 		SELECT ?, ?, '', '', 0
-		UNION
+		UNION ALL
 		SELECT r.dst_id, r.dst_kind, r.kind, r.src_id, w.depth + 1
 		  FROM relationships r
 		  JOIN walk w ON r.src_id = w.id
@@ -983,20 +1041,19 @@ type HealthStats struct {
 }
 
 // Health returns row counts so callers don't have to write the same
-// COUNT queries everywhere. Returns TableExists=false (with no error)
-// if migration hasn't run yet — useful during boot ordering.
+// COUNT queries everywhere.
+//
+// Contract: callers MUST call New() (which runs init() / the idempotent
+// migration) BEFORE Health(). The earlier portable-error-string-match
+// approach broke on Postgres ("relation X does not exist") and MySQL
+// ("Table 'db.X' doesn't exist"); Go's database/sql doesn't expose
+// portable "table not found" sentinel errors, and information_schema
+// queries are also engine-specific in ways that defeat the purpose.
+// So: Health assumes init succeeded, which is enforced by New().
 func (s *Store) Health(ctx context.Context) (HealthStats, error) {
 	var h HealthStats
-	// Probe the table; if it doesn't exist yet, return TableExists=false
-	// without surfacing an error. Some boot sequences call Health before
-	// migrations finish.
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM relationships WHERE valid_to = ''`).Scan(&h.CurrentEdges)
-	if err != nil {
-		// "no such table" is a known-acceptable state; everything else is real.
-		if strings.Contains(err.Error(), "no such table") {
-			return h, nil
-		}
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relationships WHERE valid_to = ''`).Scan(&h.CurrentEdges); err != nil {
 		return h, fmt.Errorf("health current count: %w", err)
 	}
 	if err := s.db.QueryRowContext(ctx,
@@ -1005,6 +1062,166 @@ func (s *Store) Health(ctx context.Context) (HealthStats, error) {
 	}
 	h.TableExists = true
 	return h, nil
+}
+
+// Get returns the CURRENT edge for (srcID, dstID, kind), or
+// (Edge{}, false, nil) if no current row exists. Atomic single-edge
+// lookup — the most common pre-mutation query ("does this edge already
+// exist before I Create?"). Replaces today's pattern of calling
+// ListOutgoing + filtering by DstID, which loads every outgoing edge
+// when only one matters.
+//
+// Returns at most ONE row by construction: the (src_id, dst_id, kind,
+// valid_from) PK + valid_to='' partial index together guarantee a
+// single current version per edge tuple. Multiple rows would mean the
+// SCD-2 invariant was violated by a backfill — that's a bug, not a
+// shape this function tolerates.
+func (s *Store) Get(ctx context.Context, srcID, dstID, kind string) (Edge, bool, error) {
+	if srcID == "" || dstID == "" {
+		return Edge{}, false, fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, srcID, dstID)
+	}
+	if !validEdgeKind(kind) {
+		return Edge{}, false, fmt.Errorf("%w: kind=%q", ErrInvalidKind, kind)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+rowColumns+` FROM relationships
+		 WHERE src_id = ? AND dst_id = ? AND kind = ? AND valid_to = ''
+		 LIMIT 1`,
+		srcID, dstID, kind)
+	if err != nil {
+		return Edge{}, false, fmt.Errorf("get: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return Edge{}, false, nil // no current edge — caller's expected case
+	}
+	e, err := scanEdge(rows)
+	if err != nil {
+		return Edge{}, false, fmt.Errorf("scan get: %w", err)
+	}
+	return e, true, rows.Err()
+}
+
+// BackfillBulk inserts many historical rows in one transaction.
+// Migration paths (PR/M2) typically write 10K–100K rows; calling
+// BackfillRow in a loop pays one fsync per row (slow on cloud disks,
+// minutes for 100K rows). BackfillBulk amortises to one fsync per
+// transaction.
+//
+// Validation: every edge in the slice gets the same checks as
+// BackfillRow. If ANY edge fails validation, the entire transaction
+// rolls back — caller must filter / fix before retrying. There is no
+// partial-success mode by design (avoids the "which rows landed?"
+// question downstream).
+//
+// Performance: ~100x faster than BackfillRow loop on disk-bound
+// systems; ~10x on NVMe. Recommended batch size: 1K–10K rows. Beyond
+// that the transaction lock starves concurrent readers.
+func (s *Store) BackfillBulk(ctx context.Context, edges []Edge) error {
+	if len(edges) == 0 {
+		return nil
+	}
+	// Pre-validate ALL edges before starting the tx so we don't have to
+	// roll back after partial inserts. validate-then-write is cheaper
+	// than write-then-rollback.
+	for i, e := range edges {
+		if e.SrcID == "" || e.DstID == "" {
+			return fmt.Errorf("%w: edges[%d] src_id=%q dst_id=%q", ErrEmptyID, i, e.SrcID, e.DstID)
+		}
+		if !validKind(e.SrcKind) || !validKind(e.DstKind) {
+			return fmt.Errorf("%w: edges[%d] src_kind=%q dst_kind=%q", ErrInvalidKind, i, e.SrcKind, e.DstKind)
+		}
+		if !validEdgeKind(e.Kind) {
+			return fmt.Errorf("%w: edges[%d] kind=%q", ErrInvalidKind, i, e.Kind)
+		}
+		if e.SrcID == e.DstID {
+			return fmt.Errorf("%w: edges[%d] %s", ErrSelfLoop, i, e.SrcID)
+		}
+		if e.ValidFrom == "" {
+			return fmt.Errorf("relationships: edges[%d] missing ValidFrom (BackfillBulk requires explicit historical timing)", i)
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin bulk tx: %w", err)
+	}
+	defer func() {
+		if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) {
+			slog.Warn("relationships: rollback after BackfillBulk failed", "err", rerr)
+		}
+	}()
+
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO relationships
+		   (src_kind, src_id, dst_kind, dst_id, kind, metadata,
+		    valid_from, valid_to, created_by, reason, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare bulk insert: %w", err)
+	}
+	defer stmt.Close()
+
+	now := nowUTC()
+	for i, e := range edges {
+		if _, err := stmt.ExecContext(ctx,
+			e.SrcKind, e.SrcID, e.DstKind, e.DstID, e.Kind, e.Metadata,
+			e.ValidFrom, e.ValidTo, e.CreatedBy, e.Reason, now); err != nil {
+			return fmt.Errorf("bulk insert edges[%d]: %w", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit bulk: %w", err)
+	}
+	return nil
+}
+
+// ListIncomingForMany is the dst-side mirror of ListOutgoingForMany.
+// "Who depends on these N manifests?" — same use case, reverse
+// direction. One IN(...) query against idx_rel_dst_current; results
+// grouped by dst_id.
+func (s *Store) ListIncomingForMany(ctx context.Context, dstIDs []string, edgeKind string) (map[string][]Edge, error) {
+	if len(dstIDs) == 0 {
+		return map[string][]Edge{}, nil
+	}
+	for _, id := range dstIDs {
+		if id == "" {
+			return nil, fmt.Errorf("%w: dstIDs contains empty string", ErrEmptyID)
+		}
+	}
+	if edgeKind != "" && !validEdgeKind(edgeKind) {
+		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+	}
+
+	placeholders := make([]string, 0, len(dstIDs))
+	args := make([]any, 0, len(dstIDs)+1)
+	for _, id := range dstIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE dst_id IN (` + strings.Join(placeholders, ", ") + `)
+		   AND valid_to = ''`
+	if edgeKind != "" {
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query incoming-for-many: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]Edge, len(dstIDs))
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan incoming-for-many: %w", err)
+		}
+		out[e.DstID] = append(out[e.DstID], e)
+	}
+	return out, rows.Err()
 }
 
 // ListOutgoingForMany batches the per-srcID lookup for the dashboard's
