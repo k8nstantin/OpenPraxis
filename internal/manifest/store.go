@@ -242,9 +242,22 @@ func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) 
 }
 
 // List returns manifests sorted by updated_at.
+//
+// limit semantics:
+//   - limit > 0  → cap at that many rows
+//   - limit == 0 → UNBOUNDED (return every matching row). The caller is
+//     declaring "I want everything." Used by apiTasksByPeer's bulk-
+//     fetch optimization which needs every manifest to resolve task
+//     groupings; without unbounded support, the handler silently
+//     synthesised "Unknown" labels for tasks beyond the 50-row cap.
+//   - limit < 0  → defensively treated as 50 (likely a caller bug)
+//
+// Was: any limit <= 0 collapsed to 50, which silently truncated the
+// "give me all manifests" intent. 50-cap is fine for paginated views;
+// it broke the bulk-fetch caller. 2026-04-25.
 func (s *Store) List(status string, limit int) ([]*Manifest, error) {
-	if limit <= 0 {
-		limit = 50
+	if limit < 0 {
+		limit = 50 // defensive — negative is ambiguous, fall back to a sane cap
 	}
 
 	query := `SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at FROM manifests WHERE deleted_at = ''`
@@ -255,8 +268,11 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		args = append(args, status)
 	}
 
-	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
