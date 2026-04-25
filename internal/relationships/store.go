@@ -361,26 +361,12 @@ func (s *Store) Create(ctx context.Context, e Edge) error {
 	return nil
 }
 
-// BackfillRow inserts a single row with caller-controlled valid_from
-// AND valid_to — bypassing Create's close-then-insert dance. Used by
-// PR/M2's migration path to copy historical rows out of legacy dep
-// tables (task_dependency / manifest_dependencies / etc.) preserving
-// their original time intervals.
-//
-// Validation is the same as Create EXCEPT we do not require valid_to
-// to be empty — caller can write a fully-closed historical row.
-//
-// MUST NOT be used by application code outside backfill paths. Calling
-// this for a normal mutation breaks the SCD-2 invariant that "only one
-// row per (src, dst, kind) has valid_to=''" — the close-then-insert
-// transaction in Create exists to maintain it. BackfillRow trusts the
-// caller; backfills run in a controlled migration transaction with
-// known-non-overlapping intervals.
-//
-// Idempotent at the row level: the composite PK rejects duplicate
-// inserts, so re-running a backfill on the same source data returns
-// PK error rows that the caller can filter as "already migrated."
-func (s *Store) BackfillRow(ctx context.Context, e Edge) error {
+// validateBackfillEdge runs the validation rules shared by BackfillRow
+// and BackfillBulk. Centralised so adding a new rule (say "metadata
+// must be parseable JSON" in PR/M2) lands in ONE place; the two
+// callers can't drift. Returns nil if the edge is acceptable for a
+// backfill insert.
+func validateBackfillEdge(e Edge) error {
 	if e.SrcID == "" || e.DstID == "" {
 		return fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, e.SrcID, e.DstID)
 	}
@@ -397,15 +383,52 @@ func (s *Store) BackfillRow(ctx context.Context, e Edge) error {
 		return fmt.Errorf("%w: %s", ErrSelfLoop, e.SrcID)
 	}
 	if e.ValidFrom == "" {
-		return fmt.Errorf("relationships: BackfillRow requires explicit ValidFrom (callers must preserve historical timing)")
+		return fmt.Errorf("relationships: backfill requires explicit ValidFrom (callers must preserve historical timing)")
 	}
-	// valid_to may be empty (active row) or set (closed historical row).
+	return nil
+}
+
+// backfillInsertSQL is the standard INSERT statement used by BOTH
+// BackfillRow (single-row) and BackfillBulk (prepared statement,
+// per-tx). Sharing the SQL means a future column add updates one
+// place, not two.
+const backfillInsertSQL = `INSERT INTO relationships
+	(src_kind, src_id, dst_kind, dst_id, kind, metadata,
+	 valid_from, valid_to, created_by, reason, created_at)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+// BackfillRow inserts a single row with caller-controlled valid_from
+// AND valid_to — bypassing Create's close-then-insert dance. Used by
+// PR/M2's migration path to copy historical rows out of legacy dep
+// tables (task_dependency / manifest_dependencies / etc.) preserving
+// their original time intervals.
+//
+// Validation: same rules as Create EXCEPT we DO NOT require valid_to
+// to be empty (caller can write a fully-closed historical row) AND we
+// DO require valid_from to be non-empty (no implicit now() — backfill
+// callers must preserve historical timing). Lives in the shared
+// validateBackfillEdge() function used by BackfillBulk too.
+//
+// MUST NOT be used by application code outside backfill paths. Calling
+// this for a normal mutation breaks the SCD-2 invariant that "only one
+// row per (src, dst, kind) has valid_to=''" — the close-then-insert
+// transaction in Create exists to maintain it. BackfillRow trusts the
+// caller; backfills run in a controlled migration transaction with
+// known-non-overlapping intervals.
+//
+// Idempotent at the row level: the composite PK rejects duplicate
+// inserts, so re-running a backfill on the same source data returns
+// PK error rows that the caller can filter as "already migrated."
+//
+// For high-volume backfills (>1K rows) prefer BackfillBulk — it shares
+// one transaction and prepared statement instead of paying per-row
+// fsync + parse cost.
+func (s *Store) BackfillRow(ctx context.Context, e Edge) error {
+	if err := validateBackfillEdge(e); err != nil {
+		return err
+	}
 	now := nowUTC()
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO relationships
-		   (src_kind, src_id, dst_kind, dst_id, kind, metadata,
-		    valid_from, valid_to, created_by, reason, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.ExecContext(ctx, backfillInsertSQL,
 		e.SrcKind, e.SrcID, e.DstKind, e.DstID, e.Kind, e.Metadata,
 		e.ValidFrom, e.ValidTo, e.CreatedBy, e.Reason, now)
 	if err != nil {
@@ -800,13 +823,15 @@ type WalkRow struct {
 //   - nil or empty: follow ALL edge kinds (owns + depends_on + reviews + links_to)
 //   - otherwise: only follow edges whose kind is in the slice
 //
-// maxDepth caps recursion. 0 means "root only" (degenerate case for
-// validation). Negative or > 100 is clamped to 100 — prevents
-// runaway walks if a cycle ever sneaks in (the schema doesn't
-// currently enforce acyclicity at the DB level; we may add that
-// later as a CHECK trigger).
+// maxDepth caps recursion. 0 means "root only" (anchor row only — the
+// recursive WHERE w.depth < 0 excludes everything). Negative or
+// > MaxWalkDepth clamps to MaxWalkDepth. The clamp is the only
+// cycle-defense the system has — schema portability forbids CHECK
+// constraints and triggers, so an acyclicity invariant lives nowhere
+// at the DB level. If a cycle ever appears, Walk hits the depth
+// ceiling and emits a slog.Warn (see end of function).
 //
-// The CTE is the heart of why this whole manifest exists: ONE query
+// The CTE is the heart of why this whole product exists: ONE query
 // replaces what used to be 6+ table joins for a hierarchy walk. The
 // dashboard's apiProductHierarchy will eventually rebuild on this in
 // PR/M3.
@@ -949,8 +974,9 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 // graphs with thousands of nodes this allocates more than the current-
 // state walk. AOS-scale (~50 nodes) is fine.
 //
-// Same caveats as Walk: maxDepth clamped [0, 100]; UNION dedups; Go-
-// side dedup-by-id collapses diamond paths to one row per node.
+// Same dedup contract as Walk: UNION ALL emits raw, Go-side
+// dedup-by-id collapses diamond paths to one row per node (shortest
+// path wins). maxDepth clamped to [0, MaxWalkDepth].
 func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds []string, maxDepth int, asOf string) ([]WalkRow, error) {
 	if rootID == "" {
 		return nil, fmt.Errorf("%w: root_id empty", ErrEmptyID)
@@ -1037,19 +1063,20 @@ func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds [
 type HealthStats struct {
 	CurrentEdges int // valid_to = ''
 	TotalRows    int // all rows including closed history
-	TableExists  bool
 }
 
 // Health returns row counts so callers don't have to write the same
 // COUNT queries everywhere.
 //
 // Contract: callers MUST call New() (which runs init() / the idempotent
-// migration) BEFORE Health(). The earlier portable-error-string-match
-// approach broke on Postgres ("relation X does not exist") and MySQL
-// ("Table 'db.X' doesn't exist"); Go's database/sql doesn't expose
-// portable "table not found" sentinel errors, and information_schema
-// queries are also engine-specific in ways that defeat the purpose.
-// So: Health assumes init succeeded, which is enforced by New().
+// migration) BEFORE Health(). Earlier prototypes tried to detect
+// "table not found" via error string match, but the message shape
+// varies across SQL engines (SQLite "no such table:", Postgres
+// "relation X does not exist", MySQL "Table 'db.X' doesn't exist") —
+// any portable sentinel would be brittle. Go's database/sql doesn't
+// surface a typed "table missing" error either. So Health trusts that
+// init succeeded; callers wanting "table-was-already-there?" semantics
+// should add a top-level boot check rather than embedding it here.
 func (s *Store) Health(ctx context.Context) (HealthStats, error) {
 	var h HealthStats
 	if err := s.db.QueryRowContext(ctx,
@@ -1060,7 +1087,6 @@ func (s *Store) Health(ctx context.Context) (HealthStats, error) {
 		`SELECT COUNT(*) FROM relationships`).Scan(&h.TotalRows); err != nil {
 		return h, fmt.Errorf("health total count: %w", err)
 	}
-	h.TableExists = true
 	return h, nil
 }
 
@@ -1093,13 +1119,27 @@ func (s *Store) Get(ctx context.Context, srcID, dstID, kind string) (Edge, bool,
 	}
 	defer rows.Close()
 	if !rows.Next() {
+		// Differentiate "row iterator advanced cleanly past the end" from
+		// "iterator errored before producing a row." rows.Err() captures
+		// the latter; if non-nil, return it as a real error rather than
+		// implying the edge doesn't exist.
+		if rerr := rows.Err(); rerr != nil {
+			return Edge{}, false, fmt.Errorf("get iterate: %w", rerr)
+		}
 		return Edge{}, false, nil // no current edge — caller's expected case
 	}
 	e, err := scanEdge(rows)
 	if err != nil {
 		return Edge{}, false, fmt.Errorf("scan get: %w", err)
 	}
-	return e, true, rows.Err()
+	// Final iterator check after the scan — catches errors that surface
+	// during row consumption. Returning (e, true, err) here would let a
+	// caller process a partially-scanned Edge thinking found=true; safer
+	// to return zero on any non-nil iterator error.
+	if rerr := rows.Err(); rerr != nil {
+		return Edge{}, false, fmt.Errorf("get final iterate: %w", rerr)
+	}
+	return e, true, nil
 }
 
 // BackfillBulk inserts many historical rows in one transaction.
@@ -1123,22 +1163,11 @@ func (s *Store) BackfillBulk(ctx context.Context, edges []Edge) error {
 	}
 	// Pre-validate ALL edges before starting the tx so we don't have to
 	// roll back after partial inserts. validate-then-write is cheaper
-	// than write-then-rollback.
+	// than write-then-rollback. Uses the same validateBackfillEdge() as
+	// BackfillRow — rules can't drift between the two.
 	for i, e := range edges {
-		if e.SrcID == "" || e.DstID == "" {
-			return fmt.Errorf("%w: edges[%d] src_id=%q dst_id=%q", ErrEmptyID, i, e.SrcID, e.DstID)
-		}
-		if !validKind(e.SrcKind) || !validKind(e.DstKind) {
-			return fmt.Errorf("%w: edges[%d] src_kind=%q dst_kind=%q", ErrInvalidKind, i, e.SrcKind, e.DstKind)
-		}
-		if !validEdgeKind(e.Kind) {
-			return fmt.Errorf("%w: edges[%d] kind=%q", ErrInvalidKind, i, e.Kind)
-		}
-		if e.SrcID == e.DstID {
-			return fmt.Errorf("%w: edges[%d] %s", ErrSelfLoop, i, e.SrcID)
-		}
-		if e.ValidFrom == "" {
-			return fmt.Errorf("relationships: edges[%d] missing ValidFrom (BackfillBulk requires explicit historical timing)", i)
+		if err := validateBackfillEdge(e); err != nil {
+			return fmt.Errorf("edges[%d]: %w", i, err)
 		}
 	}
 
@@ -1152,11 +1181,9 @@ func (s *Store) BackfillBulk(ctx context.Context, edges []Edge) error {
 		}
 	}()
 
-	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO relationships
-		   (src_kind, src_id, dst_kind, dst_id, kind, metadata,
-		    valid_from, valid_to, created_by, reason, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	// Reuse the shared backfillInsertSQL — same column order as
+	// BackfillRow so future schema changes touch one constant.
+	stmt, err := tx.PrepareContext(ctx, backfillInsertSQL)
 	if err != nil {
 		return fmt.Errorf("prepare bulk insert: %w", err)
 	}

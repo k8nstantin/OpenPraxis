@@ -860,9 +860,6 @@ func TestHealth_CountsCurrentVsTotal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if !h.TableExists {
-		t.Errorf("TableExists should be true after migration")
-	}
 	if h.CurrentEdges != 1 {
 		t.Errorf("expected 1 current edge (A→C), got %d", h.CurrentEdges)
 	}
@@ -1166,6 +1163,61 @@ func TestCreate_ConcurrentSameEdge(t *testing.T) {
 		if !isLast && hasValidTo {
 			t.Errorf("non-last row should be closed, but row %d has valid_to=''", i)
 		}
+	}
+}
+
+// TestCreate_RacingRemove — Create and Remove fire concurrently on the
+// same edge. Verifies the SCD-2 invariant holds: end state is either
+// "1 current row" (Create won the race or Create ran after Remove)
+// or "0 current rows" (Remove won + closed Create's row).
+//
+// What this test catches: if Remove ignored Create's createMu (it
+// does — Remove doesn't take it), and SQLite's write-statement
+// serialization weren't enough, we could end up with two current
+// rows or a row stuck "half-closed". Test confirms the actual
+// behavior is invariant-preserving.
+func TestCreate_RacingRemove(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const iterations = 25
+	var wg sync.WaitGroup
+	wg.Add(2 * iterations)
+	errs := make(chan error, 2*iterations)
+
+	for i := 0; i < iterations; i++ {
+		go func() {
+			defer wg.Done()
+			err := s.Create(ctx, Edge{
+				SrcKind: KindManifest, SrcID: "A",
+				DstKind: KindManifest, DstID: "B",
+				Kind:      EdgeDependsOn,
+				CreatedBy: "creator",
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := s.Remove(ctx, "A", "B", EdgeDependsOn, "remover", "race"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("race error: %v", err)
+	}
+
+	// Invariant: after the storm, AT MOST ONE current row exists.
+	current, err := s.ListOutgoing(ctx, "A", EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("ListOutgoing: %v", err)
+	}
+	if len(current) > 1 {
+		t.Errorf("SCD-2 invariant violated: %d current rows after Create/Remove race", len(current))
 	}
 }
 

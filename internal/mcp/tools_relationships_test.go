@@ -295,11 +295,11 @@ func TestRelHealth_ReturnsStats(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	out := resultJSON(t, res)
-	if out["table_exists"] != true {
-		t.Errorf("expected table_exists=true after migration, got %v", out)
-	}
 	if out["current_edges"].(float64) != 1 {
 		t.Errorf("expected 1 current edge, got %v", out["current_edges"])
+	}
+	if out["total_rows"].(float64) != 1 {
+		t.Errorf("expected 1 total row, got %v", out["total_rows"])
 	}
 }
 

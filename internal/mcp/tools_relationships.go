@@ -361,7 +361,6 @@ func (s *Server) handleRelHealth(ctx context.Context, req mcplib.CallToolRequest
 	return jsonResult(map[string]any{
 		"current_edges": h.CurrentEdges,
 		"total_rows":    h.TotalRows,
-		"table_exists":  h.TableExists,
 	}), nil
 }
 
