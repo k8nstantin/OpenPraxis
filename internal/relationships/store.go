@@ -307,3 +307,148 @@ func (s *Store) Remove(ctx context.Context, srcID, dstID, kind, by, reason strin
 	}
 	return nil
 }
+
+// rowColumns is the standard SELECT projection for relationships rows.
+// Centralised so every reader (List/History/Walk) uses identical
+// column ordering — a misaligned scan is a class of bug we eliminate
+// at the type level.
+const rowColumns = `src_kind, src_id, dst_kind, dst_id, kind, metadata,
+	valid_from, valid_to, created_by, reason, created_at`
+
+// scanEdge scans one row from the standard rowColumns projection into
+// an Edge struct. Used by every reader's row loop. Keeping this in one
+// place means changing the column order is a single-file edit instead
+// of touching every Scan call site.
+func scanEdge(rows *sql.Rows) (Edge, error) {
+	var e Edge
+	err := rows.Scan(
+		&e.SrcKind, &e.SrcID, &e.DstKind, &e.DstID, &e.Kind, &e.Metadata,
+		&e.ValidFrom, &e.ValidTo, &e.CreatedBy, &e.Reason, &e.CreatedAt,
+	)
+	return e, err
+}
+
+// ListOutgoing returns all CURRENT edges leaving srcID, optionally
+// filtered to a specific edge kind. "Current" means valid_to == ''.
+//
+// edgeKind == "" returns every kind (owns + depends_on + reviews +
+// links_to). Pass a specific kind to restrict (e.g. EdgeDependsOn for
+// just the dep graph).
+//
+// Hits the partial index idx_rel_src_current — O(log n + matches) on
+// current state regardless of how much history accumulates.
+//
+// Returned edges are unordered. Callers that need ordering should sort
+// in Go (typically by ValidFrom or DstID).
+func (s *Store) ListOutgoing(ctx context.Context, srcID, edgeKind string) ([]Edge, error) {
+	// Build query + args dynamically so the WHERE is precisely "what
+	// the partial index covers" — no wasted predicate that would force
+	// a wider scan.
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE src_id = ? AND valid_to = ''`
+	args := []any{srcID}
+	if edgeKind != "" {
+		if !validEdgeKind(edgeKind) {
+			return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+		}
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query outgoing: %w", err)
+	}
+	defer rows.Close()
+
+	// Pre-allocate a small slice; most nodes have a handful of edges.
+	// If a node has hundreds, append's growth handles it.
+	out := make([]Edge, 0, 8)
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan outgoing: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListIncoming returns all CURRENT edges arriving at dstID, optionally
+// filtered to a specific edge kind. Mirror of ListOutgoing but driven
+// by the dst-side partial index idx_rel_dst_current.
+//
+// Use case: "who depends on this manifest?" — reverse-lookup that
+// today requires a full scan of manifest_dependencies in the reverse
+// direction. With the dst index it's O(log n + matches).
+func (s *Store) ListIncoming(ctx context.Context, dstID, edgeKind string) ([]Edge, error) {
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE dst_id = ? AND valid_to = ''`
+	args := []any{dstID}
+	if edgeKind != "" {
+		if !validEdgeKind(edgeKind) {
+			return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+		}
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query incoming: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Edge, 0, 8)
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan incoming: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// History returns every version of one specific edge (one src_id +
+// dst_id + kind tuple), oldest first. Includes both the closed
+// historical rows AND the current row (if any) at the tail.
+//
+// Use case: "show me the audit trail of M5's depends_on M2 edge over
+// time" — when did it open, who opened it, when was it closed, who
+// closed it, did it re-open later, etc. Drives the dashboard's
+// per-edge history panel.
+//
+// Order: ASC by valid_from. Earliest version first; current row (if
+// present) last. This is the natural "story" order — readers walk it
+// chronologically.
+//
+// Hits idx_rel_history (src_id, dst_id, valid_from DESC) which the
+// query optimizer reverses to ASC at minimal cost.
+func (s *Store) History(ctx context.Context, srcID, dstID, kind string) ([]Edge, error) {
+	if !validEdgeKind(kind) {
+		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, kind)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+rowColumns+` FROM relationships
+		 WHERE src_id = ? AND dst_id = ? AND kind = ?
+		 ORDER BY valid_from ASC`,
+		srcID, dstID, kind)
+	if err != nil {
+		return nil, fmt.Errorf("query history: %w", err)
+	}
+	defer rows.Close()
+
+	// Edges typically have <10 versions over their lifetime. 8 is a
+	// reasonable default capacity; growth handles outliers.
+	out := make([]Edge, 0, 8)
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan history: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
