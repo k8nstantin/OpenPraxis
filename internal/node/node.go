@@ -17,6 +17,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/marker"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
@@ -42,6 +43,10 @@ type Node struct {
 	Templates        *templates.Store
 	TemplatesResolv  *templates.Resolver
 	Comments         *comments.Store
+	// Relationships is the unified edge store (Praxis Relationships
+	// PR/M1). Lives alongside the existing dep tables during the M2
+	// dual-write phase; becomes the sole source after M3 cutover.
+	Relationships    *relationships.Store
 	runner           *task.Runner
 	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine
@@ -255,6 +260,15 @@ func New(cfg *config.Config) (*Node, error) {
 
 	embedder := embedding.NewEngine(cfg.Embedding.OllamaURL, cfg.Embedding.Model, cfg.Embedding.Dimension)
 
+	// Praxis Relationships PR/M1 — unified edge store. Migration is
+	// idempotent (CREATE TABLE / CREATE INDEX IF NOT EXISTS). Sharing
+	// the same DB handle as every other store so it lives in
+	// memories.db alongside products / manifests / tasks etc.
+	relationshipsStore, err := relationships.New(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init relationships store: %w", err)
+	}
+
 	n := &Node{
 		Config:           cfg,
 		Store:            store,
@@ -273,6 +287,7 @@ func New(cfg *config.Config) (*Node, error) {
 		Templates:        templatesStore,
 		TemplatesResolv:  templatesResolver,
 		Comments:         commentsStore,
+		Relationships:    relationshipsStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
