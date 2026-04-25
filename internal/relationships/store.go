@@ -347,6 +347,24 @@ func scanEdge(rows *sql.Rows) (Edge, error) {
 	return e, err
 }
 
+// validateAsOf parses an ISO8601 timestamp; empty string is allowed
+// (means "now / current state"). Centralised so every time-travel
+// reader uses identical parsing rules. Accepts either RFC3339Nano (the
+// format nowUTC writes) or RFC3339 (operator-friendly, looser
+// precision) — caller-facing leniency.
+func validateAsOf(asOf string) error {
+	if asOf == "" {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339Nano, asOf); err == nil {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339, asOf); err == nil {
+		return nil
+	}
+	return fmt.Errorf("relationships: as_of must be ISO8601 (RFC3339 or RFC3339Nano), got %q", asOf)
+}
+
 // ListOutgoing returns all CURRENT edges leaving srcID, optionally
 // filtered to a specific edge kind. "Current" means valid_to == ''.
 //
@@ -359,6 +377,10 @@ func scanEdge(rows *sql.Rows) (Edge, error) {
 //
 // Returned edges are unordered. Callers that need ordering should sort
 // in Go (typically by ValidFrom or DstID).
+//
+// For time-travel ("what edges left srcID at past time T?") use
+// ListOutgoingAt instead. ListOutgoing is the hot path; ListOutgoingAt
+// trades the partial index for a wider scan to honour history.
 func (s *Store) ListOutgoing(ctx context.Context, srcID, edgeKind string) ([]Edge, error) {
 	// Build query + args dynamically so the WHERE is precisely "what
 	// the partial index covers" — no wasted predicate that would force
@@ -423,6 +445,119 @@ func (s *Store) ListIncoming(ctx context.Context, dstID, edgeKind string) ([]Edg
 		e, err := scanEdge(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan incoming: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListOutgoingAt returns edges leaving srcID that were CURRENT at the
+// provided ISO8601 timestamp `asOf`. The predicate that defines "valid
+// at asOf":
+//
+//	valid_from <= asOf AND (valid_to > asOf OR valid_to = '')
+//
+//	      ↓ semantics ↓
+//	the edge had been activated (valid_from in the past relative to asOf)
+//	AND was not yet superseded as of asOf (either closed AFTER asOf,
+//	or still current today).
+//
+// asOf == "" falls through to ListOutgoing's current-state path —
+// callers that don't care about history shouldn't pay the wider-scan
+// cost. Empty asOf is therefore the ergonomic default for "now."
+//
+// Performance: cannot use idx_rel_src_current (partial on valid_to='')
+// because past-snapshot queries need closed rows. Falls back to a
+// scan of the (src_id, kind) index OR a full table scan depending on
+// the optimizer's stats. Acceptable for audit / forensics / dashboard
+// time-slider use cases; do NOT call this in a hot loop.
+//
+// Future asOf timestamps are accepted but degenerate: any future point
+// returns whatever's currently active (since no row's valid_to is yet
+// set after the future asOf). Caller can choose to validate themselves.
+func (s *Store) ListOutgoingAt(ctx context.Context, srcID, edgeKind, asOf string) ([]Edge, error) {
+	if srcID == "" {
+		return nil, fmt.Errorf("%w: src_id empty", ErrEmptyID)
+	}
+	if edgeKind != "" && !validEdgeKind(edgeKind) {
+		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+	}
+	if err := validateAsOf(asOf); err != nil {
+		return nil, err
+	}
+	// Empty asOf → delegate to the hot-path reader for partial-index speed.
+	if asOf == "" {
+		return s.ListOutgoing(ctx, srcID, edgeKind)
+	}
+
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE src_id = ?
+		   AND valid_from <= ?
+		   AND (valid_to > ? OR valid_to = '')`
+	args := []any{srcID, asOf, asOf}
+	if edgeKind != "" {
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query outgoing-at: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Edge, 0, 8)
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan outgoing-at: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListIncomingAt is the dst-side mirror of ListOutgoingAt. Same
+// predicate, same delegation-to-hot-path on empty asOf, same
+// performance caveat.
+//
+// Use case: "who depended on this manifest 30 days ago?" Walks the
+// idx_rel_dst index without the partial filter.
+func (s *Store) ListIncomingAt(ctx context.Context, dstID, edgeKind, asOf string) ([]Edge, error) {
+	if dstID == "" {
+		return nil, fmt.Errorf("%w: dst_id empty", ErrEmptyID)
+	}
+	if edgeKind != "" && !validEdgeKind(edgeKind) {
+		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+	}
+	if err := validateAsOf(asOf); err != nil {
+		return nil, err
+	}
+	if asOf == "" {
+		return s.ListIncoming(ctx, dstID, edgeKind)
+	}
+
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE dst_id = ?
+		   AND valid_from <= ?
+		   AND (valid_to > ? OR valid_to = '')`
+	args := []any{dstID, asOf, asOf}
+	if edgeKind != "" {
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query incoming-at: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Edge, 0, 8)
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan incoming-at: %w", err)
 		}
 		out = append(out, e)
 	}
@@ -611,6 +746,111 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	})
 	seen := make(map[string]bool, len(out))
 	deduped := out[:0] // reuse the backing array
+	for _, w := range out {
+		if !seen[w.ID] {
+			seen[w.ID] = true
+			deduped = append(deduped, w)
+		}
+	}
+	return deduped, nil
+}
+
+// WalkAt traverses the DAG starting at (rootID, rootKind) showing the
+// state that was current at `asOf`. Same shape as Walk except the
+// recursive-row predicate is the time-travel predicate from
+// ListOutgoingAt instead of `valid_to = ''`.
+//
+// asOf == "" delegates to Walk for the hot-path partial-index speed.
+//
+// Use case: dashboard time-slider — "show me what the AOS umbrella DAG
+// looked like on 2026-04-15." Operator can scrub through history. The
+// returned WalkRow shape is identical to Walk's, so any consumer that
+// renders a current walk renders a past walk identically.
+//
+// The recursive CTE materializes everything at the past snapshot; for
+// graphs with thousands of nodes this allocates more than the current-
+// state walk. AOS-scale (~50 nodes) is fine.
+//
+// Same caveats as Walk: maxDepth clamped [0, 100]; UNION dedups; Go-
+// side dedup-by-id collapses diamond paths to one row per node.
+func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds []string, maxDepth int, asOf string) ([]WalkRow, error) {
+	if rootID == "" {
+		return nil, fmt.Errorf("%w: root_id empty", ErrEmptyID)
+	}
+	if !validKind(rootKind) {
+		return nil, fmt.Errorf("%w: root_kind=%q", ErrInvalidKind, rootKind)
+	}
+	if err := validateAsOf(asOf); err != nil {
+		return nil, err
+	}
+	// Empty asOf → use the hot-path Walk that hits idx_rel_src_current.
+	if asOf == "" {
+		return s.Walk(ctx, rootID, rootKind, edgeKinds, maxDepth)
+	}
+
+	if maxDepth < 0 || maxDepth > 100 {
+		maxDepth = 100
+	}
+
+	// Build edge-kind filter + args. Args order MUST match the query's
+	// placeholder order; the CTE places them as:
+	//   anchor:    (?, ?)         rootID, rootKind
+	//   recursive: (?, ?)         asOf, asOf  (twice — two-clause predicate)
+	//              IN(?, ?, ...)  edge kinds (optional)
+	//              <?             maxDepth (last)
+	kindFilter := ""
+	args := []any{rootID, rootKind, asOf, asOf}
+	if len(edgeKinds) > 0 {
+		placeholders := make([]string, 0, len(edgeKinds))
+		for _, k := range edgeKinds {
+			if !validEdgeKind(k) {
+				return nil, fmt.Errorf("%w: edge_kinds[]=%q", ErrInvalidKind, k)
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, k)
+		}
+		kindFilter = ` AND r.kind IN (` + joinComma(placeholders) + `)`
+	}
+	args = append(args, maxDepth)
+
+	// Time-travel CTE: same shape as Walk, but the recursive WHERE swaps
+	// `r.valid_to = ''` for the asOf-validity predicate.
+	q := `WITH RECURSIVE walk(id, kind, via_kind, via_src, depth) AS (
+		SELECT ?, ?, '', '', 0
+		UNION
+		SELECT r.dst_id, r.dst_kind, r.kind, r.src_id, w.depth + 1
+		  FROM relationships r
+		  JOIN walk w ON r.src_id = w.id
+		 WHERE r.valid_from <= ? AND (r.valid_to > ? OR r.valid_to = '')` + kindFilter + `
+		   AND w.depth < ?
+	)
+	SELECT id, kind, via_kind, via_src, depth FROM walk`
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("walk-at query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]WalkRow, 0, 32)
+	for rows.Next() {
+		var w WalkRow
+		if err := rows.Scan(&w.ID, &w.Kind, &w.ViaKind, &w.ViaSrc, &w.Depth); err != nil {
+			return nil, fmt.Errorf("scan walk-at: %w", err)
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Same dedup-by-id sweep as Walk so diamond-path nodes appear once
+	// (shortest path wins). See Walk for rationale.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Depth < out[j].Depth
+	})
+	seen := make(map[string]bool, len(out))
+	deduped := make([]WalkRow, 0, len(out))
 	for _, w := range out {
 		if !seen[w.ID] {
 			seen[w.ID] = true

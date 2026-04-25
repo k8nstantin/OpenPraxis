@@ -22,6 +22,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -493,6 +494,224 @@ func TestWalk_EdgeKindFilter(t *testing.T) {
 	if len(rows) != 2 {
 		t.Errorf("expected P + M only, got %d rows: %+v", len(rows), rows)
 	}
+}
+
+// ─── Time-travel readers (ListOutgoingAt / ListIncomingAt / WalkAt) ────────
+
+// TestListOutgoingAt_PastSnapshot — re-target an edge over time, verify
+// past-vs-current state differs. Re-target = Remove(A→B) + Create(A→C)
+// since A→B and A→C are distinct edges in the SCD model (different dst).
+//
+// Timeline:
+//
+//	t_pre:  capture timestamp BEFORE any edge exists
+//	T0:     Create A→B  (valid_from=T0, valid_to='')
+//	t_mid:  capture timestamp WHILE A→B is current
+//	T1:     Remove A→B   (closes A→B at T1; valid_to set)
+//	T2:     Create A→C   (separate fresh edge)
+//	t_now:  current state = only A→C
+//
+// Expected at t_pre: 0 edges (nothing existed)
+// Expected at t_mid: A→B (still current then)
+// Expected now:      A→C
+func TestListOutgoingAt_PastSnapshot(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	tPre := time.Now().UTC().Add(-1 * time.Millisecond).Format(time.RFC3339Nano)
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn, func(e *Edge) { e.Reason = "v1" })
+	time.Sleep(5 * time.Millisecond)
+	tMid := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(2 * time.Millisecond)
+
+	// Query AT tPre — before any edge existed.
+	if got, _ := s.ListOutgoingAt(ctx, "A", EdgeDependsOn, tPre); len(got) != 0 {
+		t.Errorf("at tPre (pre-creation), expected 0 edges, got %d", len(got))
+	}
+
+	// Query AT tMid (after Create) — should see A→B.
+	got, err := s.ListOutgoingAt(ctx, "A", EdgeDependsOn, tMid)
+	if err != nil {
+		t.Fatalf("ListOutgoingAt: %v", err)
+	}
+	if len(got) != 1 || got[0].DstID != "B" {
+		t.Fatalf("at tMid, expected A→B, got %+v", got)
+	}
+
+	// Re-target: explicit Remove A→B, then Create A→C (distinct edge).
+	time.Sleep(2 * time.Millisecond)
+	if err := s.Remove(ctx, "A", "B", EdgeDependsOn, "test", "re-target"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	mustCreate(t, s, "A", "C", EdgeDependsOn, func(e *Edge) { e.Reason = "v2" })
+
+	// Query AT tMid again — A→B was current then, A→C didn't exist.
+	got, err = s.ListOutgoingAt(ctx, "A", EdgeDependsOn, tMid)
+	if err != nil {
+		t.Fatalf("ListOutgoingAt past: %v", err)
+	}
+	dstSet := map[string]bool{}
+	for _, e := range got {
+		dstSet[e.DstID] = true
+	}
+	if !dstSet["B"] {
+		t.Errorf("at tMid, expected to see B: %+v", got)
+	}
+	if dstSet["C"] {
+		t.Errorf("at tMid, A→C should NOT have existed yet: %+v", got)
+	}
+
+	// Query NOW (current state) — only A→C.
+	currentEdges, _ := s.ListOutgoing(ctx, "A", EdgeDependsOn)
+	if len(currentEdges) != 1 || currentEdges[0].DstID != "C" {
+		t.Errorf("current state should be A→C only, got %+v", currentEdges)
+	}
+}
+
+// TestListOutgoingAt_EmptyAsOfDelegatesToCurrent — empty asOf falls
+// through to ListOutgoing (hot-path partial-index reader). Verifies
+// the optimization: empty asOf → same result as calling ListOutgoing
+// directly.
+func TestListOutgoingAt_EmptyAsOfDelegatesToCurrent(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn)
+	mustCreate(t, s, "A", "C", EdgeDependsOn)
+
+	currentDirect, _ := s.ListOutgoing(ctx, "A", EdgeDependsOn)
+	currentViaAt, _ := s.ListOutgoingAt(ctx, "A", EdgeDependsOn, "")
+
+	if len(currentDirect) != len(currentViaAt) {
+		t.Errorf("empty asOf should match ListOutgoing: direct=%d viaAt=%d",
+			len(currentDirect), len(currentViaAt))
+	}
+}
+
+// TestListOutgoingAt_InvalidTimestamp — non-ISO8601 asOf rejected.
+func TestListOutgoingAt_InvalidTimestamp(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	_, err := s.ListOutgoingAt(ctx, "A", EdgeDependsOn, "not a timestamp")
+	if err == nil {
+		t.Fatal("expected error on garbage asOf, got nil")
+	}
+	if !strings.Contains(err.Error(), "as_of must be ISO8601") {
+		t.Errorf("expected 'as_of must be ISO8601' in error, got: %v", err)
+	}
+}
+
+// TestListIncomingAt_PastSnapshot — mirror of ListOutgoingAt_PastSnapshot.
+// Multiple sources point at one dst; one is closed; query at past time
+// should see both, query now should see only the survivor.
+func TestListIncomingAt_PastSnapshot(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "M1", "M0", EdgeDependsOn)
+	mustCreate(t, s, "M2", "M0", EdgeDependsOn)
+	time.Sleep(5 * time.Millisecond)
+	t1 := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(2 * time.Millisecond)
+
+	// Close M1→M0 (Remove).
+	if err := s.Remove(ctx, "M1", "M0", EdgeDependsOn, "test", "removed"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Past query: M1→M0 + M2→M0 BOTH current at t1.
+	past, err := s.ListIncomingAt(ctx, "M0", EdgeDependsOn, t1)
+	if err != nil {
+		t.Fatalf("ListIncomingAt: %v", err)
+	}
+	if len(past) != 2 {
+		t.Errorf("at t1, expected 2 incoming, got %d: %+v", len(past), past)
+	}
+
+	// Current: only M2→M0 left.
+	now, _ := s.ListIncoming(ctx, "M0", EdgeDependsOn)
+	if len(now) != 1 || now[0].SrcID != "M2" {
+		t.Errorf("current should be only M2→M0, got %+v", now)
+	}
+}
+
+// TestWalkAt_PastSnapshot — three-node chain whose tail is re-targeted.
+// Verifies time-travel walks return the structure that was current at
+// asOf, not what's current now. Re-target uses explicit Remove+Create
+// (B→C and B→D are distinct edges, not metadata-versions of the same).
+//
+// Timeline:
+//
+//	T0: Create A→B + Create B→C   (chain A→B→C)
+//	t1: capture
+//	T1: Remove B→C, Create B→D    (chain A→B→D from now on)
+//
+// Expected at t1: walk(A) = {A, B, C}
+// Expected now:   walk(A) = {A, B, D}
+func TestWalkAt_PastSnapshot(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn)
+	mustCreate(t, s, "B", "C", EdgeDependsOn)
+	time.Sleep(5 * time.Millisecond)
+	t1 := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(2 * time.Millisecond)
+	// Re-target B's outgoing: close B→C, open B→D.
+	if err := s.Remove(ctx, "B", "C", EdgeDependsOn, "test", "re-target"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	mustCreate(t, s, "B", "D", EdgeDependsOn)
+
+	pastRows, err := s.WalkAt(ctx, "A", KindManifest, []string{EdgeDependsOn}, 10, t1)
+	pastIDs := walkIDs(t, pastRows, err)
+	if !pastIDs["A"] || !pastIDs["B"] || !pastIDs["C"] {
+		t.Errorf("at t1, expected {A,B,C}, got %v", pastIDs)
+	}
+	if pastIDs["D"] {
+		t.Errorf("at t1, D shouldn't exist yet: %v", pastIDs)
+	}
+
+	nowRows, err := s.Walk(ctx, "A", KindManifest, []string{EdgeDependsOn}, 10)
+	nowIDs := walkIDs(t, nowRows, err)
+	if !nowIDs["A"] || !nowIDs["B"] || !nowIDs["D"] {
+		t.Errorf("now, expected {A,B,D}, got %v", nowIDs)
+	}
+	if nowIDs["C"] {
+		t.Errorf("now, C should be gone: %v", nowIDs)
+	}
+}
+
+// TestWalkAt_EmptyAsOfDelegatesToWalk — same delegation behavior as
+// ListOutgoingAt: empty asOf → hot-path Walk.
+func TestWalkAt_EmptyAsOfDelegatesToWalk(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn)
+	mustCreate(t, s, "B", "C", EdgeDependsOn)
+
+	direct, _ := s.Walk(ctx, "A", KindManifest, []string{EdgeDependsOn}, 10)
+	viaAt, _ := s.WalkAt(ctx, "A", KindManifest, []string{EdgeDependsOn}, 10, "")
+
+	if len(direct) != len(viaAt) {
+		t.Errorf("empty asOf delegation broken: direct=%d viaAt=%d", len(direct), len(viaAt))
+	}
+}
+
+// walkIDs is a tiny helper: run a Walk* call, fail the test on error,
+// return a set-of-IDs map for terse membership assertions.
+func walkIDs(t *testing.T, rows []WalkRow, err error) map[string]bool {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	out := map[string]bool{}
+	for _, r := range rows {
+		out[r.ID] = true
+	}
+	return out
 }
 
 // TestWalk_DedupesViaUnion — diamond shape: A→B→D and A→C→D. UNION (not
