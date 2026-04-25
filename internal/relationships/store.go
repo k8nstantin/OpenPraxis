@@ -452,3 +452,129 @@ func (s *Store) History(ctx context.Context, srcID, dstID, kind string) ([]Edge,
 	}
 	return out, rows.Err()
 }
+
+// WalkRow is one node visited during a recursive DAG walk. The (ID, Kind)
+// pair identifies the entity; ViaKind says how we got here (which edge
+// kind led to this node from its predecessor); ViaSrc is the predecessor
+// itself; Depth is hops from the root (root = 0).
+//
+// Returned in BFS-ish order — closer-to-root nodes appear before deeper
+// ones, but ordering within the same depth is not stable (depends on
+// SQLite's CTE iteration). Callers needing strict order should sort.
+type WalkRow struct {
+	ID      string
+	Kind    string
+	ViaKind string // edge kind that led here ("" for the root)
+	ViaSrc  string // src_id of the edge that led here ("" for the root)
+	Depth   int
+}
+
+// Walk traverses the DAG starting at (rootID, rootKind), following
+// outgoing edges. Returns every reachable node along with the edge that
+// led to it. The recursive CTE walks the partial-current-edges index so
+// only edges with valid_to='' are followed — historical edges don't
+// appear in the walk.
+//
+// edgeKinds filters which edge kinds to follow:
+//   - nil or empty: follow ALL edge kinds (owns + depends_on + reviews + links_to)
+//   - otherwise: only follow edges whose kind is in the slice
+//
+// maxDepth caps recursion. 0 means "root only" (degenerate case for
+// validation). Negative or > 100 is clamped to 100 — prevents
+// runaway walks if a cycle ever sneaks in (the schema doesn't
+// currently enforce acyclicity at the DB level; we may add that
+// later as a CHECK trigger).
+//
+// The CTE is the heart of why this whole manifest exists: ONE query
+// replaces what used to be 6+ table joins for a hierarchy walk. The
+// dashboard's apiProductHierarchy will eventually rebuild on this in
+// PR/M3.
+func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []string, maxDepth int) ([]WalkRow, error) {
+	// Validate root kind. Edge kinds in the slice are validated below.
+	if !validKind(rootKind) {
+		return nil, fmt.Errorf("%w: root_kind=%q", ErrInvalidKind, rootKind)
+	}
+	// Clamp depth — defensive against caller mistakes and against any
+	// future cycle bug. 100 is generous: AOS umbrella walks at most
+	// product → sub-product → manifest → task = depth 4.
+	if maxDepth < 0 || maxDepth > 100 {
+		maxDepth = 100
+	}
+
+	// Build the edge-kind filter. SQLite parameter lists in IN clauses
+	// need explicit '?' per value — no array binding. We construct
+	// placeholders + args defensively, validating each kind first.
+	kindFilter := ""
+	args := []any{rootID, rootKind, maxDepth}
+	if len(edgeKinds) > 0 {
+		// Validate every kind so a typo fails fast with a clean error
+		// rather than silently returning empty results.
+		placeholders := make([]string, 0, len(edgeKinds))
+		for _, k := range edgeKinds {
+			if !validEdgeKind(k) {
+				return nil, fmt.Errorf("%w: edge_kinds[]=%q", ErrInvalidKind, k)
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, k)
+		}
+		kindFilter = ` AND r.kind IN (` + joinComma(placeholders) + `)`
+	}
+
+	// Recursive CTE explained:
+	//   - Anchor row: the root itself, depth=0, no via_kind/via_src.
+	//   - Recursive row: for each row already in walk, find its
+	//     outgoing CURRENT edges (valid_to='') in the optional kind
+	//     filter, emit the dst as a new walk row at depth+1.
+	//   - WHERE w.depth < ? caps the recursion — we'd rather return
+	//     a partial walk with a clear depth ceiling than spin
+	//     forever on a malformed graph.
+	//
+	// The UNION (not UNION ALL) deduplicates: a node reachable via
+	// multiple paths shows up once (with whichever path's WalkRow
+	// was inserted first). UNION is more expensive than UNION ALL
+	// but eliminates the most common confusion in DAG output where
+	// the same node appears 5 times via different parents.
+	q := `WITH RECURSIVE walk(id, kind, via_kind, via_src, depth) AS (
+		SELECT ?, ?, '', '', 0
+		UNION
+		SELECT r.dst_id, r.dst_kind, r.kind, r.src_id, w.depth + 1
+		  FROM relationships r
+		  JOIN walk w ON r.src_id = w.id
+		 WHERE r.valid_to = ''` + kindFilter + `
+		   AND w.depth < ?
+	)
+	SELECT id, kind, via_kind, via_src, depth FROM walk`
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("walk query: %w", err)
+	}
+	defer rows.Close()
+
+	// Capacity guess: typical AOS umbrella walk hits ~30 nodes (1 +
+	// 8 sub-products + 15 manifests + ~6 tasks). Pre-allocate a bit
+	// over that to avoid the first growth.
+	out := make([]WalkRow, 0, 32)
+	for rows.Next() {
+		var w WalkRow
+		if err := rows.Scan(&w.ID, &w.Kind, &w.ViaKind, &w.ViaSrc, &w.Depth); err != nil {
+			return nil, fmt.Errorf("scan walk: %w", err)
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// joinComma joins a slice of strings with ", " — small helper for
+// building IN-clause placeholder strings without importing strings.
+// Inlined here so the file's deps stay tight.
+func joinComma(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for i := 1; i < len(parts); i++ {
+		out += ", " + parts[i]
+	}
+	return out
+}
