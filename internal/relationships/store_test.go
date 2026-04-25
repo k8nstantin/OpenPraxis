@@ -700,6 +700,230 @@ func TestWalkAt_EmptyAsOfDelegatesToWalk(t *testing.T) {
 	}
 }
 
+// ─── Reader empty-ID rejection (C1 from self-review) ────────────────────────
+
+// TestReaders_RejectEmptyIDs — every reader must reject empty IDs at
+// the top with ErrEmptyID. Previously they would silently scan with an
+// empty key (returning nothing) which masked buggy callers. With CHECK
+// constraints removed for portability, Go is the only safety net.
+func TestReaders_RejectEmptyIDs(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"ListOutgoing empty src", func() error {
+			_, err := s.ListOutgoing(ctx, "", EdgeDependsOn)
+			return err
+		}},
+		{"ListIncoming empty dst", func() error {
+			_, err := s.ListIncoming(ctx, "", EdgeDependsOn)
+			return err
+		}},
+		{"History empty src", func() error {
+			_, err := s.History(ctx, "", "B", EdgeDependsOn)
+			return err
+		}},
+		{"History empty dst", func() error {
+			_, err := s.History(ctx, "A", "", EdgeDependsOn)
+			return err
+		}},
+		{"Walk empty root", func() error {
+			_, err := s.Walk(ctx, "", KindManifest, nil, 10)
+			return err
+		}},
+		{"ListOutgoingAt empty src", func() error {
+			_, err := s.ListOutgoingAt(ctx, "", EdgeDependsOn, "2026-01-01T00:00:00Z")
+			return err
+		}},
+		{"ListIncomingAt empty dst", func() error {
+			_, err := s.ListIncomingAt(ctx, "", EdgeDependsOn, "2026-01-01T00:00:00Z")
+			return err
+		}},
+		{"WalkAt empty root", func() error {
+			_, err := s.WalkAt(ctx, "", KindManifest, nil, 10, "2026-01-01T00:00:00Z")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.fn()
+			if !errors.Is(err, ErrEmptyID) {
+				t.Errorf("expected ErrEmptyID, got %v", err)
+			}
+		})
+	}
+}
+
+// ─── BackfillRow ─────────────────────────────────────────────────────────────
+
+// TestBackfillRow_PreservesValidFromValidTo — backfill must accept
+// caller-controlled valid_from AND valid_to, including a fully-closed
+// historical row with both set to past timestamps. PR/M2's task_dependency
+// migration depends on this.
+func TestBackfillRow_PreservesValidFromValidTo(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	// Insert a closed historical row from a fictional 2025 backfill.
+	pastFrom := "2025-06-01T00:00:00Z"
+	pastTo := "2025-09-01T00:00:00Z"
+	if err := s.BackfillRow(ctx, Edge{
+		SrcKind: KindManifest, SrcID: "M1",
+		DstKind: KindManifest, DstID: "M2",
+		Kind:      EdgeDependsOn,
+		ValidFrom: pastFrom,
+		ValidTo:   pastTo,
+		CreatedBy: "backfill",
+		Reason:    "PR/M2 from task_dependency",
+	}); err != nil {
+		t.Fatalf("BackfillRow: %v", err)
+	}
+
+	hist, _ := s.History(ctx, "M1", "M2", EdgeDependsOn)
+	if len(hist) != 1 {
+		t.Fatalf("expected 1 history row, got %d", len(hist))
+	}
+	if hist[0].ValidFrom != pastFrom || hist[0].ValidTo != pastTo {
+		t.Errorf("intervals not preserved: from=%q to=%q", hist[0].ValidFrom, hist[0].ValidTo)
+	}
+	// Closed row should NOT appear in current state.
+	if got, _ := s.ListOutgoing(ctx, "M1", EdgeDependsOn); len(got) != 0 {
+		t.Errorf("closed historical row leaked into current state: %+v", got)
+	}
+}
+
+// TestBackfillRow_RequiresValidFrom — empty ValidFrom rejected. Backfill
+// callers MUST preserve historical timing; defaulting to now() would
+// silently corrupt the timeline.
+func TestBackfillRow_RequiresValidFrom(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	err := s.BackfillRow(ctx, Edge{
+		SrcKind: KindManifest, SrcID: "M1",
+		DstKind: KindManifest, DstID: "M2",
+		Kind:      EdgeDependsOn,
+		ValidFrom: "", // missing — should reject
+	})
+	if err == nil {
+		t.Fatal("expected error on empty ValidFrom")
+	}
+	if !strings.Contains(err.Error(), "ValidFrom") {
+		t.Errorf("error should mention ValidFrom, got: %v", err)
+	}
+}
+
+// TestBackfillRow_DuplicateRejectedByPK — same (src, dst, kind, valid_from)
+// inserted twice fails the second time on PK constraint. Callers can use
+// this for "skip already-migrated" semantics.
+func TestBackfillRow_DuplicateRejectedByPK(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	e := Edge{
+		SrcKind: KindManifest, SrcID: "M1",
+		DstKind: KindManifest, DstID: "M2",
+		Kind:      EdgeDependsOn,
+		ValidFrom: "2025-06-01T00:00:00Z",
+		ValidTo:   "2025-09-01T00:00:00Z",
+		CreatedBy: "backfill",
+	}
+	if err := s.BackfillRow(ctx, e); err != nil {
+		t.Fatalf("first BackfillRow: %v", err)
+	}
+	err := s.BackfillRow(ctx, e)
+	if err == nil {
+		t.Fatal("expected PK error on duplicate, got nil")
+	}
+}
+
+// ─── Health ──────────────────────────────────────────────────────────────────
+
+// TestHealth_CountsCurrentVsTotal — Health distinguishes current edges
+// from total-with-history. Add 2 edges, close one, expect current=1
+// total=2 (the closed row stays in the table per SCD-2).
+func TestHealth_CountsCurrentVsTotal(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "B", EdgeDependsOn)
+	mustCreate(t, s, "A", "C", EdgeDependsOn)
+	if err := s.Remove(ctx, "A", "B", EdgeDependsOn, "test", "removed"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	h, err := s.Health(ctx)
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if !h.TableExists {
+		t.Errorf("TableExists should be true after migration")
+	}
+	if h.CurrentEdges != 1 {
+		t.Errorf("expected 1 current edge (A→C), got %d", h.CurrentEdges)
+	}
+	if h.TotalRows != 2 {
+		t.Errorf("expected 2 total rows (closed A→B + current A→C), got %d", h.TotalRows)
+	}
+}
+
+// ─── ListOutgoingForMany ─────────────────────────────────────────────────────
+
+// TestListOutgoingForMany_BatchesQuery — three sources each with edges,
+// one IN-clause query returns everything grouped by src_id. Replaces the
+// N+1 pattern.
+func TestListOutgoingForMany_BatchesQuery(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, "A", "X", EdgeDependsOn)
+	mustCreate(t, s, "A", "Y", EdgeDependsOn)
+	mustCreate(t, s, "B", "Z", EdgeDependsOn)
+	// C has no edges intentionally.
+
+	got, err := s.ListOutgoingForMany(ctx, []string{"A", "B", "C"}, EdgeDependsOn)
+	if err != nil {
+		t.Fatalf("ListOutgoingForMany: %v", err)
+	}
+	if len(got["A"]) != 2 {
+		t.Errorf("A should have 2 edges, got %d", len(got["A"]))
+	}
+	if len(got["B"]) != 1 {
+		t.Errorf("B should have 1 edge, got %d", len(got["B"]))
+	}
+	if len(got["C"]) != 0 {
+		t.Errorf("C should have 0 edges, got %d", len(got["C"]))
+	}
+}
+
+// TestListOutgoingForMany_EmptySrcIDs — passing an empty slice returns
+// an empty map, not nil, and not an error.
+func TestListOutgoingForMany_EmptySrcIDs(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	got, err := s.ListOutgoingForMany(ctx, []string{}, "")
+	if err != nil {
+		t.Fatalf("expected no error on empty input, got %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("expected empty map, got %v", got)
+	}
+}
+
+// TestListOutgoingForMany_RejectsEmptyEntry — slice containing "" is
+// caller error.
+func TestListOutgoingForMany_RejectsEmptyEntry(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	_, err := s.ListOutgoingForMany(ctx, []string{"A", "", "B"}, "")
+	if !errors.Is(err, ErrEmptyID) {
+		t.Errorf("expected ErrEmptyID, got %v", err)
+	}
+}
+
 // walkIDs is a tiny helper: run a Walk* call, fail the test on error,
 // return a set-of-IDs map for terse membership assertions.
 func walkIDs(t *testing.T, rows []WalkRow, err error) map[string]bool {

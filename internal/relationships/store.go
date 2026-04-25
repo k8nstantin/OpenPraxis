@@ -21,9 +21,24 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
+	"strings"
 	"time"
 )
+
+// MaxWalkDepth is the upper bound on Walk / WalkAt recursion depth.
+// Exposed so the MCP layer can apply the same clamp without drifting
+// from the store. AOS umbrella walks rarely exceed depth 5; 100 is
+// generous + defensive against any future cycle bug. Negative or
+// > MaxWalkDepth is clamped to MaxWalkDepth; 0 returns root only.
+const MaxWalkDepth = 100
+
+// SlowWalkThreshold logs a warning when Walk / WalkAt exceeds this
+// duration. Helps operators spot pathological graphs (cycles caught
+// by the depth clamp, unindexed scans on bad query plans). Tuneable
+// via the slog level if log volume becomes a problem.
+const SlowWalkThreshold = 100 * time.Millisecond
 
 // ErrInvalidKind is returned when a caller passes a src_kind / dst_kind /
 // edge kind outside the enumerated set. The DB-level CHECK constraint
@@ -40,7 +55,7 @@ var ErrSelfLoop = errors.New("relationships: a node cannot have an edge to itsel
 // has no CHECK to catch this (portability rule), so Go MUST.
 var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty")
 
-// validKinds returns true if k is one of the enumerated entity kinds.
+// validKind returns true if k is one of the enumerated entity kinds.
 // Lifted to a free function so future callers (e.g. MCP tool input
 // validators) share the exact same allow-list as the store.
 func validKind(k string) bool {
@@ -251,7 +266,16 @@ func (s *Store) Create(ctx context.Context, e Edge) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck // safe; commit promotes to no-op
+	// After a successful Commit, Rollback returns sql.ErrTxDone — that's
+	// the documented sentinel for "tx already finished," not a real
+	// error. We deliberately swallow it. Any OTHER rollback error (e.g.
+	// connection died after Commit but before this defer ran) we surface
+	// via slog so operators have a signal something flaked.
+	defer func() {
+		if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) {
+			slog.Warn("relationships: rollback after Create failed", "err", rerr)
+		}
+	}()
 
 	// Step 1: close the prior current row (if any). The WHERE clause
 	// includes valid_to='' so this only touches the one current row.
@@ -279,6 +303,59 @@ func (s *Store) Create(ctx context.Context, e Edge) error {
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// BackfillRow inserts a single row with caller-controlled valid_from
+// AND valid_to — bypassing Create's close-then-insert dance. Used by
+// PR/M2's migration path to copy historical rows out of legacy dep
+// tables (task_dependency / manifest_dependencies / etc.) preserving
+// their original time intervals.
+//
+// Validation is the same as Create EXCEPT we do not require valid_to
+// to be empty — caller can write a fully-closed historical row.
+//
+// MUST NOT be used by application code outside backfill paths. Calling
+// this for a normal mutation breaks the SCD-2 invariant that "only one
+// row per (src, dst, kind) has valid_to=''" — the close-then-insert
+// transaction in Create exists to maintain it. BackfillRow trusts the
+// caller; backfills run in a controlled migration transaction with
+// known-non-overlapping intervals.
+//
+// Idempotent at the row level: the composite PK rejects duplicate
+// inserts, so re-running a backfill on the same source data returns
+// PK error rows that the caller can filter as "already migrated."
+func (s *Store) BackfillRow(ctx context.Context, e Edge) error {
+	if e.SrcID == "" || e.DstID == "" {
+		return fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, e.SrcID, e.DstID)
+	}
+	if !validKind(e.SrcKind) {
+		return fmt.Errorf("%w: src_kind=%q", ErrInvalidKind, e.SrcKind)
+	}
+	if !validKind(e.DstKind) {
+		return fmt.Errorf("%w: dst_kind=%q", ErrInvalidKind, e.DstKind)
+	}
+	if !validEdgeKind(e.Kind) {
+		return fmt.Errorf("%w: kind=%q", ErrInvalidKind, e.Kind)
+	}
+	if e.SrcID == e.DstID {
+		return fmt.Errorf("%w: %s", ErrSelfLoop, e.SrcID)
+	}
+	if e.ValidFrom == "" {
+		return fmt.Errorf("relationships: BackfillRow requires explicit ValidFrom (callers must preserve historical timing)")
+	}
+	// valid_to may be empty (active row) or set (closed historical row).
+	now := nowUTC()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO relationships
+		   (src_kind, src_id, dst_kind, dst_id, kind, metadata,
+		    valid_from, valid_to, created_by, reason, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.SrcKind, e.SrcID, e.DstKind, e.DstID, e.Kind, e.Metadata,
+		e.ValidFrom, e.ValidTo, e.CreatedBy, e.Reason, now)
+	if err != nil {
+		return fmt.Errorf("backfill insert: %w", err)
 	}
 	return nil
 }
@@ -382,6 +459,11 @@ func validateAsOf(asOf string) error {
 // ListOutgoingAt instead. ListOutgoing is the hot path; ListOutgoingAt
 // trades the partial index for a wider scan to honour history.
 func (s *Store) ListOutgoing(ctx context.Context, srcID, edgeKind string) ([]Edge, error) {
+	// Defense-in-depth: empty src_id would silently match nothing AND
+	// (after C1 from self-review) signals a buggy caller. Reject early.
+	if srcID == "" {
+		return nil, fmt.Errorf("%w: src_id empty", ErrEmptyID)
+	}
 	// Build query + args dynamically so the WHERE is precisely "what
 	// the partial index covers" — no wasted predicate that would force
 	// a wider scan.
@@ -423,6 +505,9 @@ func (s *Store) ListOutgoing(ctx context.Context, srcID, edgeKind string) ([]Edg
 // today requires a full scan of manifest_dependencies in the reverse
 // direction. With the dst index it's O(log n + matches).
 func (s *Store) ListIncoming(ctx context.Context, dstID, edgeKind string) ([]Edge, error) {
+	if dstID == "" {
+		return nil, fmt.Errorf("%w: dst_id empty", ErrEmptyID)
+	}
 	q := `SELECT ` + rowColumns + ` FROM relationships
 		 WHERE dst_id = ? AND valid_to = ''`
 	args := []any{dstID}
@@ -580,6 +665,9 @@ func (s *Store) ListIncomingAt(ctx context.Context, dstID, edgeKind, asOf string
 // Hits idx_rel_history (src_id, dst_id, valid_from DESC) which the
 // query optimizer reverses to ASC at minimal cost.
 func (s *Store) History(ctx context.Context, srcID, dstID, kind string) ([]Edge, error) {
+	if srcID == "" || dstID == "" {
+		return nil, fmt.Errorf("%w: src_id=%q dst_id=%q", ErrEmptyID, srcID, dstID)
+	}
 	if !validEdgeKind(kind) {
 		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, kind)
 	}
@@ -644,15 +732,18 @@ type WalkRow struct {
 // dashboard's apiProductHierarchy will eventually rebuild on this in
 // PR/M3.
 func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []string, maxDepth int) ([]WalkRow, error) {
+	if rootID == "" {
+		return nil, fmt.Errorf("%w: root_id empty", ErrEmptyID)
+	}
 	// Validate root kind. Edge kinds in the slice are validated below.
 	if !validKind(rootKind) {
 		return nil, fmt.Errorf("%w: root_kind=%q", ErrInvalidKind, rootKind)
 	}
-	// Clamp depth — defensive against caller mistakes and against any
-	// future cycle bug. 100 is generous: AOS umbrella walks at most
-	// product → sub-product → manifest → task = depth 4.
-	if maxDepth < 0 || maxDepth > 100 {
-		maxDepth = 100
+	// Clamp depth via the package-level constant. Out-of-range or
+	// negative collapses to MaxWalkDepth; 0 means "root only" (anchor
+	// row only — recursive WHERE w.depth < 0 excludes everything).
+	if maxDepth < 0 || maxDepth > MaxWalkDepth {
+		maxDepth = MaxWalkDepth
 	}
 
 	// Build the edge-kind filter. SQLite parameter lists in IN clauses
@@ -678,7 +769,7 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 			placeholders = append(placeholders, "?")
 			args = append(args, k)
 		}
-		kindFilter = ` AND r.kind IN (` + joinComma(placeholders) + `)`
+		kindFilter = ` AND r.kind IN (` + strings.Join(placeholders, ", ") + `)`
 	}
 	// maxDepth is the LAST positional arg — appended after any kinds.
 	args = append(args, maxDepth)
@@ -708,6 +799,10 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	)
 	SELECT id, kind, via_kind, via_src, depth FROM walk`
 
+	// Time the query so we can log slow walks. A walk that hits the depth
+	// clamp on a graph with cycles (or a graph that's just enormous) is
+	// invisible without instrumentation; D1 + M9 from self-review.
+	start := time.Now()
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("walk query: %w", err)
@@ -718,15 +813,33 @@ func (s *Store) Walk(ctx context.Context, rootID, rootKind string, edgeKinds []s
 	// 8 sub-products + 15 manifests + ~6 tasks). Pre-allocate a bit
 	// over that to avoid the first growth.
 	out := make([]WalkRow, 0, 32)
+	maxObservedDepth := 0
 	for rows.Next() {
 		var w WalkRow
 		if err := rows.Scan(&w.ID, &w.Kind, &w.ViaKind, &w.ViaSrc, &w.Depth); err != nil {
 			return nil, fmt.Errorf("scan walk: %w", err)
 		}
+		if w.Depth > maxObservedDepth {
+			maxObservedDepth = w.Depth
+		}
 		out = append(out, w)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	// Surface pathological walks: hit the depth ceiling (potential cycle
+	// or wildly nested graph) OR took longer than the slow threshold.
+	if elapsed := time.Since(start); elapsed > SlowWalkThreshold {
+		slog.Warn("relationships.Walk slow",
+			"root_id", rootID, "root_kind", rootKind,
+			"rows", len(out), "max_depth_observed", maxObservedDepth,
+			"max_depth_allowed", maxDepth, "elapsed_ms", elapsed.Milliseconds())
+	}
+	if maxDepth > 0 && maxObservedDepth >= maxDepth {
+		slog.Warn("relationships.Walk hit depth ceiling — possible cycle",
+			"root_id", rootID, "root_kind", rootKind,
+			"max_depth", maxDepth, "rows", len(out))
 	}
 
 	// SQL UNION dedupes on full-row equality, but a diamond shape
@@ -788,8 +901,8 @@ func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds [
 		return s.Walk(ctx, rootID, rootKind, edgeKinds, maxDepth)
 	}
 
-	if maxDepth < 0 || maxDepth > 100 {
-		maxDepth = 100
+	if maxDepth < 0 || maxDepth > MaxWalkDepth {
+		maxDepth = MaxWalkDepth
 	}
 
 	// Build edge-kind filter + args. Args order MUST match the query's
@@ -809,7 +922,7 @@ func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds [
 			placeholders = append(placeholders, "?")
 			args = append(args, k)
 		}
-		kindFilter = ` AND r.kind IN (` + joinComma(placeholders) + `)`
+		kindFilter = ` AND r.kind IN (` + strings.Join(placeholders, ", ") + `)`
 	}
 	args = append(args, maxDepth)
 
@@ -860,16 +973,95 @@ func (s *Store) WalkAt(ctx context.Context, rootID, rootKind string, edgeKinds [
 	return deduped, nil
 }
 
-// joinComma joins a slice of strings with ", " — small helper for
-// building IN-clause placeholder strings without importing strings.
-// Inlined here so the file's deps stay tight.
-func joinComma(parts []string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	out := parts[0]
-	for i := 1; i < len(parts); i++ {
-		out += ", " + parts[i]
-	}
-	return out
+// HealthStats is a snapshot of the store's row counts. Used by the
+// dashboard's overview card + by ops health checks. Cheap — two
+// COUNT queries against an indexed table.
+type HealthStats struct {
+	CurrentEdges int // valid_to = ''
+	TotalRows    int // all rows including closed history
+	TableExists  bool
 }
+
+// Health returns row counts so callers don't have to write the same
+// COUNT queries everywhere. Returns TableExists=false (with no error)
+// if migration hasn't run yet — useful during boot ordering.
+func (s *Store) Health(ctx context.Context) (HealthStats, error) {
+	var h HealthStats
+	// Probe the table; if it doesn't exist yet, return TableExists=false
+	// without surfacing an error. Some boot sequences call Health before
+	// migrations finish.
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relationships WHERE valid_to = ''`).Scan(&h.CurrentEdges)
+	if err != nil {
+		// "no such table" is a known-acceptable state; everything else is real.
+		if strings.Contains(err.Error(), "no such table") {
+			return h, nil
+		}
+		return h, fmt.Errorf("health current count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relationships`).Scan(&h.TotalRows); err != nil {
+		return h, fmt.Errorf("health total count: %w", err)
+	}
+	h.TableExists = true
+	return h, nil
+}
+
+// ListOutgoingForMany batches the per-srcID lookup for the dashboard's
+// product-list / manifest-list views. Today's pattern (loop calling
+// ListOutgoing) is N+1 — one query per row in the list. This issues
+// ONE query covering every srcID in the slice and groups the result
+// by src_id in Go.
+//
+// Returns map[srcID][]Edge. A srcID with zero edges has no map entry
+// (caller can do `len(m[id]) == 0` to check).
+//
+// edgeKind == "" returns all kinds (same as ListOutgoing). Filter
+// applies uniformly across every srcID.
+//
+// Performance: one IN(...) query against idx_rel_src_current. ≤ ~500
+// srcIDs is comfortable; beyond that, batch the call.
+func (s *Store) ListOutgoingForMany(ctx context.Context, srcIDs []string, edgeKind string) (map[string][]Edge, error) {
+	if len(srcIDs) == 0 {
+		return map[string][]Edge{}, nil
+	}
+	for _, id := range srcIDs {
+		if id == "" {
+			return nil, fmt.Errorf("%w: srcIDs contains empty string", ErrEmptyID)
+		}
+	}
+	if edgeKind != "" && !validEdgeKind(edgeKind) {
+		return nil, fmt.Errorf("%w: kind=%q", ErrInvalidKind, edgeKind)
+	}
+
+	placeholders := make([]string, 0, len(srcIDs))
+	args := make([]any, 0, len(srcIDs)+1)
+	for _, id := range srcIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	q := `SELECT ` + rowColumns + ` FROM relationships
+		 WHERE src_id IN (` + strings.Join(placeholders, ", ") + `)
+		   AND valid_to = ''`
+	if edgeKind != "" {
+		q += ` AND kind = ?`
+		args = append(args, edgeKind)
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query outgoing-for-many: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]Edge, len(srcIDs))
+	for rows.Next() {
+		e, err := scanEdge(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan outgoing-for-many: %w", err)
+		}
+		out[e.SrcID] = append(out[e.SrcID], e)
+	}
+	return out, rows.Err()
+}
+
