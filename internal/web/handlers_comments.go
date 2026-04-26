@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,23 +11,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-)
-
-// markdownRenderer is the shared goldmark instance used to render comment
-// bodies to HTML. GFM extensions are enabled (tables, task lists, strike,
-// autolinks). Raw HTML in source is ALWAYS escaped — html.WithUnsafe() is
-// deliberately omitted. See TestPOST_Comment_XSSEscape.
-var markdownRenderer = goldmark.New(
-	goldmark.WithExtensions(extension.GFM),
-	goldmark.WithRendererOptions(
-		html.WithXHTML(),
-	),
+	"github.com/k8nstantin/OpenPraxis/internal/render"
 )
 
 // EnrichWithHTML augments an entity payload with rendered HTML fields so
@@ -55,27 +41,13 @@ func EnrichWithHTML(entity any, mdFields map[string]string) map[string]any {
 	return out
 }
 
-// renderMarkdown converts a raw comment body to safe HTML. Returns the raw
-// body wrapped in a <p> on goldmark error so the UI always has something to
-// display.
+// renderMarkdown converts a raw body to HTML via the shared renderer in
+// internal/render. Raw HTML and custom XML-shaped tags (<role>, <scope>,
+// <calibration>, …) pass through verbatim — see DV/M5 (019dc953-b12) for
+// why we eliminated the strip-by-default pipeline that mangled
+// agent-authored prompts.
 func renderMarkdown(src string) string {
-	var buf bytes.Buffer
-	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
-		return "<p>" + escapeHTML(src) + "</p>"
-	}
-	return buf.String()
-}
-
-// escapeHTML is a tiny helper for the renderMarkdown fallback path.
-func escapeHTML(s string) string {
-	r := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&#39;",
-	)
-	return r.Replace(s)
+	return render.Render(src)
 }
 
 // M2-T5 — HTTP surface for comments. Thin wrapper over comments.Store;
