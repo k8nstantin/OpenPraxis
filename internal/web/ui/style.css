@@ -1498,6 +1498,120 @@ mark {
 .md-body th { background: var(--bg-secondary); font-weight: 600; }
 .md-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 
+/* Agent prompt structural tags — DV/M5 (PR #237) lets agents author
+   with semantic XML-shaped tags (<role>, <scope>, <calibration>, …)
+   that pass through goldmark verbatim. Browsers render unknown
+   elements as display:inline by default, so the operator sees a flat
+   blob even though the structure is in the source. The styles below
+   give every recognized agent tag a labeled block container so the
+   operator's view matches what the agent will consume.
+   See manifest 019dc953-b12 for the threat-model rationale. */
+.md-body role,
+.md-body scope,
+.md-body calibration,
+.md-body reference,
+.md-body context,
+.md-body deps,
+.md-body libraries,
+.md-body acceptance,
+.md-body out_of_scope,
+.md-body risks,
+.md-body push_back_on,
+.md-body validate,
+.md-body manifest,
+.md-body task,
+.md-body instructions,
+.md-body prompt,
+.md-body system,
+.md-body answer,
+.md-body thinking,
+.md-body rationale,
+.md-body example,
+.md-body input,
+.md-body output {
+  display: block;
+  margin: 14px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-secondary);
+  border-radius: 0 4px 4px 0;
+}
+
+/* Tag-name label rendered via ::before. CSS has no general
+   "current tag name" selector, so we set content per tag. New tags
+   added to the agent's vocabulary need a one-line entry here. */
+.md-body role::before,
+.md-body scope::before,
+.md-body calibration::before,
+.md-body reference::before,
+.md-body context::before,
+.md-body deps::before,
+.md-body libraries::before,
+.md-body acceptance::before,
+.md-body out_of_scope::before,
+.md-body risks::before,
+.md-body push_back_on::before,
+.md-body validate::before,
+.md-body manifest::before,
+.md-body task::before,
+.md-body instructions::before,
+.md-body prompt::before,
+.md-body system::before,
+.md-body answer::before,
+.md-body thinking::before,
+.md-body rationale::before,
+.md-body example::before,
+.md-body input::before,
+.md-body output::before {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.md-body role::before { content: "ROLE"; }
+.md-body scope::before { content: "SCOPE"; }
+.md-body calibration::before { content: "CALIBRATION"; }
+.md-body reference::before { content: "REFERENCE"; }
+.md-body context::before { content: "CONTEXT"; }
+.md-body deps::before { content: "DEPS"; }
+.md-body libraries::before { content: "LIBRARIES"; }
+.md-body acceptance::before { content: "ACCEPTANCE"; }
+.md-body out_of_scope::before { content: "OUT OF SCOPE"; }
+.md-body risks::before { content: "RISKS"; }
+.md-body push_back_on::before { content: "PUSH BACK ON"; }
+.md-body validate::before { content: "VALIDATE"; }
+.md-body manifest::before { content: "MANIFEST"; }
+.md-body task::before { content: "TASK"; }
+.md-body instructions::before { content: "INSTRUCTIONS"; }
+.md-body prompt::before { content: "PROMPT"; }
+.md-body system::before { content: "SYSTEM"; }
+.md-body answer::before { content: "ANSWER"; }
+.md-body thinking::before { content: "THINKING"; }
+.md-body rationale::before { content: "RATIONALE"; }
+.md-body example::before { content: "EXAMPLE"; }
+.md-body input::before { content: "INPUT"; }
+.md-body output::before { content: "OUTPUT"; }
+
+/* Nested tags (e.g. <push_back_on> / <validate> inside <calibration>)
+   render less prominently than their parent so the visual hierarchy
+   matches the semantic nesting. */
+.md-body calibration push_back_on,
+.md-body calibration validate {
+  margin: 10px 0 6px;
+  padding: 8px 12px;
+  border-left-color: var(--text-muted);
+  background: var(--bg-primary);
+}
+.md-body calibration push_back_on::before,
+.md-body calibration validate::before {
+  color: var(--text-secondary);
+  font-size: 9px;
+  margin-bottom: 6px;
+}
+
 /* Run Stats card — per-task post-run visualization (RS/M1).
    SVG sparklines + flexbox token bar + CSS conic-gradient ring. */
 .run-stats-card {
