@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
@@ -20,6 +21,18 @@ import (
 
 //go:embed ui
 var uiFS embed.FS
+
+// Svelte v2 dashboard build output. The `all:` prefix is required so
+// Vite-emitted dotfiles (and the chunk-1 .gitkeep) are included; without
+// it Go's embed silently skips anything starting with `_` or `.`.
+//
+// The directory always contains at minimum a stub index.html committed
+// to git (see internal/web/ui/dashboard/.gitignore) so this embed never
+// fails on a fresh checkout. `make build` overwrites the stub with real
+// hashed assets before `go build` runs.
+//
+//go:embed all:ui/dashboard/dist
+var dashboardFS embed.FS
 
 // Handler creates the main HTTP handler with all routes.
 func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.Registry, chatRouter *chat.Router, chatCtx *chat.ContextBuilder, chatTools *chat.ChatTools) http.Handler {
@@ -67,6 +80,20 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	r.Path("/tree.js").HandlerFunc(serveJS)
 	r.Path("/lifecycle.js").HandlerFunc(serveJS)
 	r.Path("/task-status.js").HandlerFunc(serveJS)
+
+	// Svelte v2 dashboard — embedded Vite build at /dashboard/. Hashed
+	// assets land at /dashboard/assets/*; everything else under
+	// /dashboard/ falls back to index.html so the Svelte client-side
+	// router can take over (SPA pattern). Old vanilla UI at / stays
+	// live in parallel until the cutover flag flips per the M1 plan.
+	dashboardContent, derr := fs.Sub(dashboardFS, "ui/dashboard/dist")
+	if derr != nil {
+		// Embed directive is statically validated, so this should be
+		// unreachable. Panic at startup is fine — fs.Sub failure here
+		// means the Go binary itself is malformed.
+		panic(fmt.Sprintf("dashboard embed sub: %v", derr))
+	}
+	r.PathPrefix("/dashboard").HandlerFunc(serveDashboard(dashboardContent))
 
 	// WebSocket
 	r.HandleFunc("/ws", hub.HandleWS)
@@ -257,6 +284,49 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	})
 
 	return r
+}
+
+// serveDashboard serves the Svelte v2 dashboard from the embedded Vite
+// build. URL layout:
+//
+//	/dashboard            → index.html (no-cache)
+//	/dashboard/           → index.html (no-cache)
+//	/dashboard/assets/*   → hashed JS/CSS (immutable cache)
+//	/dashboard/<spa-route> → index.html (SPA fallback so client-side
+//	                        routing works on hard refresh)
+//
+// The fallback step is what makes this handler different from a plain
+// FileServer: any path that doesn't resolve to a real embedded file
+// gets index.html instead of a 404, so the Svelte router owns
+// everything under /dashboard/.
+func serveDashboard(content fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(content))
+	return func(w http.ResponseWriter, req *http.Request) {
+		rel := strings.TrimPrefix(req.URL.Path, "/dashboard")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			rel = "index.html"
+		}
+		// SPA fallback: paths Vite didn't emit (e.g. /dashboard/products/abc)
+		// serve index.html so the Svelte router can take over. fs.Stat is
+		// cheap on an embed.FS — it's a map lookup, not real I/O.
+		if _, err := fs.Stat(content, rel); err != nil {
+			rel = "index.html"
+		}
+		// Cache headers: hashed assets are content-addressed and safe to
+		// cache forever; index.html (and SPA fallbacks) must revalidate
+		// every load so a redeploy takes effect immediately.
+		if strings.HasPrefix(rel, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
+		// Rewrite the request path so http.FileServer resolves against the
+		// embedded fs root. Mutating req.URL.Path is safe here — this is
+		// the terminal handler in the chain.
+		req.URL.Path = "/" + rel
+		fileServer.ServeHTTP(w, req)
+	}
 }
 
 func apiStatus(n *node.Node, mcpServer *mcp.Server, peerRegistry *peer.Registry) http.HandlerFunc {
