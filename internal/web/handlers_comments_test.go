@@ -428,26 +428,26 @@ func TestPOST_Comment_BodyHTMLGFMTable(t *testing.T) {
 	}
 }
 
-// TestPOST_Comment_XSSEscape is the acceptance-criteria XSS test: raw
-// <script> in body must be escaped in body_html.
-func TestPOST_Comment_XSSEscape(t *testing.T) {
+// TestPOST_Comment_RawHTMLPassesThrough — DV/M5 reverses the prior
+// XSS-strip behavior. Single-user, single-node OpenPraxis renders raw
+// HTML / custom tags verbatim so the operator's view matches what their
+// agents will consume. If / when multi-user lands, the trust-tier
+// sanitizer designed in DV/M5's manifest comes back and a new test
+// asserts the strip behavior under the appropriate trust level.
+func TestPOST_Comment_RawHTMLPassesThrough(t *testing.T) {
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "a", Type: string(comments.TypeUserNote),
-		Body: "<script>alert(1)</script>",
+		Body: "<role>reviewer</role>\n\n<scope>verify</scope>",
 	})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, body)
 	}
 	c := decodeComment(t, body)
-	// goldmark with WithUnsafe() OFF drops raw HTML entirely (replaces with
-	// an "<!-- raw HTML omitted -->" comment). The security property we
-	// enforce: no executable <script> tag survives into body_html.
-	if strings.Contains(c.BodyHTML, "<script>") {
-		t.Fatalf("raw <script> tag leaked into body_html: %q", c.BodyHTML)
-	}
-	if strings.Contains(c.BodyHTML, "alert(1)") {
-		t.Fatalf("script payload leaked into body_html: %q", c.BodyHTML)
+	for _, want := range []string{"<role>", "</role>", "<scope>", "</scope>"} {
+		if !strings.Contains(c.BodyHTML, want) {
+			t.Fatalf("expected %q in body_html (DV/M5 pass-through); got: %q", want, c.BodyHTML)
+		}
 	}
 }
 
