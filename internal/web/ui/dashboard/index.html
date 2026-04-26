@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Favicon shipped from this dashboard's own public/ — Vite copies
+         it to dist/openpraxis-icon.png and the Go embed serves it at
+         /dashboard/openpraxis-icon.png. We deliberately don't reuse the
+         legacy /assets/ path because that surface gets removed at the
+         vanilla-UI cutover. -->
+    <link rel="icon" type="image/png" href="./openpraxis-icon.png" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>OpenPraxis Dashboard v2</title>
+  </head>
+  <body>
+    <!-- The Svelte app mounts here. main.ts replaces #app's contents
+         on boot. If you see this raw text, the script tag failed to
+         load (likely a go:embed misconfiguration). -->
+    <div id="app">Loading…</div>
+    <!-- Source path is relative to the project root (the dashboard/ dir).
+         Vite rewrites this to /dashboard/assets/index-<hash>.js in the
+         built output because of `base: '/dashboard/'` in vite.config.ts. -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

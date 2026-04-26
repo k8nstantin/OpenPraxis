@@ -8,8 +8,13 @@ openloom
 # Data directory
 data/
 
-# GoReleaser output
+# GoReleaser output (top-level dist/ from `make build-all`)
 dist/
+# …but the frontend dashboard's dist/ ships a committed stub index.html
+# so go:embed always has something to embed on a fresh checkout. The
+# inner .gitignore at internal/web/ui/dashboard/.gitignore re-applies
+# fine-grained rules (ignore hashed bundles, keep stub).
+!internal/web/ui/dashboard/dist/
 
 # Dependencies
 vendor/
