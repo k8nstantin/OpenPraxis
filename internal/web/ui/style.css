@@ -1498,6 +1498,54 @@ mark {
 .md-body th { background: var(--bg-secondary); font-weight: 600; }
 .md-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 
+/* Description / content view toggle — Markup (default, raw text the
+   agent receives) vs Rendered (pretty view for non-tech readers).
+   See internal/web/ui/components/desc-toggle.js. */
+.desc-toggle-wrap { width: 100%; }
+.desc-toggle-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.desc-toggle-btn {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.desc-toggle-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.desc-toggle-btn.active {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+.desc-markup {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin: 0;
+  overflow-x: auto;
+  max-height: 400px;
+}
+
 /* Agent prompt structural tags — DV/M5 (PR #237) lets agents author
    with semantic XML-shaped tags (<role>, <scope>, <calibration>, …)
    that pass through goldmark verbatim. Browsers render unknown
