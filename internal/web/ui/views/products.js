@@ -391,7 +391,7 @@
             }).join('')}
           </div>
           <div id="product-revisions-mount" style="margin-bottom:12px"></div>
-          ${p.description ? `<div class="md-body" style="margin-bottom:12px">${p.description_html || esc(p.description)}</div>` : ''}
+          ${p.description ? `<div style="margin-bottom:12px">${OL.descToggle(p.description, p.description_html || esc(p.description), { className: 'md-body' })}</div>` : ''}
           ${productDepsHtml}
           ${manifestsHtml}
           <div id="product-knobs-mount" style="margin-top:16px"></div>

@@ -478,7 +478,9 @@
             </div>
             <div id="task-instructions-display">
               ${t.description
-                ? `<div class="md-body" style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);max-height:400px;overflow-y:auto">${t.description_html || esc(t.description)}</div>`
+                ? OL.descToggle(t.description, t.description_html || esc(t.description), {
+                    style: 'padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);max-height:400px;overflow-y:auto'
+                  })
                 : `<div style="font-size:12px;color:var(--text-muted);font-style:italic">No instructions</div>`}
             </div>
             <div id="task-instructions-editor" style="display:none">
