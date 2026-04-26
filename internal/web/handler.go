@@ -22,13 +22,13 @@ import (
 //go:embed ui
 var uiFS embed.FS
 
-// Svelte v2 dashboard build output. The `all:` prefix is required so
-// Vite-emitted dotfiles (and the chunk-1 .gitkeep) are included; without
-// it Go's embed silently skips anything starting with `_` or `.`.
+// Svelte v2 dashboard build output. The `all:` prefix preserves the
+// committed `dist/.gitkeep` (Go's default embed semantics skip files
+// starting with `.` or `_`).
 //
-// The directory always contains at minimum a stub index.html committed
-// to git (see internal/web/ui/dashboard/.gitignore) so this embed never
-// fails on a fresh checkout. `make build` overwrites the stub with real
+// dist/ always contains at minimum a stub index.html committed to git
+// (see internal/web/ui/dashboard/.gitignore) so this embed never fails
+// on a fresh checkout. `make build` overwrites the stub with real
 // hashed assets before `go build` runs.
 //
 //go:embed all:ui/dashboard/dist
@@ -316,8 +316,12 @@ func serveDashboard(content fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		rel := strings.TrimPrefix(req.URL.Path, "/dashboard")
 		rel = strings.TrimPrefix(rel, "/")
-		// Bare /dashboard or /dashboard/ → serve index.html.
-		if rel == "" {
+		// Any path that resolves to index.html — bare /dashboard, the
+		// trailing-slash form, the SPA fallback, AND the explicit
+		// /dashboard/index.html — must bypass http.FileServer. ServeFile
+		// auto-redirects URLs ending in `index.html` to the parent dir,
+		// which our path-rewrite would re-trigger forever.
+		if rel == "" || rel == "index.html" {
 			serveIndex(w, req)
 			return
 		}

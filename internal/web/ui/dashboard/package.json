@@ -5,6 +5,9 @@
   "description": "OpenPraxis dashboard v2 — Svelte rewrite. Embedded into the Go binary via go:embed.",
   "license": "Apache-2.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

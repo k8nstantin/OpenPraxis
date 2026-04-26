@@ -2,7 +2,12 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/assets/openpraxis-icon.png" />
+    <!-- Favicon shipped from this dashboard's own public/ — Vite copies
+         it to dist/openpraxis-icon.png and the Go embed serves it at
+         /dashboard/openpraxis-icon.png. We deliberately don't reuse the
+         legacy /assets/ path because that surface gets removed at the
+         vanilla-UI cutover. -->
+    <link rel="icon" type="image/png" href="./openpraxis-icon.png" />
     <meta name="viewport" content="width=device-width,initial-scale=1.0" />
     <title>OpenPraxis Dashboard v2</title>
   </head>

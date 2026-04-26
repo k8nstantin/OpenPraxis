@@ -42,6 +42,10 @@ jobs:
         working-directory: internal/web/ui/dashboard
         run: npm ci
 
+      - name: svelte-check (strict TS gate)
+        working-directory: internal/web/ui/dashboard
+        run: npm run check
+
       - name: npm test (dashboard vitest)
         working-directory: internal/web/ui/dashboard
         run: npm test

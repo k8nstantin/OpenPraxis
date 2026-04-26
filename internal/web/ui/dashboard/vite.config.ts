@@ -30,9 +30,6 @@ export default defineConfig(({ mode }) => ({
     assetsDir: 'assets',
     emptyOutDir: true,
     sourcemap: mode === 'development',
-    // Modest chunk size warning bumps because lazy-loaded cytoscape
-    // + dagre will dominate one chunk and we don't want false alarms.
-    chunkSizeWarningLimit: 600,
   },
   // Vitest config lives here too so we don't need a separate file.
   // jsdom would let us mount components in tests; for T1 we only need
