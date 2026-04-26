@@ -295,37 +295,51 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 //	/dashboard/<spa-route> → index.html (SPA fallback so client-side
 //	                        routing works on hard refresh)
 //
-// The fallback step is what makes this handler different from a plain
-// FileServer: any path that doesn't resolve to a real embedded file
-// gets index.html instead of a 404, so the Svelte router owns
-// everything under /dashboard/.
+// We deliberately avoid http.FileServer for the index.html path because
+// http.ServeFile auto-redirects any URL ending in `index.html` to its
+// parent directory, and our path-rewrite trick (`req.URL.Path = /index.html`)
+// would re-trigger that redirect in a loop. Reading + writing the file
+// directly is the simplest fix and matches what we want for SPA
+// fallback semantics anyway (no 30x dance, just serve the bytes).
 func serveDashboard(content fs.FS) http.HandlerFunc {
-	fileServer := http.FileServer(http.FS(content))
+	assetServer := http.FileServer(http.FS(content))
+	serveIndex := func(w http.ResponseWriter, _ *http.Request) {
+		data, err := fs.ReadFile(content, "index.html")
+		if err != nil {
+			http.Error(w, "dashboard not built — run `make build`", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Write(data)
+	}
 	return func(w http.ResponseWriter, req *http.Request) {
 		rel := strings.TrimPrefix(req.URL.Path, "/dashboard")
 		rel = strings.TrimPrefix(rel, "/")
+		// Bare /dashboard or /dashboard/ → serve index.html.
 		if rel == "" {
-			rel = "index.html"
+			serveIndex(w, req)
+			return
 		}
 		// SPA fallback: paths Vite didn't emit (e.g. /dashboard/products/abc)
 		// serve index.html so the Svelte router can take over. fs.Stat is
 		// cheap on an embed.FS — it's a map lookup, not real I/O.
 		if _, err := fs.Stat(content, rel); err != nil {
-			rel = "index.html"
+			serveIndex(w, req)
+			return
 		}
-		// Cache headers: hashed assets are content-addressed and safe to
-		// cache forever; index.html (and SPA fallbacks) must revalidate
-		// every load so a redeploy takes effect immediately.
+		// Real file (hashed asset or other dist artifact). Long-cache the
+		// content-addressed assets/ tree; everything else (favicons,
+		// .well-known, etc.) gets the conservative no-cache header.
 		if strings.HasPrefix(rel, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}
-		// Rewrite the request path so http.FileServer resolves against the
-		// embedded fs root. Mutating req.URL.Path is safe here — this is
-		// the terminal handler in the chain.
+		// Rewrite path against the embedded fs root and hand off to
+		// FileServer for content-type detection + range support.
 		req.URL.Path = "/" + rel
-		fileServer.ServeHTTP(w, req)
+		assetServer.ServeHTTP(w, req)
 	}
 }
 
