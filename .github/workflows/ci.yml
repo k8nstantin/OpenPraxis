@@ -28,6 +28,32 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Node toolchain for the React v2 dashboard. The Go binary embeds
+      # internal/web/ui/dashboard/dist via go:embed, so the frontend MUST
+      # build before `go build` — otherwise CI ships the committed stub
+      # index.html instead of real React assets.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/ui/dashboard/package-lock.json
+
+      - name: npm ci (dashboard)
+        working-directory: internal/web/ui/dashboard
+        run: npm ci
+
+      - name: tsc --noEmit (strict TS gate)
+        working-directory: internal/web/ui/dashboard
+        run: npm run check
+
+      - name: npm test (dashboard vitest)
+        working-directory: internal/web/ui/dashboard
+        run: npm test
+
+      - name: npm run build (dashboard)
+        working-directory: internal/web/ui/dashboard
+        run: npm run build
+
       - name: go build
         env:
           CGO_ENABLED: '1'

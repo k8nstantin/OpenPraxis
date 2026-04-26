@@ -96,6 +96,12 @@ func Catalog() []KnobDef {
 			"mcp__openpraxis__settings_catalog",
 			"mcp__openpraxis__comment_add",
 		}, Description: "Tool allowlist for agent. Includes MCP tools the runner prompts reference; removing any breaks the corresponding closing step."},
+		// Frontend dashboard v2 cutover flags. Resolve at system scope; the
+		// existing inheritance chain still applies if an operator wants to
+		// override per-product (e.g. a QA product running on the new UI
+		// before the rest of the org cuts over).
+		{Key: "frontend_dashboard_v2", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, the legacy /products nav link redirects to /dashboard/products (React v2). Defaults false until parity is verified across all migrated tabs."},
+		{Key: "frontend_dev_mode", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, dashboard v2 is allowed to talk to a Vite HMR proxy. Do NOT enable in production — prod always serves the embedded build."},
 	}
 }
 
