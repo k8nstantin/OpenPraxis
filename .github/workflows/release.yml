@@ -55,22 +55,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Frontend toolchain. Release builds embed the Svelte dashboard
-      # via go:embed, so npm run build MUST precede `go build` on every
-      # matrix arch — otherwise the released binary ships the chunk-1
-      # stub instead of the real dashboard.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: internal/web/ui/dashboard/package-lock.json
-
-      - name: Build dashboard (npm ci + run build)
-        working-directory: internal/web/ui/dashboard
-        run: |
-          npm ci
-          npm run build
-
       - name: Install cross-compile toolchain (linux/arm64)
         if: matrix.apt_deps != ''
         run: |

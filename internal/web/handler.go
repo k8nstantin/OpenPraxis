@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
@@ -21,18 +20,6 @@ import (
 
 //go:embed ui
 var uiFS embed.FS
-
-// Svelte v2 dashboard build output. The `all:` prefix preserves the
-// committed `dist/.gitkeep` (Go's default embed semantics skip files
-// starting with `.` or `_`).
-//
-// dist/ always contains at minimum a stub index.html committed to git
-// (see internal/web/ui/dashboard/.gitignore) so this embed never fails
-// on a fresh checkout. `make build` overwrites the stub with real
-// hashed assets before `go build` runs.
-//
-//go:embed all:ui/dashboard/dist
-var dashboardFS embed.FS
 
 // Handler creates the main HTTP handler with all routes.
 func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.Registry, chatRouter *chat.Router, chatCtx *chat.ContextBuilder, chatTools *chat.ChatTools) http.Handler {
@@ -80,20 +67,6 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	r.Path("/tree.js").HandlerFunc(serveJS)
 	r.Path("/lifecycle.js").HandlerFunc(serveJS)
 	r.Path("/task-status.js").HandlerFunc(serveJS)
-
-	// Svelte v2 dashboard — embedded Vite build at /dashboard/. Hashed
-	// assets land at /dashboard/assets/*; everything else under
-	// /dashboard/ falls back to index.html so the Svelte client-side
-	// router can take over (SPA pattern). Old vanilla UI at / stays
-	// live in parallel until the cutover flag flips per the M1 plan.
-	dashboardContent, derr := fs.Sub(dashboardFS, "ui/dashboard/dist")
-	if derr != nil {
-		// Embed directive is statically validated, so this should be
-		// unreachable. Panic at startup is fine — fs.Sub failure here
-		// means the Go binary itself is malformed.
-		panic(fmt.Sprintf("dashboard embed sub: %v", derr))
-	}
-	r.PathPrefix("/dashboard").HandlerFunc(serveDashboard(dashboardContent))
 
 	// WebSocket
 	r.HandleFunc("/ws", hub.HandleWS)
@@ -284,67 +257,6 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	})
 
 	return r
-}
-
-// serveDashboard serves the Svelte v2 dashboard from the embedded Vite
-// build. URL layout:
-//
-//	/dashboard            → index.html (no-cache)
-//	/dashboard/           → index.html (no-cache)
-//	/dashboard/assets/*   → hashed JS/CSS (immutable cache)
-//	/dashboard/<spa-route> → index.html (SPA fallback so client-side
-//	                        routing works on hard refresh)
-//
-// We deliberately avoid http.FileServer for the index.html path because
-// http.ServeFile auto-redirects any URL ending in `index.html` to its
-// parent directory, and our path-rewrite trick (`req.URL.Path = /index.html`)
-// would re-trigger that redirect in a loop. Reading + writing the file
-// directly is the simplest fix and matches what we want for SPA
-// fallback semantics anyway (no 30x dance, just serve the bytes).
-func serveDashboard(content fs.FS) http.HandlerFunc {
-	assetServer := http.FileServer(http.FS(content))
-	serveIndex := func(w http.ResponseWriter, _ *http.Request) {
-		data, err := fs.ReadFile(content, "index.html")
-		if err != nil {
-			http.Error(w, "dashboard not built — run `make build`", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Write(data)
-	}
-	return func(w http.ResponseWriter, req *http.Request) {
-		rel := strings.TrimPrefix(req.URL.Path, "/dashboard")
-		rel = strings.TrimPrefix(rel, "/")
-		// Any path that resolves to index.html — bare /dashboard, the
-		// trailing-slash form, the SPA fallback, AND the explicit
-		// /dashboard/index.html — must bypass http.FileServer. ServeFile
-		// auto-redirects URLs ending in `index.html` to the parent dir,
-		// which our path-rewrite would re-trigger forever.
-		if rel == "" || rel == "index.html" {
-			serveIndex(w, req)
-			return
-		}
-		// SPA fallback: paths Vite didn't emit (e.g. /dashboard/products/abc)
-		// serve index.html so the Svelte router can take over. fs.Stat is
-		// cheap on an embed.FS — it's a map lookup, not real I/O.
-		if _, err := fs.Stat(content, rel); err != nil {
-			serveIndex(w, req)
-			return
-		}
-		// Real file (hashed asset or other dist artifact). Long-cache the
-		// content-addressed assets/ tree; everything else (favicons,
-		// .well-known, etc.) gets the conservative no-cache header.
-		if strings.HasPrefix(rel, "assets/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else {
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		}
-		// Rewrite path against the embedded fs root and hand off to
-		// FileServer for content-type detection + range support.
-		req.URL.Path = "/" + rel
-		assetServer.ServeHTTP(w, req)
-	}
 }
 
 func apiStatus(n *node.Node, mcpServer *mcp.Server, peerRegistry *peer.Registry) http.HandlerFunc {
