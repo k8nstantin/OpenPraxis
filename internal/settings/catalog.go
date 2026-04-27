@@ -102,6 +102,20 @@ func Catalog() []KnobDef {
 		// before the rest of the org cuts over).
 		{Key: "frontend_dashboard_v2", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, the legacy /products nav link redirects to /dashboard/products (React v2). Defaults false until parity is verified across all migrated tabs."},
 		{Key: "frontend_dev_mode", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, dashboard v2 is allowed to talk to a Vite HMR proxy. Do NOT enable in production — prod always serves the embedded build."},
+		// Per-tab cutover knobs — flipped on as each tab's React 2 manifest
+		// reaches parity. Resolves at system scope; the inheritance chain
+		// allows a per-product override (QA product on the new UI before the
+		// rest of the org cuts over). The dashboard's lazy route registry
+		// reads these at boot via /api/settings/resolve and decides whether
+		// to redirect the legacy URL to /dashboard/<tab>.
+		{Key: "frontend_dashboard_v2_products", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /products redirects to /dashboard/products."},
+		{Key: "frontend_dashboard_v2_manifests", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /manifests redirects to /dashboard/manifests."},
+		{Key: "frontend_dashboard_v2_tasks", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /tasks redirects to /dashboard/tasks."},
+		{Key: "frontend_dashboard_v2_memories", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /memories redirects to /dashboard/memories."},
+		{Key: "frontend_dashboard_v2_conversations", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /conversations redirects to /dashboard/conversations."},
+		{Key: "frontend_dashboard_v2_settings", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /settings redirects to /dashboard/settings."},
+		{Key: "frontend_dashboard_v2_compliance", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /compliance redirects to /dashboard/compliance."},
+		{Key: "frontend_dashboard_v2_overview", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /overview redirects to /dashboard/overview."},
 	}
 }
 

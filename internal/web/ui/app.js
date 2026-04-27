@@ -95,8 +95,44 @@
     });
   }
 
+  // --- React 2 cutover redirect -----------------------------------------
+  // Per-tab feature flags `frontend_dashboard_v2_<tab>` (settings catalog)
+  // tell the legacy app which views have been migrated to the React 2
+  // dashboard. When flagged on, a click on `#view-<tab>` (or a deep-link
+  // load) is replaced with a hard navigation to `/dashboard/<tab>`. The
+  // resolved settings come from /api/settings/resolve?scope=system, which
+  // is cheap and cached on the server.
+  var v2Flags = null;
+  function loadV2Flags() {
+    if (v2Flags) return Promise.resolve(v2Flags);
+    return OL.fetchJSON('/api/settings/resolve?scope=system')
+      .then(function(rows) {
+        v2Flags = {};
+        (rows || []).forEach(function(r) {
+          if (r && r.key && /^frontend_dashboard_v2(_|$)/.test(r.key)) {
+            v2Flags[r.key] = String(r.value) === 'true';
+          }
+        });
+        return v2Flags;
+      })
+      .catch(function() { v2Flags = {}; return v2Flags; });
+  }
+  function v2RedirectFor(view) {
+    var flags = v2Flags || {};
+    return flags['frontend_dashboard_v2_' + view] === true ? '/dashboard/' + view : null;
+  }
+  // Exposed for tests and the React app's own boot path.
+  OL.tabIsOnReactV2 = function(view) { return Boolean(v2RedirectFor(view)); };
+
   // --- Init ---
   document.addEventListener('DOMContentLoaded', function() {
+    // Resolve cutover flags BEFORE wiring nav so the very first click on
+    // a migrated tab redirects instead of rendering the legacy view.
+    loadV2Flags().then(function() {
+      var initialView = (parseHash(window.location.hash) || {}).view;
+      var dest = initialView ? v2RedirectFor(initialView) : null;
+      if (dest) { window.location.replace(dest); return; }
+    });
     setupNav();
     setupSearch();
     setupTheme();
@@ -152,6 +188,13 @@
   }
 
   function switchView(view) {
+    // React 2 cutover: when the per-tab flag is on, hand the rest of the
+    // navigation to the React app rather than rendering the legacy view.
+    var dest = v2RedirectFor(view);
+    if (dest) {
+      window.location.assign(dest);
+      return;
+    }
     var prev = currentView;
     currentView = view;
     OL._switchLifecycle(prev, view);

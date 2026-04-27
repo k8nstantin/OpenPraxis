@@ -1,6 +1,6 @@
-// JSON shapes mirrored from the Go API. Kept narrow to what the
-// Products tab actually reads — fields the legacy UI ignores are
-// omitted here too. Add fields as new tabs migrate.
+// JSON shapes mirrored from the Go API. Kept narrow to what the migrated
+// tabs actually read — fields the legacy UI ignores are omitted here too.
+// Tab manifests should add fields as they migrate.
 
 export interface PeerProductGroup {
   peer_id: string;
@@ -32,6 +32,7 @@ export interface Manifest {
   title: string;
   status: string;
   description?: string;
+  description_html?: string;
   project_id?: string;
   total_tasks?: number;
   total_turns?: number;
@@ -47,7 +48,10 @@ export interface Task {
   marker: string;
   title: string;
   status: string;
+  description?: string;
+  description_html?: string;
   depends_on?: string;
+  manifest_id?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -59,4 +63,35 @@ export interface ProductHierarchy {
   meta?: Record<string, unknown>;
   children?: Manifest[];
   sub_products?: ProductHierarchy[];
+}
+
+export interface Comment {
+  id: string;
+  body?: string;
+  body_html?: string;
+  author?: string;
+  created_at?: string;
+  deleted_at?: string;
+  parent_kind?: 'product' | 'manifest' | 'task';
+  parent_id?: string;
+}
+
+/** Settings catalog entry mirrored from Go's settings.KnobDef. */
+export interface KnobDef {
+  key: string;
+  type: 'int' | 'float' | 'string' | 'enum' | 'multiselect';
+  slider_min?: number;
+  slider_max?: number;
+  slider_step?: number;
+  enum_values?: string[];
+  default: unknown;
+  description: string;
+  unit?: string;
+}
+
+/** Per-scope resolved knob from /api/settings/resolve. */
+export interface ResolvedKnob {
+  key: string;
+  value: unknown;
+  source: 'task' | 'manifest' | 'product' | 'system';
 }
