@@ -104,7 +104,8 @@
       // case rendered as plain text and looked like a broken layout next
       // to populated rows on the same card.
       var v0 = values[0];
-      var single = opts.formatLatest ? opts.formatLatest(v0.y) : String(v0.y);
+      var single = opts.displayValue != null ? opts.displayValue
+        : (opts.formatLatest ? opts.formatLatest(v0.y) : String(v0.y));
       var midY = height / 2;
       var x1 = padX;
       var x2 = width - padX;
@@ -132,7 +133,8 @@
       return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.5" fill="' + color + '" data-run="' + p.raw.run + '"><title>run #' + p.raw.run + ': ' + p.raw.tooltip + '</title></circle>';
     }).join('');
     var latest = values[values.length - 1];
-    var latestStr = opts.formatLatest ? opts.formatLatest(latest.y) : String(latest.y);
+    var latestStr = opts.displayValue != null ? opts.displayValue
+      : (opts.formatLatest ? opts.formatLatest(latest.y) : String(latest.y));
     return '<div class="run-stats-spark-row">' +
       '<span class="run-stats-spark-label">' + esc(label) + '</span>' +
       '<svg class="run-stats-spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" width="' + width + '" height="' + height + '">' +
@@ -205,9 +207,17 @@
       var costPts = [], turnPts = [], actionPts = [], cpuPts = [], rssPts = [];
       var priorCost = 0, priorTurns = 0, priorActions = 0;
 
+      // Per-tick DELTAS (rate of change) — visually matches CPU/RSS
+      // (oscillating), not monotonic-cumulative which renders as a
+      // smooth slope. Right-side numbers are CUMULATIVE totals across
+      // all runs, displayed via displayValue override on the sparkline
+      // so the chart shape doesn't dictate the headline figure.
+      // cpu/rss stay absolute (physical metrics).
       sortedRuns.forEach(function (r, ri) {
         var samples = sortedSamples[ri] || [];
         if (samples.length === 0) {
+          // Legacy run with no host_samples — synthesize endpoint with
+          // final counters so the line still has a delta to render.
           samples = [{
             ts: r.completed_at || r.started_at || '',
             cost_usd: r.cost_usd || 0,
@@ -217,18 +227,22 @@
             rss_mb: 0,
           }];
         }
+        var prevCost = 0, prevTurns = 0, prevActions = 0;
         samples.forEach(function (sm) {
           var rn = r.run_number;
           var t = (sm.ts || '').slice(11, 19);
-          var cumC = priorCost + (sm.cost_usd || 0);
-          var cumT = priorTurns + (sm.turns || 0);
-          var cumA = priorActions + (sm.actions || 0);
-          costPts.push({ run: rn, y: cumC,
-            tooltip: 'cum ' + fmtCost(cumC) + ' (run #' + rn + ' at ' + t + ')' });
-          turnPts.push({ run: rn, y: cumT,
-            tooltip: 'cum ' + cumT + ' turns (run #' + rn + ' at ' + t + ')' });
-          actionPts.push({ run: rn, y: cumA,
-            tooltip: 'cum ' + cumA + ' actions (run #' + rn + ' at ' + t + ')' });
+          var dC = Math.max(0, (sm.cost_usd || 0) - prevCost);
+          var dT = Math.max(0, (sm.turns || 0) - prevTurns);
+          var dA = Math.max(0, (sm.actions || 0) - prevActions);
+          prevCost = sm.cost_usd || 0;
+          prevTurns = sm.turns || 0;
+          prevActions = sm.actions || 0;
+          costPts.push({ run: rn, y: dC,
+            tooltip: '+' + fmtCost(dC) + ' tick (run #' + rn + ' at ' + t + ')' });
+          turnPts.push({ run: rn, y: dT,
+            tooltip: '+' + dT + ' turns (run #' + rn + ' at ' + t + ')' });
+          actionPts.push({ run: rn, y: dA,
+            tooltip: '+' + dA + ' actions (run #' + rn + ' at ' + t + ')' });
           cpuPts.push({ run: rn, y: sm.cpu_pct || 0,
             tooltip: (sm.cpu_pct || 0).toFixed(1) + '% (run #' + rn + ' at ' + t + ')' });
           rssPts.push({ run: rn, y: sm.rss_mb || 0,
@@ -239,15 +253,17 @@
         priorActions += r.actions || 0;
       });
 
-      // Subsample to keep the chart readable across long histories. ~80
-      // points fits the ~200px sparkline width without overlap. subsample
-      // preserves first + last so endpoints stay accurate.
+      // Subsample to 20 points per series — matches the original visual
+      // density before the periodic-cumulative refactor. subsample
+      // preserves first + last so the run-end synthetic points always
+      // make it into the rendered chart, keeping the right-side number
+      // = footer cumulative.
       var cumCost = priorCost, cumTurns = priorTurns, cumActions = priorActions;
-      costPts = subsample(costPts, 80);
-      turnPts = subsample(turnPts, 80);
-      actionPts = subsample(actionPts, 80);
-      cpuPts = subsample(cpuPts, 80);
-      rssPts = subsample(rssPts, 80);
+      costPts = subsample(costPts, 20);
+      turnPts = subsample(turnPts, 20);
+      actionPts = subsample(actionPts, 20);
+      cpuPts = subsample(cpuPts, 20);
+      rssPts = subsample(rssPts, 20);
 
       var when = latest.completed_at ? timeAgo(latest.completed_at) : 'in progress';
       var dur = fmtDuration(latest.started_at, latest.completed_at);
@@ -277,9 +293,9 @@
           '<div class="run-stats-detail-row">' +
             renderCacheRing(latest) +
             '<div class="run-stats-sparks">' +
-              renderSparkline('cost', costPts, { color: 'var(--green)', formatLatest: fmtCost }) +
-              renderSparkline('turns', turnPts, { color: 'var(--accent)' }) +
-              renderSparkline('actions', actionPts, { color: 'var(--yellow)' }) +
+              renderSparkline('cost', costPts, { color: 'var(--green)', displayValue: fmtCost(cumCost) }) +
+              renderSparkline('turns', turnPts, { color: 'var(--accent)', displayValue: String(cumTurns) }) +
+              renderSparkline('actions', actionPts, { color: 'var(--yellow)', displayValue: String(cumActions) }) +
               // Host metrics stay within-run (last completed run's samples)
               // — physical metrics like CPU% have no cumulative interpretation.
               // Orange CPU%, purple RSS MB. Empty arrays render as a muted
