@@ -41,6 +41,35 @@ export interface Manifest {
   depends_on?: string;
   meta?: Record<string, unknown>;
   children?: Task[];
+  tags?: string[];
+}
+
+export interface Idea {
+  id: string;
+  marker: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority?: string;
+  project_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductDep {
+  id: string;
+  marker: string;
+  title: string;
+  status: string;
+}
+
+export interface ProductDependencies {
+  deps: ProductDep[] | null;
+  dependents: ProductDep[] | null;
+}
+
+export interface CommentEnvelope {
+  comments: Comment[] | null;
 }
 
 export interface Task {
@@ -70,10 +99,12 @@ export interface Comment {
   body?: string;
   body_html?: string;
   author?: string;
+  type?: string;
   created_at?: string;
+  updated_at?: string;
   deleted_at?: string;
-  parent_kind?: 'product' | 'manifest' | 'task';
-  parent_id?: string;
+  target_type?: 'product' | 'manifest' | 'task';
+  target_id?: string;
 }
 
 /** Settings catalog entry mirrored from Go's settings.KnobDef. */

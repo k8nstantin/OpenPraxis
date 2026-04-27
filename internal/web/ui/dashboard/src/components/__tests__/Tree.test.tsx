@@ -74,4 +74,21 @@ describe('TreeRow', () => {
     fireEvent.click(screen.getByText('A'));
     expect(screen.getAllByTestId('tree-row')).toHaveLength(4);
   });
+
+  // #244 — chevron click expands without triggering onSelect. The
+  // expand-on-row-click and select-on-row-click overlap; if a future
+  // refactor removes the chevron's stopPropagation, the chevron would
+  // double-toggle AND fire onSelect.
+  it('chevron click expands without firing onSelect', () => {
+    const onSelect = vi.fn();
+    renderTree({ onSelect });
+    const chevron = screen.getByLabelText('expand');
+    fireEvent.click(chevron);
+    expect(screen.getByText('A')).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+    const collapse = screen.getByLabelText('collapse');
+    fireEvent.click(collapse);
+    expect(screen.queryByText('A')).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
