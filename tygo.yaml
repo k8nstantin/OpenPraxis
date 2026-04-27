@@ -1,0 +1,22 @@
+packages:
+  - path: "github.com/k8nstantin/OpenPraxis/internal/product"
+    output_path: "internal/web/ui/dashboard/src/lib/types.gen.product.ts"
+    type_mappings:
+      uuid.UUID: "string"
+      time.Time: "string"
+    frontmatter: |
+      // GENERATED FILE — DO NOT EDIT. Run `make types` to regenerate from Go.
+  - path: "github.com/k8nstantin/OpenPraxis/internal/manifest"
+    output_path: "internal/web/ui/dashboard/src/lib/types.gen.manifest.ts"
+    type_mappings:
+      uuid.UUID: "string"
+      time.Time: "string"
+    frontmatter: |
+      // GENERATED FILE — DO NOT EDIT. Run `make types` to regenerate from Go.
+  - path: "github.com/k8nstantin/OpenPraxis/internal/task"
+    output_path: "internal/web/ui/dashboard/src/lib/types.gen.task.ts"
+    type_mappings:
+      uuid.UUID: "string"
+      time.Time: "string"
+    frontmatter: |
+      // GENERATED FILE — DO NOT EDIT. Run `make types` to regenerate from Go.

@@ -1,4 +1,4 @@
-.PHONY: build frontend dev-frontend clean run test test-ui help build-all
+.PHONY: build frontend dev-frontend clean run test test-ui help build-all types types-check storybook build-storybook
 
 VERSION ?= 0.4.1
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -32,6 +32,30 @@ frontend: $(DASHBOARD_NM)
 # separate terminal — the dev server proxies /api/* to the Go server.
 dev-frontend: $(DASHBOARD_NM)
 	cd $(DASHBOARD_DIR) && npm run dev
+
+# Regenerate TypeScript types from Go structs via tygo. Output lives in
+# internal/web/ui/dashboard/src/lib/types.gen.*.ts and is committed —
+# `types-check` re-runs the generator and fails CI if anything drifted.
+types:
+	@echo "  tygo generate…"
+	go run github.com/gzuidhof/tygo@v0.2.16 generate
+
+types-check:
+	@echo "  tygo drift check…"
+	@go run github.com/gzuidhof/tygo@v0.2.16 generate
+	@if [ -n "$$(git status --porcelain $(DASHBOARD_DIR)/src/lib/types.gen.*.ts)" ]; then \
+		echo "ERROR: generated TS types drifted from Go. Run 'make types' and commit the diff."; \
+		git --no-pager diff $(DASHBOARD_DIR)/src/lib/types.gen.*.ts; \
+		exit 1; \
+	fi
+
+# Storybook — dev-only component playground. Not embedded in the
+# binary; storybook-static/ is gitignored.
+storybook: $(DASHBOARD_NM)
+	cd $(DASHBOARD_DIR) && npm run storybook
+
+build-storybook: $(DASHBOARD_NM)
+	cd $(DASHBOARD_DIR) && npm run build-storybook
 
 build: frontend
 	go mod tidy

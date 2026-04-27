@@ -102,6 +102,18 @@ func Catalog() []KnobDef {
 		// before the rest of the org cuts over).
 		{Key: "frontend_dashboard_v2", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, the legacy /products nav link redirects to /dashboard/products (React v2). Defaults false until parity is verified across all migrated tabs."},
 		{Key: "frontend_dev_mode", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, dashboard v2 is allowed to talk to a Vite HMR proxy. Do NOT enable in production — prod always serves the embedded build."},
+		// Per-tab cutover flags. When `true`, the legacy nav for that tab
+		// redirects to /dashboard/<tab>; when `false`, the legacy view
+		// stays. Tabs migrate one at a time, so each gets its own switch
+		// rather than one global flip. Operators can also override per-
+		// product (e.g. a QA product on the new UI) via the resolution
+		// chain.
+		{Key: "frontend_dashboard_v2_products", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /products redirects to /dashboard/products (React v2)."},
+		{Key: "frontend_dashboard_v2_manifests", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /manifests redirects to /dashboard/manifests (React v2)."},
+		{Key: "frontend_dashboard_v2_tasks", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /tasks redirects to /dashboard/tasks (React v2)."},
+		{Key: "frontend_dashboard_v2_ideas", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /ideas redirects to /dashboard/ideas (React v2)."},
+		{Key: "frontend_dashboard_v2_memories", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /memories redirects to /dashboard/memories (React v2)."},
+		{Key: "frontend_dashboard_v2_sessions", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "When true, legacy /sessions redirects to /dashboard/sessions (React v2)."},
 	}
 }
 

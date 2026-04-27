@@ -13,3 +13,6 @@ dist/*
 !dist/.gitkeep
 *.log
 .DS_Store
+
+# Storybook build output. Storybook is dev-only — never embedded.
+storybook-static/

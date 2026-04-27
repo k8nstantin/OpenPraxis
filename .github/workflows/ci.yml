@@ -42,6 +42,11 @@ jobs:
         working-directory: internal/web/ui/dashboard
         run: npm ci
 
+      - name: types — drift check (Go → TS via tygo)
+        env:
+          CGO_ENABLED: '1'
+        run: make types-check
+
       - name: tsc --noEmit (strict TS gate)
         working-directory: internal/web/ui/dashboard
         run: npm run check

@@ -12,9 +12,11 @@ func TestCatalog_HasExpectedKnobCount(t *testing.T) {
 	// PostToolUse embedding spam incident + 4 RC/M5 operator knobs
 	// (scheduler_tick_seconds, on_restart_behavior, branch_prefix,
 	// worktree_base_dir) + 2 React/Products M1 cutover flags
-	// (frontend_dashboard_v2, frontend_dev_mode). Every knob inherits
-	// via the existing task → manifest → product → system resolver.
-	const want = 21
+	// (frontend_dashboard_v2, frontend_dev_mode) + 6 per-tab cutover
+	// flags added in React 2 / Foundation M1 (products, manifests,
+	// tasks, ideas, memories, sessions). Every knob inherits via the
+	// existing task → manifest → product → system resolver.
+	const want = 27
 	got := len(Catalog())
 	if got != want {
 		t.Fatalf("Catalog() returned %d knobs, want %d", got, want)
