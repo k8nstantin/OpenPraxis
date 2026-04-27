@@ -61,8 +61,10 @@ async function expectNoViolationsBody(node: ReactElement) {
 
 // Helper that throws on first render — exercises the ErrorBoundary
 // fallback path so axe scans the role="alert" surface, not happy-path
-// children.
-function ThrowOnce({ msg = 'boom' }: { msg?: string }) {
+// children. `: never` is honest (function never returns); also
+// satisfies TS 5+'s rule that JSX components must return ReactNode,
+// not void.
+function ThrowOnce({ msg = 'boom' }: { msg?: string }): never {
   throw new Error(msg);
 }
 

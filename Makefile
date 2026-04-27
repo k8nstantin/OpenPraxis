@@ -80,8 +80,15 @@ build-all: clean frontend
 # diff --exit-code` so an out-of-date generated file fails the pipeline.
 types:
 	@command -v tygo >/dev/null 2>&1 || { echo "tygo not installed — run: go install github.com/gzuidhof/tygo@latest"; exit 1; }
-	tygo generate
+	tygo generate --config tools/tygo/config.yaml
 	@echo "  types generated → $(DASHBOARD_DIR)/src/lib/api/generated.ts"
+
+# CI gate: regenerate types and fail if the working tree drifts. Catches
+# Go struct changes that weren't paired with a `make types` commit.
+types-check: types
+	@git diff --exit-code -- $(DASHBOARD_DIR)/src/lib/api/generated.ts \
+		|| { echo "ERROR: generated.ts is stale — run 'make types' and commit"; exit 1; }
+	@echo "  types-check ok"
 
 # Storybook dev server. Dev-only — Storybook is NOT bundled into the Go
 # binary; this is the operator-facing review surface for primitives +

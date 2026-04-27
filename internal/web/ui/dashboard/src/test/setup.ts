@@ -19,10 +19,8 @@ class IntersectionObserverStub {
   thresholds: number[] = [];
 }
 if (typeof globalThis.ResizeObserver === 'undefined') {
-  // @ts-expect-error — installing a minimal stub on globalThis.
   globalThis.ResizeObserver = ResizeObserverStub;
 }
 if (typeof globalThis.IntersectionObserver === 'undefined') {
-  // @ts-expect-error — installing a minimal stub on globalThis.
   globalThis.IntersectionObserver = IntersectionObserverStub;
 }
