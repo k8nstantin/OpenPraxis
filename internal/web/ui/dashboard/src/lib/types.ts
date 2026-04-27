@@ -43,6 +43,30 @@ export interface Manifest {
   children?: Task[];
 }
 
+export interface Idea {
+  id: string;
+  marker: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority: string;
+  project_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProductDepEntry {
+  id: string;
+  marker: string;
+  title: string;
+  status: string;
+}
+
+export interface ProductDependencies {
+  deps: ProductDepEntry[];
+  dependents: ProductDepEntry[];
+}
+
 export interface Task {
   id: string;
   marker: string;
