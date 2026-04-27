@@ -1,0 +1,18 @@
+# tygo config — Go-to-TypeScript type generation.
+#
+# tygo walks each Go package listed under `packages` and emits a single
+# `.ts` file with the matching interfaces. The dashboard's typed API
+# client imports the generated file via `@/lib/api/generated`.
+#
+# Add Go packages here as new tabs migrate. Keep the include_files list
+# narrow — exporting test helpers or internal-only structs into the
+# frontend bundle would make refactoring painful.
+#
+# To regenerate: `make types` (or `go install github.com/gzuidhof/tygo@latest && tygo generate`).
+packages:
+  - path: "github.com/k8nstantin/OpenPraxis/internal/settings"
+    output_path: "internal/web/ui/dashboard/src/lib/api/generated.ts"
+    include_files:
+      - "catalog.go"
+    type_mappings:
+      "interface{}": "unknown"

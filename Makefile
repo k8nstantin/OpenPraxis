@@ -1,4 +1,4 @@
-.PHONY: build frontend dev-frontend clean run test test-ui help build-all
+.PHONY: build frontend dev-frontend clean run test test-ui help build-all types storybook
 
 VERSION ?= 0.4.1
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -73,6 +73,22 @@ build-all: clean frontend
 		codesign --force --sign - openpraxis-darwin-amd64 && echo "  codesigned: openpraxis-darwin-amd64"; \
 	fi
 
+# Generate TypeScript types from Go structs so the dashboard's typed API
+# client and Go's HTTP handlers can never drift. Uses `tygo`; the config
+# at tools/tygo/config.yaml maps internal/* packages to a single emitted
+# .ts file consumed by src/lib/api/index.ts. CI runs this then a `git
+# diff --exit-code` so an out-of-date generated file fails the pipeline.
+types:
+	@command -v tygo >/dev/null 2>&1 || { echo "tygo not installed — run: go install github.com/gzuidhof/tygo@latest"; exit 1; }
+	tygo generate
+	@echo "  types generated → $(DASHBOARD_DIR)/src/lib/api/generated.ts"
+
+# Storybook dev server. Dev-only — Storybook is NOT bundled into the Go
+# binary; this is the operator-facing review surface for primitives +
+# chrome + cross-cutting components.
+storybook: $(DASHBOARD_NM)
+	cd $(DASHBOARD_DIR) && npm run storybook
+
 help:
 	@echo "  build         - Build the binary (chains npm install + npm run build)"
 	@echo "  clean         - Remove built binaries + dashboard hashed assets"
@@ -81,4 +97,6 @@ help:
 	@echo "  test-ui       - Run UI tests only (legacy JS + React vitest)"
 	@echo "  frontend      - Build the React dashboard only"
 	@echo "  dev-frontend  - Run vite HMR dev server (use alongside 'make run')"
+	@echo "  storybook     - Run Storybook dev server (primitives review)"
+	@echo "  types         - Regenerate TS types from Go structs (tygo)"
 	@echo "  build-all     - Cross-compile for darwin/linux"
