@@ -193,49 +193,45 @@
       // either empty samples OR samples with zero cost/turns/actions.
       // For those rows, fall back to per-run trend (cross-run aggregate)
       // so the chart isn't a flat-zero liar.
-      var trend = runs.slice(0, 10).reverse();
+      // Cumulative trend across all runs. Each point = cumulative total at
+      // that run's completion. Right-side number on each sparkline shows
+      // the running total (not the per-run delta). The header counters
+      // (Runs / Turns / Cost) on the parent task panel already show
+      // cumulative; sparkline numbers now match instead of diverging.
+      //
+      // CPU% / RSS MB stay within-run (those are physical metrics — a
+      // cumulative CPU% has no meaning).
+      var trendAll = runs.slice().reverse();   // oldest → newest
+      var cumCost = 0, cumTurns = 0, cumActions = 0;
+      trendAll = trendAll.map(function (r) {
+        cumCost += r.cost_usd || 0;
+        cumTurns += r.turns || 0;
+        cumActions += r.actions || 0;
+        return Object.assign({}, r, {
+          _cumCost: cumCost,
+          _cumTurns: cumTurns,
+          _cumActions: cumActions,
+        });
+      });
+      // Cap visualisation at the most recent 10 cycles so the sparkline
+      // stays readable on long-lived tasks. The cumulative values reflect
+      // totals across ALL runs, not just the visible window.
+      var visTrend = trendAll.slice(-10);
+
       var s20 = subsample(hostSamples, 20);
-      var tLabel = function (s) { return (s && s.ts) ? s.ts.slice(11, 19) : ''; };
-      var hasSampleVal = function (field) {
-        for (var i = 0; i < hostSamples.length; i++) {
-          if ((hostSamples[i][field] || 0) > 0) return true;
-        }
-        return false;
-      };
-      var costPts, turnPts, actionPts;
-      if (hasSampleVal('cost_usd')) {
-        costPts = s20.map(function (s, i) {
-          return { run: i, y: s.cost_usd || 0,
-            tooltip: fmtCost(s.cost_usd) + ' at ' + tLabel(s) };
-        });
-      } else {
-        costPts = trend.map(function (r) {
-          return { run: r.run_number, y: r.cost_usd || 0,
-            tooltip: fmtCost(r.cost_usd) + ', ' + (r.turns || 0) + ' turns, ' + (r.actions || 0) + ' actions' };
-        });
-      }
-      if (hasSampleVal('turns')) {
-        turnPts = s20.map(function (s, i) {
-          return { run: i, y: s.turns || 0,
-            tooltip: (s.turns || 0) + ' turns at ' + tLabel(s) };
-        });
-      } else {
-        turnPts = trend.map(function (r) {
-          return { run: r.run_number, y: r.turns || 0,
-            tooltip: (r.turns || 0) + ' turns, ' + fmtCost(r.cost_usd) };
-        });
-      }
-      if (hasSampleVal('actions')) {
-        actionPts = s20.map(function (s, i) {
-          return { run: i, y: s.actions || 0,
-            tooltip: (s.actions || 0) + ' actions at ' + tLabel(s) };
-        });
-      } else {
-        actionPts = trend.map(function (r) {
-          return { run: r.run_number, y: r.actions || 0,
-            tooltip: (r.actions || 0) + ' actions, ' + (r.turns || 0) + ' turns' };
-        });
-      }
+
+      var costPts = visTrend.map(function (r) {
+        return { run: r.run_number, y: r._cumCost,
+          tooltip: 'cum ' + fmtCost(r._cumCost) + ' (run #' + r.run_number + ' +' + fmtCost(r.cost_usd || 0) + ')' };
+      });
+      var turnPts = visTrend.map(function (r) {
+        return { run: r.run_number, y: r._cumTurns,
+          tooltip: 'cum ' + r._cumTurns + ' turns (run #' + r.run_number + ' +' + (r.turns || 0) + ')' };
+      });
+      var actionPts = visTrend.map(function (r) {
+        return { run: r.run_number, y: r._cumActions,
+          tooltip: 'cum ' + r._cumActions + ' actions (run #' + r.run_number + ' +' + (r.actions || 0) + ')' };
+      });
       // Host CPU/RSS points are a within-run time series (one per ~5s
       // sample). Different X-axis conceptually but rendered by the same
       // sparkline helper so the visual vocabulary is consistent.
@@ -255,14 +251,23 @@
         ? esc(latest.model) + ' · pricing ' + esc(latest.pricing_version || '—')
         : '<span class="run-stats-empty">model not recorded — re-run to populate</span>';
 
+      // Cumulative footer totals across ALL runs. Peaks are MAX (not sum) —
+      // "peak" by definition is the highest sample seen.
+      var totalLines = 0, peakCpu = 0, peakRss = 0;
+      runs.forEach(function (r) {
+        totalLines += r.lines || 0;
+        if ((r.peak_cpu_pct || 0) > peakCpu) peakCpu = r.peak_cpu_pct;
+        if ((r.peak_rss_mb || 0) > peakRss) peakRss = r.peak_rss_mb;
+      });
+
       containerEl.innerHTML =
         '<div class="run-stats-card">' +
           '<div class="run-stats-header">' +
-            '<span class="run-stats-title">Run Stats — Run #' + latest.run_number + '</span>' +
-            '<span class="run-stats-when">' + esc(when) + ' · ' + esc(dur) + '</span>' +
+            '<span class="run-stats-title">Run Stats — ' + runs.length + ' run' + (runs.length === 1 ? '' : 's') + ' (cumulative)</span>' +
+            '<span class="run-stats-when">latest run #' + latest.run_number + ' · ' + esc(when) + ' · ' + esc(dur) + '</span>' +
           '</div>' +
           '<div class="run-stats-tokens-row">' +
-            '<div class="run-stats-tokens-label">Token mix</div>' +
+            '<div class="run-stats-tokens-label">Token mix (run #' + latest.run_number + ')</div>' +
             renderTokenBar(latest) +
           '</div>' +
           '<div class="run-stats-detail-row">' +
@@ -271,19 +276,20 @@
               renderSparkline('cost', costPts, { color: 'var(--green)', formatLatest: fmtCost }) +
               renderSparkline('turns', turnPts, { color: 'var(--accent)' }) +
               renderSparkline('actions', actionPts, { color: 'var(--yellow)' }) +
-              // Host metrics overlay — orange CPU%, purple RSS MB. Empty
-              // arrays render as a muted "no samples" placeholder so the
-              // card layout stays stable during migrations / legacy runs.
+              // Host metrics stay within-run (last completed run's samples)
+              // — physical metrics like CPU% have no cumulative interpretation.
+              // Orange CPU%, purple RSS MB. Empty arrays render as a muted
+              // "no samples" placeholder so the card layout stays stable.
               renderSparkline('cpu%', cpuPts, { color: '#f59e0b', formatLatest: function (v) { return v.toFixed(0) + '%'; } }) +
               renderSparkline('rss mb', rssPts, { color: '#a855f7', formatLatest: function (v) { return Math.round(v) + ''; } }) +
             '</div>' +
           '</div>' +
           '<div class="run-stats-footer">' +
-            '<span>Turns ' + (latest.turns || 0) + '</span>' +
-            '<span>Actions ' + (latest.actions || 0) + '</span>' +
-            '<span>Lines ' + (latest.lines || 0) + '</span>' +
-            (latest.peak_cpu_pct > 0 ? '<span>Peak CPU ' + latest.peak_cpu_pct.toFixed(0) + '%</span>' : '') +
-            (latest.peak_rss_mb > 0 ? '<span>Peak RSS ' + Math.round(latest.peak_rss_mb) + ' MB</span>' : '') +
+            '<span>Turns ' + cumTurns + '</span>' +
+            '<span>Actions ' + cumActions + '</span>' +
+            '<span>Lines ' + totalLines + '</span>' +
+            (peakCpu > 0 ? '<span>Peak CPU ' + peakCpu.toFixed(0) + '%</span>' : '') +
+            (peakRss > 0 ? '<span>Peak RSS ' + Math.round(peakRss) + ' MB</span>' : '') +
             '<span>' + modelLine + '</span>' +
           '</div>' +
         '</div>';
