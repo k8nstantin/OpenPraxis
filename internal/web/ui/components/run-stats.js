@@ -162,88 +162,92 @@
     if (!containerEl || !taskID) return;
     containerEl.innerHTML = '<div class="run-stats-loading">Loading run stats…</div>';
 
-    Promise.all([
-      fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs'),
-      // Host samples for the latest run — fetched after we know the run id.
-      // Two separate calls are cheap (both cache at max-age=5).
-    ]).then(function (r0) {
-      var runs = r0[0] || [];
+    fetchJSON('/api/tasks/' + encodeURIComponent(taskID) + '/runs').then(function (runsRaw) {
+      var runs = runsRaw || [];
       if (runs.length === 0) {
         containerEl.innerHTML = '<div class="run-stats-card run-stats-empty-state">No runs yet. Stats will appear after the first run completes.</div>';
         return;
       }
-      // ListRuns returns newest-first per repository.go.
-      var latest = runs[0];
-      return fetchJSON('/api/task_runs/' + latest.id + '/host_samples').then(function (hostSamples) {
-        return { runs: runs, latest: latest, hostSamples: hostSamples || [] };
+      // Fetch host_samples for ALL runs in parallel so the sparklines can
+      // walk every periodic tick chronologically across the task's history,
+      // not just the latest run. Each call is cached server-side at max-age=5.
+      // listRuns returns newest-first per repository.go.
+      return Promise.all(runs.map(function (r) {
+        return fetchJSON('/api/task_runs/' + r.id + '/host_samples')
+          .catch(function () { return []; });
+      })).then(function (samplesPerRun) {
+        return { runs: runs, latest: runs[0], samplesPerRun: samplesPerRun };
       });
     }).then(function (ctx) {
       if (!ctx) return;
       var runs = ctx.runs;
       var latest = ctx.latest;
-      var hostSamples = ctx.hostSamples;
-      // All 5 sparklines share the same X-axis (time-into-run) when the
-      // current run has within-run samples. Each 5-second host-sampler
-      // tick snapshots host CPU/RSS AND live task counters (cost/turns/
-      // actions) simultaneously, so lines are aligned and correlate:
-      // turn bump → cost jump; CPU spike → actions burst.
+
+      // Cumulative + within-run periodic timeseries.
       //
-      // Legacy-run fallback: runs captured before the sampler shipped
-      // (or before the 5-unified cost/turns/actions fields landed) have
-      // either empty samples OR samples with zero cost/turns/actions.
-      // For those rows, fall back to per-run trend (cross-run aggregate)
-      // so the chart isn't a flat-zero liar.
-      // Cumulative trend across all runs. Each point = cumulative total at
-      // that run's completion. Right-side number on each sparkline shows
-      // the running total (not the per-run delta). The header counters
-      // (Runs / Turns / Cost) on the parent task panel already show
-      // cumulative; sparkline numbers now match instead of diverging.
+      // Walk runs oldest → newest. For each run, walk its host_samples
+      // (one tick every ~5s recorded by the host sampler — same source
+      // CPU/RSS use). At each tick, compute the cross-run cumulative
+      // value: priorRunsTotal + thisRunCounter. cost/turns/actions
+      // monotonically increase across the whole task lifecycle.
       //
-      // CPU% / RSS MB stay within-run (those are physical metrics — a
-      // cumulative CPU% has no meaning).
-      var trendAll = runs.slice().reverse();   // oldest → newest
-      var cumCost = 0, cumTurns = 0, cumActions = 0;
-      trendAll = trendAll.map(function (r) {
-        cumCost += r.cost_usd || 0;
-        cumTurns += r.turns || 0;
-        cumActions += r.actions || 0;
-        return Object.assign({}, r, {
-          _cumCost: cumCost,
-          _cumTurns: cumTurns,
-          _cumActions: cumActions,
+      // CPU% / RSS MB stay physical (within-run absolute) — a cumulative
+      // CPU has no meaning. We DO concatenate cpu/rss samples across
+      // runs so the chart shows full history, not just the last run.
+      //
+      // Legacy-run fallback: runs without host_samples (older sampler,
+      // or runs where the sampler crashed) get a single synthesized
+      // endpoint at run completion using the run row's recorded counters
+      // — keeps the line connected and the right-side number honest.
+      var sortedRuns = runs.slice().reverse();        // oldest first
+      var sortedSamples = ctx.samplesPerRun.slice().reverse();
+
+      var costPts = [], turnPts = [], actionPts = [], cpuPts = [], rssPts = [];
+      var priorCost = 0, priorTurns = 0, priorActions = 0;
+
+      sortedRuns.forEach(function (r, ri) {
+        var samples = sortedSamples[ri] || [];
+        if (samples.length === 0) {
+          samples = [{
+            ts: r.completed_at || r.started_at || '',
+            cost_usd: r.cost_usd || 0,
+            turns: r.turns || 0,
+            actions: r.actions || 0,
+            cpu_pct: 0,
+            rss_mb: 0,
+          }];
+        }
+        samples.forEach(function (sm) {
+          var rn = r.run_number;
+          var t = (sm.ts || '').slice(11, 19);
+          var cumC = priorCost + (sm.cost_usd || 0);
+          var cumT = priorTurns + (sm.turns || 0);
+          var cumA = priorActions + (sm.actions || 0);
+          costPts.push({ run: rn, y: cumC,
+            tooltip: 'cum ' + fmtCost(cumC) + ' (run #' + rn + ' at ' + t + ')' });
+          turnPts.push({ run: rn, y: cumT,
+            tooltip: 'cum ' + cumT + ' turns (run #' + rn + ' at ' + t + ')' });
+          actionPts.push({ run: rn, y: cumA,
+            tooltip: 'cum ' + cumA + ' actions (run #' + rn + ' at ' + t + ')' });
+          cpuPts.push({ run: rn, y: sm.cpu_pct || 0,
+            tooltip: (sm.cpu_pct || 0).toFixed(1) + '% (run #' + rn + ' at ' + t + ')' });
+          rssPts.push({ run: rn, y: sm.rss_mb || 0,
+            tooltip: Math.round(sm.rss_mb || 0) + ' MB (run #' + rn + ' at ' + t + ')' });
         });
+        priorCost += r.cost_usd || 0;
+        priorTurns += r.turns || 0;
+        priorActions += r.actions || 0;
       });
-      // Cap visualisation at the most recent 10 cycles so the sparkline
-      // stays readable on long-lived tasks. The cumulative values reflect
-      // totals across ALL runs, not just the visible window.
-      var visTrend = trendAll.slice(-10);
 
-      var s20 = subsample(hostSamples, 20);
-
-      var costPts = visTrend.map(function (r) {
-        return { run: r.run_number, y: r._cumCost,
-          tooltip: 'cum ' + fmtCost(r._cumCost) + ' (run #' + r.run_number + ' +' + fmtCost(r.cost_usd || 0) + ')' };
-      });
-      var turnPts = visTrend.map(function (r) {
-        return { run: r.run_number, y: r._cumTurns,
-          tooltip: 'cum ' + r._cumTurns + ' turns (run #' + r.run_number + ' +' + (r.turns || 0) + ')' };
-      });
-      var actionPts = visTrend.map(function (r) {
-        return { run: r.run_number, y: r._cumActions,
-          tooltip: 'cum ' + r._cumActions + ' actions (run #' + r.run_number + ' +' + (r.actions || 0) + ')' };
-      });
-      // Host CPU/RSS points are a within-run time series (one per ~5s
-      // sample). Different X-axis conceptually but rendered by the same
-      // sparkline helper so the visual vocabulary is consistent.
-      // Sub-sample to 20 points so the line stays readable even on long runs.
-      var cpuPts = subsample(hostSamples, 20).map(function (s, i) {
-        return { run: i, y: s.cpu_pct || 0,
-          tooltip: (s.cpu_pct || 0).toFixed(1) + '% CPU at ' + (s.ts ? s.ts.slice(11, 19) : '') };
-      });
-      var rssPts = subsample(hostSamples, 20).map(function (s, i) {
-        return { run: i, y: s.rss_mb || 0,
-          tooltip: Math.round(s.rss_mb || 0) + ' MB RSS at ' + (s.ts ? s.ts.slice(11, 19) : '') };
-      });
+      // Subsample to keep the chart readable across long histories. ~80
+      // points fits the ~200px sparkline width without overlap. subsample
+      // preserves first + last so endpoints stay accurate.
+      var cumCost = priorCost, cumTurns = priorTurns, cumActions = priorActions;
+      costPts = subsample(costPts, 80);
+      turnPts = subsample(turnPts, 80);
+      actionPts = subsample(actionPts, 80);
+      cpuPts = subsample(cpuPts, 80);
+      rssPts = subsample(rssPts, 80);
 
       var when = latest.completed_at ? timeAgo(latest.completed_at) : 'in progress';
       var dur = fmtDuration(latest.started_at, latest.completed_at);
