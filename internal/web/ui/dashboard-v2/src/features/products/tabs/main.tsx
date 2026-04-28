@@ -85,7 +85,7 @@ export function MainTab({ productId }: { productId: string }) {
       <div className='grid grid-cols-3 gap-2 lg:grid-cols-6'>
         {product.isLoading || !p ? (
           Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className='h-12 w-full' />
+            <Skeleton key={i} className='h-6 w-full' />
           ))
         ) : (
           <>
@@ -263,12 +263,12 @@ export function MainTab({ productId }: { productId: string }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Card>
-      <CardContent className='flex flex-col items-start gap-0 p-2'>
-        <span className='text-muted-foreground text-[10px] uppercase tracking-wider'>
+      <CardContent className='flex items-center justify-between gap-2 px-2 py-1'>
+        <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
           {label}
         </span>
         <span
-          className='w-full truncate font-mono text-sm font-semibold'
+          className='truncate font-mono text-xs font-semibold'
           title={value}
         >
           {value}
