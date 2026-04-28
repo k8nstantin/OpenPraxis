@@ -13,6 +13,18 @@ function fmtTip(v: number): string {
   return v.toFixed(2)
 }
 
+// Wider variant for the big value label below the dial — keeps two
+// decimals on small numbers but compacts thousands/millions so a
+// raw float like 59.86350728859151 doesn't overflow the gauge.
+function fmtMain(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return (v / 1_000_000).toFixed(2) + 'M'
+  if (abs >= 1_000) return (v / 1_000).toFixed(2) + 'k'
+  if (Number.isInteger(v)) return String(v)
+  return v.toFixed(2)
+}
+
 // Tick mark crossing the arc at the fraction (value-min)/range, painted
 // in `color` (hard-coded so deviation tone on the wrapper doesn't
 // repaint it). Used for both the default tick (green) on Execution
@@ -244,18 +256,18 @@ export function Gauge({
         </text>
         {/* Value + label live inside the SVG so they scale with the
             gauge as the container resizes (text-xs CSS sizing didn't
-            track the SVG). Two lines: bold value (with unit) at y=72,
-            uppercase label at y=84. */}
+            track the SVG). Compact formatter so raw floats don't
+            overflow at small grid sizes. */}
         <text
           x={50}
           y={72}
           textAnchor='middle'
-          fontSize='10'
+          fontSize='8'
           fontWeight='bold'
           fill='currentColor'
           fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
         >
-          {String(value)}
+          {fmtMain(value)}
           {unit ? ` ${unit}` : ''}
         </text>
         {label ? (
