@@ -100,20 +100,161 @@ export function ExecutionTab({ productId }: { productId: string }) {
   }
   if (!catalog) return null
 
+  const numericKnobs = catalog.filter(
+    (k) => k.type === 'int' || k.type === 'float'
+  )
+  const otherKnobs = catalog.filter(
+    (k) => k.type !== 'int' && k.type !== 'float'
+  )
+
   return (
-    <Card>
-      <CardContent className='divide-y p-0'>
-        {catalog.map((knob) => (
-          <KnobRow
-            key={knob.key}
-            knob={knob}
-            explicit={explicit.get(knob.key)}
-            productId={productId}
-            onChanged={reload}
-          />
-        ))}
-      </CardContent>
-    </Card>
+    <div className='space-y-3'>
+      {numericKnobs.length > 0 ? (
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
+          {numericKnobs.map((knob) => (
+            <NumericKnobCell
+              key={knob.key}
+              knob={knob}
+              explicit={explicit.get(knob.key)}
+              productId={productId}
+              onChanged={reload}
+            />
+          ))}
+        </div>
+      ) : null}
+      {otherKnobs.length > 0 ? (
+        <Card>
+          <CardContent className='divide-y p-0'>
+            {otherKnobs.map((knob) => (
+              <KnobRow
+                key={knob.key}
+                knob={knob}
+                explicit={explicit.get(knob.key)}
+                productId={productId}
+                onChanged={reload}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  )
+}
+
+// Compact dial cell for one int/float knob: gauge on top, name below
+// the value, Reset button at the bottom (only when the knob is set at
+// product scope). Tone flips green→rose the moment the operator dials
+// off the catalog default so deviations are visible at a glance.
+function NumericKnobCell({
+  knob,
+  explicit,
+  productId,
+  onChanged,
+}: {
+  knob: KnobDef
+  explicit?: ExplicitEntry
+  productId: string
+  onChanged: () => void
+}) {
+  const isExplicit = !!explicit
+  const initial: KnobValue = explicit ? safeParse(explicit.value) : knob.default
+  const [value, setValue] = useState<KnobValue>(initial)
+  const [status, setStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
+  const [errMsg, setErrMsg] = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    setValue(initial)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [explicit?.value, knob.default])
+
+  const isInt = knob.type === 'int'
+  const min = knob.slider_min ?? 0
+  const max = knob.slider_max ?? 100
+  const step = knob.slider_step ?? (isInt ? 1 : 0.01)
+  const num = numericOr(value, knob.default)
+  const def = numericOr(knob.default, min)
+  const atDefault = Math.abs(num - def) < (step ?? 0.0001) / 2
+  const tone = atDefault ? 'text-emerald-500' : 'text-rose-500'
+
+  const scheduleSave = (next: number) => {
+    const v = isInt ? Math.round(next) : next
+    setValue(v)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => doSave(v), 400)
+  }
+
+  const doSave = async (next: KnobValue) => {
+    setStatus('saving')
+    setErrMsg(null)
+    try {
+      const res = await fetch(`/api/products/${productId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [knob.key]: next }),
+      })
+      const data = await res.json()
+      const result = data?.results?.[0] ?? { ok: false, error: 'no result' }
+      if (!result.ok) {
+        setStatus('err')
+        setErrMsg(result.error || 'save failed')
+        return
+      }
+      setStatus('ok')
+      onChanged()
+      setTimeout(() => setStatus('idle'), 1500)
+    } catch (e) {
+      setStatus('err')
+      setErrMsg(String(e))
+    }
+  }
+
+  const reset = async () => {
+    try {
+      const res = await fetch(
+        `/api/products/${productId}/settings/${encodeURIComponent(knob.key)}`,
+        { method: 'DELETE' }
+      )
+      if (!res.ok) {
+        const txt = await res.text()
+        throw new Error(txt || `HTTP ${res.status}`)
+      }
+      onChanged()
+    } catch (e) {
+      setStatus('err')
+      setErrMsg(String(e))
+    }
+  }
+
+  return (
+    <div className={`flex flex-col items-stretch gap-1 ${tone}`}>
+      <Gauge
+        label={knob.key}
+        value={num}
+        min={min}
+        max={max}
+        step={step}
+        unit={knob.unit}
+        onChange={scheduleSave}
+      />
+      <div className='flex items-center justify-between gap-1 px-1'>
+        <SaveStatus status={status} title={errMsg ?? ''} />
+        {isExplicit ? (
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='text-muted-foreground h-6 px-2 text-xs'
+            onClick={reset}
+            title={`Reset to default (${knob.default})`}
+          >
+            Reset
+          </Button>
+        ) : (
+          <span />
+        )}
+      </div>
+    </div>
   )
 }
 
