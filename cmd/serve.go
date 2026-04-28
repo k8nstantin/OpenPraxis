@@ -191,7 +191,7 @@ var serveCmd = &cobra.Command{
 			v2Addr := fmt.Sprintf("%s:%d", cfg.Server.Host, portalV2Port)
 			portalV2Server = &http.Server{
 				Addr:         v2Addr,
-				Handler:      web.HandlerV2(),
+				Handler:      web.HandlerV2(deps),
 				ReadTimeout:  30 * time.Second,
 				WriteTimeout: 30 * time.Second,
 			}
