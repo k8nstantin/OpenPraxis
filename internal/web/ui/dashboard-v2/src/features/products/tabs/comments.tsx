@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   useCreateProductComment,
   useProductComments,
@@ -44,6 +44,45 @@ function fmtTime(ts: number | string): string {
   return new Date(t).toLocaleString()
 }
 
+// Shared markup/rendered toggle — same `descMode` localStorage key and
+// `desc-mode-change` custom event as DescriptionView so flipping the
+// toggle on Main also flips Comments and vice versa. Agents always
+// write markup; this only changes how it's displayed.
+type Mode = 'markup' | 'rendered'
+function readMode(): Mode {
+  try {
+    const v = localStorage.getItem('descMode')
+    return v === 'rendered' ? 'rendered' : 'markup'
+  } catch {
+    return 'markup'
+  }
+}
+function useDescMode(): [Mode, (m: Mode) => void] {
+  const [mode, setMode] = useState<Mode>(readMode)
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const next = (e as CustomEvent<Mode>).detail
+      if (next === 'markup' || next === 'rendered') setMode(next)
+    }
+    window.addEventListener('desc-mode-change', onChange as EventListener)
+    return () =>
+      window.removeEventListener(
+        'desc-mode-change',
+        onChange as EventListener
+      )
+  }, [])
+  const broadcast = (m: Mode) => {
+    setMode(m)
+    try {
+      localStorage.setItem('descMode', m)
+    } catch {
+      /* ignore */
+    }
+    window.dispatchEvent(new CustomEvent('desc-mode-change', { detail: m }))
+  }
+  return [mode, broadcast]
+}
+
 // Comments tab — full thread + compose. Same MarkdownEditor used
 // across description-edit and any future markdown surface (manifests,
 // tasks). Cmd-Enter posts; Escape clears.
@@ -82,6 +121,7 @@ export function CommentsTab({ productId }: { productId: string }) {
   }, [real, filter])
 
   const [composing, setComposing] = useState(false)
+  const [mode, setMode] = useDescMode()
   const open = () => setComposing(true)
   const close = () => {
     setComposing(false)
@@ -111,6 +151,26 @@ export function CommentsTab({ productId }: { productId: string }) {
             : `${visible.length} of ${real.length}`}
         </div>
         <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-1'>
+            <Button
+              type='button'
+              variant={mode === 'markup' ? 'secondary' : 'ghost'}
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => setMode('markup')}
+            >
+              Markup
+            </Button>
+            <Button
+              type='button'
+              variant={mode === 'rendered' ? 'secondary' : 'ghost'}
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => setMode('rendered')}
+            >
+              Rendered
+            </Button>
+          </div>
           <Select value={filter} onValueChange={setFilter}>
             <SelectTrigger className='h-8 w-48 text-xs'>
               <SelectValue placeholder='Filter by type' />
@@ -228,9 +288,20 @@ export function CommentsTab({ productId }: { productId: string }) {
                       {fmtTime(c.created_at)}
                     </span>
                   </div>
-                  <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
-                    {c.body}
-                  </pre>
+                  {mode === 'rendered' &&
+                  (c as { body_html?: string }).body_html ? (
+                    <div
+                      className='md-body text-sm'
+                      dangerouslySetInnerHTML={{
+                        __html:
+                          (c as { body_html?: string }).body_html ?? '',
+                      }}
+                    />
+                  ) : (
+                    <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
+                      {c.body}
+                    </pre>
+                  )}
                 </div>
               ))}
             </div>
