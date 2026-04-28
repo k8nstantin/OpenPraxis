@@ -127,7 +127,7 @@ export function DAGTab({ productId }: { productId: string }) {
           },
         },
       ],
-      minZoom: 0.3,
+      minZoom: 0.05,
       maxZoom: 2.5,
       wheelSensitivity: 0.2,
     })
@@ -173,11 +173,21 @@ export function DAGTab({ productId }: { productId: string }) {
 
   return (
     <Card>
-      <CardContent className='p-0'>
+      <CardContent className='relative p-0'>
         <div
           ref={containerRef}
           className='bg-background h-[calc(100vh-22rem)] min-h-96 w-full rounded-md'
         />
+        {/* Fit-to-view affordance — operator-clickable rescue when
+            the dagre layout sprawls past the panel and even maxed-out
+            wheel zoom-out doesn't reveal the whole graph. */}
+        <button
+          type='button'
+          onClick={() => cyRef.current?.fit(undefined, 32)}
+          className='bg-card hover:bg-accent absolute top-2 right-2 rounded-md border px-2 py-1 text-xs shadow-sm'
+        >
+          Fit
+        </button>
       </CardContent>
     </Card>
   )
