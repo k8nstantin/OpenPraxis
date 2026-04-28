@@ -43,15 +43,17 @@ export function ProductsListPane({
   const drill = useProductHierarchy(selectedId)
   const [query, setQuery] = useState('')
 
+  // Show sub-products of the selected product WHEN it has any. Leaves
+  // (no sub-products) fall back to "all products" so the operator
+  // always has a navigable list to switch context — no dead ends.
+  // Top-level (no selection) also shows all products.
+  const subRows = (drill.data?.sub_products ?? []).map(rowFromHierarchy)
+  const showSubs = selectedId && drill.data && subRows.length > 0
   const rows: Row[] = useMemo(() => {
-    if (selectedId && drill.data) {
-      return (drill.data.sub_products ?? []).map(rowFromHierarchy)
-    }
-    if (top.data) {
-      return top.data.map(rowFromProduct)
-    }
-    return []
-  }, [selectedId, drill.data, top.data])
+    if (showSubs) return subRows
+    return (top.data ?? []).map(rowFromProduct)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSubs, drill.data, top.data])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -63,11 +65,11 @@ export function ProductsListPane({
     )
   }, [rows, query])
 
-  const isLoading = selectedId ? drill.isLoading : top.isLoading
-  const isError = selectedId ? drill.isError : top.isError
-  const error = selectedId ? drill.error : top.error
+  const isLoading = showSubs ? drill.isLoading : top.isLoading
+  const isError = showSubs ? drill.isError : top.isError
+  const error = showSubs ? drill.error : top.error
 
-  const heading = selectedId ? 'Sub-products' : 'All products'
+  const heading = showSubs ? 'Sub-products' : 'All products'
 
   return (
     <div className='flex h-full flex-col'>
