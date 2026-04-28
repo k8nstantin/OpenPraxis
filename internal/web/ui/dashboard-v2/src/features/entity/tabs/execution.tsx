@@ -45,7 +45,9 @@ interface ExplicitEntry {
 }
 
 function basePath(kind: EntityKind): string {
-  return kind === 'product' ? '/api/products' : '/api/manifests'
+  if (kind === 'product') return '/api/products'
+  if (kind === 'task') return '/api/tasks'
+  return '/api/manifests'
 }
 
 export function ExecutionTab({

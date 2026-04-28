@@ -12,7 +12,15 @@ import { EntityPage } from '@/features/entity'
 const productsSearch = z.object({
   id: z.string().optional(),
   tab: z
-    .enum(['main', 'execution', 'comments', 'dependencies', 'dag'])
+    .enum([
+      'main',
+      'execution',
+      'comments',
+      'dependencies',
+      'dag',
+      'schedule',
+      'stats',
+    ])
     .optional()
     .default('main'),
 })

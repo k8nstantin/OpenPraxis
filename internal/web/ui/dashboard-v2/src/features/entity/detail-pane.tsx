@@ -11,14 +11,18 @@ import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
 import { MainTab } from './tabs/main'
 
-// Five tabs in operator-priority order. Same set for products and
-// manifests — the user explicitly chose this symmetry.
+// Seven tabs in operator-priority order — same set across product /
+// manifest / task. Schedule + Stats are placeholders pending the
+// central schedules + run_stats backend (next PR); they render a
+// "pending backend" stub so the tab strip is complete now.
 const TAB_IDS = [
   'main',
   'execution',
   'comments',
   'dependencies',
   'dag',
+  'schedule',
+  'stats',
 ] as const
 
 export type EntityTabId = (typeof TAB_IDS)[number]
@@ -100,6 +104,8 @@ export function EntityDetailPane({
               <TabsTrigger value='comments'>Comments</TabsTrigger>
               <TabsTrigger value='dependencies'>Dependencies</TabsTrigger>
               <TabsTrigger value='dag'>DAG</TabsTrigger>
+              <TabsTrigger value='schedule'>Schedule</TabsTrigger>
+              <TabsTrigger value='stats'>Stats</TabsTrigger>
             </TabsList>
 
             <TabsContent value='main'>
@@ -117,9 +123,47 @@ export function EntityDetailPane({
             <TabsContent value='dag'>
               <DAGTab kind={kind} entityId={entityId} />
             </TabsContent>
+            <TabsContent value='schedule'>
+              <SchedulePlaceholder />
+            </TabsContent>
+            <TabsContent value='stats'>
+              <StatsPlaceholder />
+            </TabsContent>
           </Tabs>
         </div>
       </ScrollArea>
+    </div>
+  )
+}
+
+// Placeholder until the central SCD-2 `schedules` table + `?as_of=`
+// time-travel land in the next backend PR. Same on every entity kind.
+function SchedulePlaceholder() {
+  return (
+    <div className='text-muted-foreground rounded-md border bg-card p-6 text-sm'>
+      <div className='mb-2 font-medium text-foreground'>Schedule</div>
+      <p>
+        When + how often this entity should fire. Backed by the central
+        SCD-2 <code className='font-mono text-xs'>schedules</code> table
+        — keyed by entity UUID. Pending the backend-decoupling PR.
+      </p>
+    </div>
+  )
+}
+
+// Placeholder until the central `run_stats` table + per-entity
+// rollup queries land. ECharts visuals lock in here once data is wired.
+function StatsPlaceholder() {
+  return (
+    <div className='text-muted-foreground rounded-md border bg-card p-6 text-sm'>
+      <div className='mb-2 font-medium text-foreground'>Stats</div>
+      <p>
+        Per-run charts (cost, turns, actions, tokens, cpu%, rss) for this
+        entity. Backed by <code className='font-mono text-xs'>task_runs</code>
+        {' + '}<code className='font-mono text-xs'>task_run_host_samples</code>
+        ; aggregated across descendants on products / manifests, individual
+        runs on tasks. ECharts. Pending the backend-decoupling PR.
+      </p>
     </div>
   )
 }
