@@ -56,9 +56,8 @@ export function DependenciesTab({ productId }: { productId: string }) {
               {upstream.data.map((d) => (
                 <Link
                   key={d.id}
-                  to='/products/$productId'
-                  params={{ productId: d.id }}
-                  search={{ tab: 'main' }}
+                  to='/products'
+                  search={{ id: d.id, tab: 'main' }}
                   className='hover:bg-accent flex items-center justify-between gap-2 rounded-md px-3 py-2'
                 >
                   <div className='min-w-0'>
