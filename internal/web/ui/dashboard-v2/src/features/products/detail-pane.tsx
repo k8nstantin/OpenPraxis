@@ -61,8 +61,8 @@ export function ProductDetailPane({
   }
 
   return (
-    <div className='flex h-full flex-col'>
-      <ScrollArea className='flex-1'>
+    <div className='flex h-full min-h-0 flex-col'>
+      <ScrollArea className='min-h-0 flex-1'>
         <div className='space-y-4 p-4'>
           <ProductsBreadcrumb
             productId={productId}
