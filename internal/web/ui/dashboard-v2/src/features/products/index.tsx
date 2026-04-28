@@ -75,7 +75,7 @@ export function ProductsPage() {
   return (
     <>
       <Header />
-      <Main fixed>
+      <Main fixed fluid>
         <div className='mb-3 flex items-center justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Products</h1>
         </div>
