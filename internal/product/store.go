@@ -24,11 +24,16 @@ type Product struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// Computed — aggregated from manifests → tasks → task_runs
+	// Computed — aggregated from manifests → tasks → task_runs.
+	// Recursive sums (across descendants in product_dependencies) live
+	// alongside the direct-only sums on the same struct; populated by
+	// EnrichRecursiveCosts when the dashboard fetches a single product.
 	TotalManifests int     `json:"total_manifests"`
 	TotalTasks     int     `json:"total_tasks"`
 	TotalTurns     int     `json:"total_turns"`
 	TotalCost      float64 `json:"total_cost"`
+	TotalActions   int     `json:"total_actions"`
+	TotalTokens    int     `json:"total_tokens"`
 }
 
 // Store manages product persistence.
@@ -214,6 +219,51 @@ func (s *Store) Delete(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`UPDATE products SET deleted_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, now, id, id+"%")
 	return err
+}
+
+// EnrichRecursiveCosts populates totals on a single product by walking
+// descendant sub-products via product_dependencies and summing their
+// manifests → tasks → task_runs. Used by the single-product GET so a
+// product whose tasks live under sub-product manifests still surfaces
+// the cumulative cost on its dashboard. Direct-only EnrichWithCosts
+// stays in place for the list endpoints (cheaper, batched).
+func (s *Store) EnrichRecursiveCosts(p *Product) {
+	if p == nil {
+		return
+	}
+	// Edge direction in product_dependencies: parent.product_id →
+	// child.depends_on_product_id (umbrella has rows with product_id=
+	// itself for each sub-product). Walk that to collect descendants.
+	row := s.db.QueryRow(`
+		WITH RECURSIVE descendants(id) AS (
+			SELECT ?
+			UNION ALL
+			SELECT pd.depends_on_product_id FROM product_dependencies pd
+			INNER JOIN descendants d ON pd.product_id = d.id
+		)
+		SELECT
+			COUNT(DISTINCT m.id),
+			COUNT(DISTINCT t.id),
+			COALESCE(SUM(tr.turns), 0),
+			COALESCE(SUM(tr.cost_usd), 0),
+			COALESCE(SUM(tr.actions), 0),
+			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
+		FROM descendants d
+		LEFT JOIN manifests m ON m.project_id = d.id AND m.deleted_at = ''
+		LEFT JOIN tasks t ON t.manifest_id = m.id AND t.deleted_at = ''
+		LEFT JOIN task_runs tr ON tr.task_id = t.id`,
+		p.ID,
+	)
+	var manifests, tasks, turns, actions, tokens int
+	var cost float64
+	if err := row.Scan(&manifests, &tasks, &turns, &cost, &actions, &tokens); err == nil {
+		p.TotalManifests = manifests
+		p.TotalTasks = tasks
+		p.TotalTurns = turns
+		p.TotalCost = cost
+		p.TotalActions = actions
+		p.TotalTokens = tokens
+	}
 }
 
 // EnrichWithCosts populates TotalManifests, TotalTasks, TotalTurns, TotalCost from manifests → tasks → task_runs.

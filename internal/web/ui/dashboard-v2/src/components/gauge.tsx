@@ -191,6 +191,31 @@ export function Gauge({
         >
           {fmtTip(value)}
         </text>
+        {/* Minor notches at 25/50/75% so the operator can read scale
+            position without staring — like a real speedometer. Drawn
+            before the value ticks so default + red-line stay on top. */}
+        {[0.25, 0.5, 0.75].map((nf) => {
+          const t = -Math.PI / 2 + Math.PI * nf
+          const innerR = R - 2
+          const outerR = R + 2
+          const x1 = cx + innerR * Math.sin(t)
+          const y1 = cy - innerR * Math.cos(t)
+          const x2 = cx + outerR * Math.sin(t)
+          const y2 = cy - outerR * Math.cos(t)
+          return (
+            <line
+              key={nf}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke='currentColor'
+              strokeOpacity={0.25}
+              strokeWidth={0.75}
+              strokeLinecap='round'
+            />
+          )
+        })}
         {defaultValue !== undefined && range > 0
           ? renderTick(cx, cy, R, min, range, defaultValue, '#10b981')
           : null}

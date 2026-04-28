@@ -159,6 +159,13 @@ func apiProductGet(n *node.Node) http.HandlerFunc {
 			http.Error(w, "not found", 404)
 			return
 		}
+		// Pull turns + cost from descendant manifests → tasks → task_runs.
+		// Recursive: walks sub-products via product_dependencies so an
+		// umbrella whose tasks live under sub-product manifests still
+		// surfaces the cumulative cost on its dashboard. Without this
+		// the single-product GET returned struct zero values regardless
+		// of what work had actually run.
+		n.Products.EnrichRecursiveCosts(p)
 		writeJSON(w, EnrichWithHTML(p, map[string]string{"description": p.Description}))
 	}
 }

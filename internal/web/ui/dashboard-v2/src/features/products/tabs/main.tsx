@@ -130,17 +130,21 @@ export function MainTab({ productId }: { productId: string }) {
               max={Math.max(50, (p.total_turns ?? 0) * 1.5)}
             />
           </div>
-          <div
-            className='flex flex-col items-stretch text-emerald-500 opacity-50'
-            title='pending total_actions on product API'
-          >
-            <Gauge label='actions' value={0} min={0} max={1000} />
+          <div className='flex flex-col items-stretch text-emerald-500'>
+            <Gauge
+              label='actions'
+              value={p.total_actions ?? 0}
+              min={0}
+              max={Math.max(100, (p.total_actions ?? 0) * 1.5)}
+            />
           </div>
-          <div
-            className='flex flex-col items-stretch text-emerald-500 opacity-50'
-            title='pending total_tokens on product API'
-          >
-            <Gauge label='tokens' value={0} min={0} max={1000000} />
+          <div className='flex flex-col items-stretch text-emerald-500'>
+            <Gauge
+              label='tokens'
+              value={p.total_tokens ?? 0}
+              min={0}
+              max={Math.max(10000, (p.total_tokens ?? 0) * 1.5)}
+            />
           </div>
         </div>
       ) : (

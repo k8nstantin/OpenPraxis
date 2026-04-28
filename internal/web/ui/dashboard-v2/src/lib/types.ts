@@ -28,6 +28,8 @@ export interface Product {
   total_manifests?: number
   total_tasks?: number
   total_turns?: number
+  total_actions?: number
+  total_tokens?: number
 }
 
 export interface Manifest {
