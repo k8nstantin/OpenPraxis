@@ -139,15 +139,25 @@ export function ProductsListPane({
               />
             ))}
             {hasMore ? (
-              <div
-                ref={sentinelRef}
-                className='text-muted-foreground py-2 text-center text-xs'
+              // Sentinel is also a button — when content fits in the
+              // viewport (no scroll possible), the scroll-event load
+              // path can never fire. Click is the always-available
+              // fallback. Auto-loads on scroll near bottom too.
+              <button
+                ref={sentinelRef as unknown as React.Ref<HTMLButtonElement>}
+                type='button'
+                onClick={() =>
+                  setVisibleCount((n) =>
+                    Math.min(n + PAGE_SIZE, filtered.length)
+                  )
+                }
+                className='text-muted-foreground hover:text-foreground hover:bg-accent w-full py-2 text-center text-xs transition-colors'
               >
-                Loading more… ({visible.length} of {filtered.length})
-              </div>
+                Load more ({visible.length} of {filtered.length})
+              </button>
             ) : filtered.length > PAGE_SIZE ? (
               <div className='text-muted-foreground py-2 text-center text-xs'>
-                {filtered.length} shown · scroll exhausted
+                {filtered.length} shown
               </div>
             ) : null}
           </div>

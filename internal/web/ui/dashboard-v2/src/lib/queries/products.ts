@@ -540,3 +540,11 @@ export function useRestoreDependencySnapshot(
     onSuccess: () => productId && invalidateDepCaches(qc, productId),
   })
 }
+
+// Lifecycle status change — same `useUpdateProduct` mutation under
+// the hood, exposed as a friendlier hook for the detail header. Each
+// transition (draft / open / closed / archived) lands as a single
+// PUT and refreshes detail + list caches.
+export function useChangeProductStatus(productId: string | undefined) {
+  return useUpdateProduct(productId)
+}
