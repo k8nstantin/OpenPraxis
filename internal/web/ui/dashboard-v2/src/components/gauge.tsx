@@ -122,7 +122,7 @@ export function Gauge({
   }
 
   return (
-    <div className='bg-card rounded-md border'>
+    <div className='bg-card mx-auto w-full max-w-[180px] rounded-md border'>
       <svg
         ref={svgRef}
         viewBox='0 0 100 90'
