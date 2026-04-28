@@ -194,3 +194,227 @@ export function useCreateProductComment(id: string | undefined) {
     },
   })
 }
+
+// ── Dependency mutations ─────────────────────────────────────────────
+//
+// Three edge directions managed from the Dependencies editor:
+//
+//   1. Upstream product   — THIS product depends on X
+//      POST   /api/products/{this}/dependencies/{X}
+//      DELETE /api/products/{this}/dependencies/{X}
+//
+//   2. Downstream product — X depends on THIS (X becomes a sub-product)
+//      POST   /api/products/{X}/dependencies/{this}
+//      DELETE /api/products/{X}/dependencies/{this}
+//
+//   3. Owned manifest     — re-parent manifest.project_id = THIS
+//      PUT /api/manifests/{m} with body { project_id: this | "" }
+//
+// Every mutation posts a `dependency_revision` agent_note comment on
+// THIS product with an op + snapshot so the revision history can show
+// what changed. Same versioning rhythm as description revisions.
+
+interface DepRevisionPayload {
+  op: 'add' | 'remove'
+  kind: 'product_upstream' | 'product_downstream' | 'manifest'
+  target: { id: string; marker: string; title: string }
+  snapshot: {
+    upstream: string[]
+    downstream: string[]
+    manifests: string[]
+  }
+}
+
+async function postDepRevision(
+  productId: string,
+  payload: DepRevisionPayload
+): Promise<void> {
+  const body = JSON.stringify(payload, null, 2)
+  await fetch(`/api/products/${productId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      author: 'operator',
+      // Use existing `agent_note` type with a structured body. A
+      // dedicated `dependency_revision` type can be added to the
+      // backend registry later — for now agent_note keeps the comment
+      // valid + visible in the existing revisions stream filter.
+      type: 'agent_note',
+      body: '<dependency_revision>\n' + body + '\n</dependency_revision>',
+    }),
+  })
+}
+
+function invalidateDepCaches(qc: ReturnType<typeof useQueryClient>, id: string) {
+  qc.invalidateQueries({ queryKey: productKeys.deps(id) })
+  qc.invalidateQueries({ queryKey: productKeys.manifests(id) })
+  qc.invalidateQueries({ queryKey: productKeys.hierarchy(id) })
+  qc.invalidateQueries({ queryKey: productKeys.comments(id) })
+}
+
+// 1. Upstream — this depends on X.
+export function useAddUpstreamProductDep(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(
+        `/api/products/${productId}/dependencies/${input.target.id}`,
+        { method: 'POST' }
+      )
+      if (!res.ok && res.status !== 409)
+        throw new Error(`add upstream → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'add',
+          kind: 'product_upstream',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+export function useRemoveUpstreamProductDep(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(
+        `/api/products/${productId}/dependencies/${input.target.id}`,
+        { method: 'DELETE' }
+      )
+      if (!res.ok && res.status !== 404)
+        throw new Error(`remove upstream → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'remove',
+          kind: 'product_upstream',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+// 2. Downstream — X depends on this. Edit goes against X's deps API.
+export function useAddDownstreamProductDep(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(
+        `/api/products/${input.target.id}/dependencies/${productId}`,
+        { method: 'POST' }
+      )
+      if (!res.ok && res.status !== 409)
+        throw new Error(`add downstream → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'add',
+          kind: 'product_downstream',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+export function useRemoveDownstreamProductDep(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(
+        `/api/products/${input.target.id}/dependencies/${productId}`,
+        { method: 'DELETE' }
+      )
+      if (!res.ok && res.status !== 404)
+        throw new Error(`remove downstream → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'remove',
+          kind: 'product_downstream',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+// 3. Manifest — re-parent / unlink via manifest.project_id.
+export function useLinkManifest(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(`/api/manifests/${input.target.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: productId }),
+      })
+      if (!res.ok) throw new Error(`link manifest → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'add',
+          kind: 'manifest',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+export function useUnlinkManifest(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      target: { id: string; marker: string; title: string }
+      snapshot: DepRevisionPayload['snapshot']
+    }) => {
+      const res = await fetch(`/api/manifests/${input.target.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: '' }),
+      })
+      if (!res.ok) throw new Error(`unlink manifest → ${res.status}`)
+      if (productId)
+        await postDepRevision(productId, {
+          op: 'remove',
+          kind: 'manifest',
+          target: input.target,
+          snapshot: input.snapshot,
+        })
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
+
+// All-manifests query — used by the manifest picker. Filtered client-
+// side to "manifests not already linked to this product."
+export function useAllManifests() {
+  return useQuery({
+    queryKey: ['manifests', 'list'],
+    queryFn: async () => {
+      const res = await fetch('/api/manifests')
+      if (!res.ok) throw new Error(`manifests → ${res.status}`)
+      return (await res.json()) as Manifest[]
+    },
+    staleTime: 30 * 1000,
+  })
+}
