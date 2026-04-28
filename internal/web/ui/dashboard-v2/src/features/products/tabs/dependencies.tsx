@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Pencil, Plus, X } from 'lucide-react'
+import { History, Pencil, Plus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   useAddDownstreamProductDep,
   useAllManifests,
@@ -10,9 +11,20 @@ import {
   useProductManifests,
   useProducts,
   useRemoveDownstreamProductDep,
+  useRestoreDependencySnapshot,
   useUnlinkManifest,
 } from '@/lib/queries/products'
 import type { Comment } from '@/lib/types'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,18 +39,28 @@ const STATUS_COLOR: Record<string, string> = {
   archived: 'bg-zinc-500/10 text-zinc-500',
 }
 
-// Dependencies tab — view + edit. Two panels (Sub-products,
-// Manifests) side-by-side. Every add/remove writes a
-// dependency_revision agent_note comment on this product so the
-// revision history below records what changed. Restore from history
-// lands in a follow-up PR.
-//
-// Reads + writes go through the established API surface:
-//   /api/products/{id}/dependencies(/depId)  ↔ product↔product edges
-//   /api/manifests/{id}  PUT {project_id}    ↔ manifest re-parent
-//   /api/products/{id}/comments  POST        ↔ revision log
-// All of which the backend resolves against the unified
-// relationships table (PR #232 + dual-write + read-cutover).
+type ConfirmTarget =
+  | {
+      kind: 'remove-subproduct'
+      row: PickerRow
+    }
+  | {
+      kind: 'remove-manifest'
+      row: PickerRow
+    }
+  | {
+      kind: 'restore'
+      revisionLabel: string
+      snapshot: {
+        downstream: string[]
+        manifests: string[]
+      }
+    }
+
+// Dependencies tab — view + edit, with confirmation dialogs on every
+// mutating action and a toast on success/failure. Revision history
+// items are clickable → Restore prompt → applies the prior snapshot
+// back as current state via diff + replay.
 export function DependenciesTab({ productId }: { productId: string }) {
   const subs = useProductDependencies(productId)
   const manifests = useProductManifests(productId)
@@ -48,11 +70,13 @@ export function DependenciesTab({ productId }: { productId: string }) {
 
   const [editing, setEditing] = useState(false)
   const [picker, setPicker] = useState<null | 'subproduct' | 'manifest'>(null)
+  const [confirm, setConfirm] = useState<ConfirmTarget | null>(null)
 
   const addSub = useAddDownstreamProductDep(productId)
   const remSub = useRemoveDownstreamProductDep(productId)
   const linkM = useLinkManifest(productId)
   const unlinkM = useUnlinkManifest(productId)
+  const restore = useRestoreDependencySnapshot(productId)
 
   const subRows: PickerRow[] = (subs.data ?? []).map((d) => ({
     id: d.id,
@@ -103,7 +127,6 @@ export function DependenciesTab({ productId }: { productId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picker, allProducts.data, allManifests.data, subs.data, manifests.data])
 
-  // Filter comments to dependency_revision entries.
   const revisions = useMemo<Comment[]>(() => {
     if (!comments.data) return []
     return comments.data
@@ -114,6 +137,33 @@ export function DependenciesTab({ productId }: { productId: string }) {
         return tb - ta
       })
   }, [comments.data])
+
+  const onConfirm = async () => {
+    if (!confirm) return
+    try {
+      if (confirm.kind === 'remove-subproduct') {
+        await remSub.mutateAsync({ target: confirm.row, snapshot })
+        toast.success(`Removed sub-product "${confirm.row.title}"`)
+      } else if (confirm.kind === 'remove-manifest') {
+        await unlinkM.mutateAsync({ target: confirm.row, snapshot })
+        toast.success(`Unlinked manifest "${confirm.row.title}"`)
+      } else if (confirm.kind === 'restore') {
+        const result = await restore.mutateAsync({
+          snapshot: confirm.snapshot,
+          revisionLabel: confirm.revisionLabel,
+          currentDownstream: subRows,
+          currentManifests: manifestRows,
+        })
+        const summary = result
+          ? `+${result.addedSubs + result.addedManifests} −${result.removedSubs + result.removedManifests}`
+          : 'snapshot applied'
+        toast.success(`Restored to ${confirm.revisionLabel} (${summary})`)
+      }
+    } catch (e) {
+      toast.error(`Failed: ${String(e)}`)
+    }
+    setConfirm(null)
+  }
 
   return (
     <div className='space-y-3'>
@@ -142,7 +192,7 @@ export function DependenciesTab({ productId }: { productId: string }) {
           loading={subs.isLoading}
           error={subs.error}
           onAdd={() => setPicker('subproduct')}
-          onRemove={(target) => remSub.mutateAsync({ target, snapshot })}
+          onRemove={(row) => setConfirm({ kind: 'remove-subproduct', row })}
           rowHref='/products'
         />
         <DepSection
@@ -153,7 +203,7 @@ export function DependenciesTab({ productId }: { productId: string }) {
           loading={manifests.isLoading}
           error={manifests.error}
           onAdd={() => setPicker('manifest')}
-          onRemove={(target) => unlinkM.mutateAsync({ target, snapshot })}
+          onRemove={(row) => setConfirm({ kind: 'remove-manifest', row })}
         />
       </div>
 
@@ -189,8 +239,9 @@ export function DependenciesTab({ productId }: { productId: string }) {
             </span>
           </CardTitle>
           <p className='text-muted-foreground pt-1 text-xs'>
-            Every add / remove logs a snapshot here. Restore (apply
-            back) lands in the next PR.
+            Every add / remove logs a snapshot here. Click a row to
+            restore that state — the diff is applied as a sequence of
+            add/remove ops and a new revision is logged.
           </p>
         </CardHeader>
         <CardContent className='pt-0 pb-3'>
@@ -203,7 +254,17 @@ export function DependenciesTab({ productId }: { productId: string }) {
           ) : (
             <div className='divide-y'>
               {revisions.map((rev) => (
-                <RevisionRow key={rev.id} rev={rev} />
+                <RevisionRow
+                  key={rev.id}
+                  rev={rev}
+                  onRestore={(snap, label) =>
+                    setConfirm({
+                      kind: 'restore',
+                      snapshot: snap,
+                      revisionLabel: label,
+                    })
+                  }
+                />
               ))}
             </div>
           )}
@@ -228,13 +289,87 @@ export function DependenciesTab({ productId }: { productId: string }) {
             : allProducts.isLoading
         }
         onPick={async (row) => {
-          if (picker === 'subproduct') {
-            await addSub.mutateAsync({ target: row, snapshot })
-          } else if (picker === 'manifest') {
-            await linkM.mutateAsync({ target: row, snapshot })
+          try {
+            if (picker === 'subproduct') {
+              await addSub.mutateAsync({ target: row, snapshot })
+              toast.success(`Added sub-product "${row.title}"`)
+            } else if (picker === 'manifest') {
+              await linkM.mutateAsync({ target: row, snapshot })
+              toast.success(`Linked manifest "${row.title}"`)
+            }
+          } catch (e) {
+            toast.error(`Failed: ${String(e)}`)
           }
         }}
       />
+
+      <AlertDialog
+        open={confirm !== null}
+        onOpenChange={(open) => !open && setConfirm(null)}
+      >
+        <AlertDialogContent>
+          {confirm?.kind === 'remove-subproduct' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Remove sub-product?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Remove <span className='font-medium'>{confirm.row.title}</span>{' '}
+                  from this product? It stays as a standalone product —
+                  this only severs the parent edge. Action is logged
+                  in revision history; you can restore.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onConfirm}>
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : confirm?.kind === 'remove-manifest' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Unlink manifest?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Unlink <span className='font-medium'>{confirm.row.title}</span>{' '}
+                  from this product? Tasks owned by this manifest stay
+                  with the manifest but won't show up under this
+                  product anymore. Action is logged in revision
+                  history; you can restore.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onConfirm}>
+                  Unlink
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : confirm?.kind === 'restore' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Restore to this revision?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Apply the snapshot from{' '}
+                  <span className='font-medium'>{confirm.revisionLabel}</span>{' '}
+                  as current state. Items removed since then get
+                  re-added; items added since get removed. The restore
+                  itself is logged as a new revision so you can move
+                  forward or back again.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onConfirm}>
+                  Restore
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : null}
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -257,7 +392,7 @@ function DepSection({
   loading: boolean
   error: unknown
   onAdd: () => void
-  onRemove: (row: PickerRow) => Promise<unknown>
+  onRemove: (row: PickerRow) => void
   rowHref?: '/products'
 }) {
   return (
@@ -342,12 +477,28 @@ function DepSection({
   )
 }
 
-function RevisionRow({ rev }: { rev: Comment }) {
+interface ParsedRevision {
+  op?: string
+  kind?: string
+  target?: { title?: string }
+  snapshot?: { downstream?: string[]; manifests?: string[] }
+}
+
+function RevisionRow({
+  rev,
+  onRestore,
+}: {
+  rev: Comment
+  onRestore: (
+    snap: { downstream: string[]; manifests: string[] },
+    label: string
+  ) => void
+}) {
   const body = rev.body ?? ''
   const match = body.match(
     /<dependency_revision>\s*([\s\S]*?)\s*<\/dependency_revision>/
   )
-  let parsed: { op?: string; kind?: string; target?: { title?: string } } = {}
+  let parsed: ParsedRevision = {}
   if (match) {
     try {
       parsed = JSON.parse(match[1])
@@ -365,21 +516,53 @@ function RevisionRow({ rev }: { rev: Comment }) {
         ? 'upstream dep'
         : kind === 'manifest'
           ? 'manifest'
-          : 'item'
+          : kind === 'snapshot'
+            ? 'snapshot'
+            : 'item'
   const summary =
-    op && kind
-      ? `${op === 'add' ? 'Added' : 'Removed'} ${kindLabel} "${targetTitle}"`
-      : 'Dependency change'
+    op === 'restore'
+      ? `Restored to ${targetTitle}`
+      : op && kind
+        ? `${op === 'add' ? 'Added' : 'Removed'} ${kindLabel} "${targetTitle}"`
+        : 'Dependency change'
+
+  const ts = fmtTime(rev.created_at)
+
+  const canRestore =
+    !!parsed.snapshot &&
+    Array.isArray(parsed.snapshot.downstream) &&
+    Array.isArray(parsed.snapshot.manifests)
 
   return (
-    <div className='space-y-1 py-2 text-sm'>
-      <div className='flex items-center justify-between'>
-        <code className='font-mono text-[11px]'>{rev.author.slice(0, 16)}</code>
-        <span className='text-muted-foreground text-xs'>
-          {fmtTime(rev.created_at)}
-        </span>
+    <div className='hover:bg-accent flex items-center justify-between gap-2 rounded-md px-2 py-2 text-sm'>
+      <div className='min-w-0 flex-1'>
+        <div className='flex items-center gap-2'>
+          <code className='font-mono text-[11px]'>
+            {rev.author.slice(0, 16)}
+          </code>
+          <span className='text-muted-foreground text-xs'>{ts}</span>
+        </div>
+        <div className='text-foreground text-xs'>{summary}</div>
       </div>
-      <div className='text-foreground text-xs'>{summary}</div>
+      {canRestore ? (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 shrink-0 px-2 text-xs'
+          onClick={() =>
+            onRestore(
+              {
+                downstream: parsed.snapshot!.downstream ?? [],
+                manifests: parsed.snapshot!.manifests ?? [],
+              },
+              ts
+            )
+          }
+        >
+          <History className='mr-1 h-3 w-3' />
+          Restore
+        </Button>
+      ) : null}
     </div>
   )
 }
