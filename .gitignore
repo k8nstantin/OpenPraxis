@@ -15,6 +15,7 @@ dist/
 # inner .gitignore at internal/web/ui/dashboard/.gitignore re-applies
 # fine-grained rules (ignore hashed bundles, keep stub).
 !internal/web/ui/dashboard/dist/
+!internal/web/ui/dashboard-v2/dist/
 
 # Dependencies
 vendor/
