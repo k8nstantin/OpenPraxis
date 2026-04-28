@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProductsBreadcrumb } from './breadcrumb'
+import { ProductStatusControl } from './status-control'
 import { CommentsTab } from './tabs/comments'
 import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
@@ -86,12 +87,11 @@ export function ProductDetailPane({
                     {product.data.marker}
                   </code>
                 </div>
-                <Badge
-                  variant='secondary'
-                  className={`shrink-0 uppercase ${STATUS_COLOR[product.data.status] ?? 'bg-zinc-500/15'}`}
-                >
-                  {product.data.status}
-                </Badge>
+                <ProductStatusControl
+                  productId={productId}
+                  status={product.data.status}
+                  productTitle={product.data.title}
+                />
               </div>
             ) : null}
           </div>
