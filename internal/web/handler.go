@@ -735,6 +735,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	registerCommentsRoutesFromNode(api, n)
 	registerDescriptionRoutes(api, n)
 	registerTemplateRoutes(api, n)
+	registerScheduleRoutes(api, n)
 
 	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
 	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")

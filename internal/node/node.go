@@ -18,6 +18,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
+	"github.com/k8nstantin/OpenPraxis/internal/schedule"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
@@ -47,6 +48,11 @@ type Node struct {
 	// PR/M1). Lives alongside the existing dep tables during the M2
 	// dual-write phase; becomes the sole source after M3 cutover.
 	Relationships    *relationships.Store
+	// Schedules is the central SCD-2 store for entity firing schedules
+	// (PR/M-Schedule/M1). The runner currently still reads scheduling
+	// fields off the task row; a follow-up cuts it over to read here.
+	// This PR persists schedules so the dashboard surfaces them.
+	Schedules        *schedule.Store
 	runner           *task.Runner
 	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine
@@ -269,6 +275,15 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init relationships store: %w", err)
 	}
 
+	// Central SCD-2 schedules table. Migration is idempotent
+	// (CREATE TABLE / INDEX IF NOT EXISTS). Same DB handle as every
+	// other store so schedules live in memories.db alongside tasks /
+	// manifests / products.
+	scheduleStore, err := schedule.New(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init schedule store: %w", err)
+	}
+
 	n := &Node{
 		Config:           cfg,
 		Store:            store,
@@ -288,6 +303,7 @@ func New(cfg *config.Config) (*Node, error) {
 		TemplatesResolv:  templatesResolver,
 		Comments:         commentsStore,
 		Relationships:    relationshipsStore,
+		Schedules:        scheduleStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
