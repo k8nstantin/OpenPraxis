@@ -14,6 +14,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedRecallRouteImport } from './routes/_authenticated/recall'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductivityRouteImport } from './routes/_authenticated/productivity'
+import { Route as AuthenticatedManifestsRouteImport } from './routes/_authenticated/manifests'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
@@ -55,6 +56,11 @@ const AuthenticatedProductivityRoute =
     path: '/productivity',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManifestsRoute = AuthenticatedManifestsRouteImport.update({
+  id: '/manifests',
+  path: '/manifests',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
+  '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByTo {
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
+  '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
+  '/_authenticated/manifests': typeof AuthenticatedManifestsRoute
   '/_authenticated/productivity': typeof AuthenticatedProductivityRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/recall': typeof AuthenticatedRecallRoute
@@ -215,6 +224,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/audit'
     | '/inbox'
+    | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
@@ -234,6 +244,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/audit'
     | '/inbox'
+    | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
@@ -256,6 +267,7 @@ export interface FileRouteTypes {
     | '/_authenticated/activity'
     | '/_authenticated/audit'
     | '/_authenticated/inbox'
+    | '/_authenticated/manifests'
     | '/_authenticated/productivity'
     | '/_authenticated/products'
     | '/_authenticated/recall'
@@ -311,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/productivity'
       fullPath: '/productivity'
       preLoaderRoute: typeof AuthenticatedProductivityRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manifests': {
+      id: '/_authenticated/manifests'
+      path: '/manifests'
+      fullPath: '/manifests'
+      preLoaderRoute: typeof AuthenticatedManifestsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/inbox': {
@@ -450,6 +469,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
+  AuthenticatedManifestsRoute: typeof AuthenticatedManifestsRoute
   AuthenticatedProductivityRoute: typeof AuthenticatedProductivityRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedRecallRoute: typeof AuthenticatedRecallRoute
@@ -462,6 +482,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
+  AuthenticatedManifestsRoute: AuthenticatedManifestsRoute,
   AuthenticatedProductivityRoute: AuthenticatedProductivityRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedRecallRoute: AuthenticatedRecallRoute,

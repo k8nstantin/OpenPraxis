@@ -118,6 +118,11 @@ func apiManifestGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
+		// Pull turns + cost + actions + tokens from this manifest's
+		// task_runs. Mirrors the apiProductGet enrichment so the Main
+		// tab gauges have something to render. List endpoints stay lean
+		// (cheaper batched EnrichWithCosts only).
+		n.Manifests.EnrichRecursiveCosts(m)
 		// Single GET enriches with rendered HTML for the body fields so
 		// the dashboard renders formatted markdown. List endpoints stay
 		// lean (no HTML render per row).

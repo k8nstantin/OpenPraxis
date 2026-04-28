@@ -43,6 +43,11 @@ export interface Manifest {
   source_node?: string
   created_at: string
   updated_at: string
+  total_tasks?: number
+  total_turns?: number
+  total_cost?: number
+  total_actions?: number
+  total_tokens?: number
 }
 
 export interface Idea {

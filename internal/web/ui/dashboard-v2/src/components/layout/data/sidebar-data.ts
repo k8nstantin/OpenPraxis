@@ -4,6 +4,7 @@ import {
   Boxes,
   Brain,
   Command,
+  FileText,
   Inbox,
   LayoutDashboard,
   PlayCircle,
@@ -47,6 +48,11 @@ export const sidebarData: SidebarData = {
           title: 'Products',
           url: '/products',
           icon: Boxes,
+        },
+        {
+          title: 'Manifests',
+          url: '/manifests',
+          icon: FileText,
         },
         {
           title: 'Inbox',

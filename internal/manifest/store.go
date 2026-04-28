@@ -30,10 +30,16 @@ type Manifest struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// Computed from linked tasks — populated by EnrichWithCosts()
-	TotalTasks int     `json:"total_tasks"`
-	TotalTurns int     `json:"total_turns"`
-	TotalCost  float64 `json:"total_cost"`
+	// Computed from linked tasks — populated by EnrichWithCosts() (list-
+	// path: turns + cost only) or EnrichRecursiveCosts() (single-get path:
+	// adds actions + tokens). Manifests don't recurse like products do —
+	// the "recursive" name is kept for symmetry with product.Store but
+	// the walk is just task_runs joined to tasks where manifest_id = m.id.
+	TotalTasks   int     `json:"total_tasks"`
+	TotalTurns   int     `json:"total_turns"`
+	TotalCost    float64 `json:"total_cost"`
+	TotalActions int     `json:"total_actions"`
+	TotalTokens  int     `json:"total_tokens"`
 }
 
 // Store manages manifest persistence.
@@ -356,6 +362,40 @@ func (s *Store) EnrichWithCosts(manifests []*Manifest) {
 				m.TotalCost = cost
 			}
 		}
+	}
+}
+
+// EnrichRecursiveCosts populates totals on a single manifest by summing
+// task_runs across every task owned by this manifest. Used by the
+// single-manifest GET so the dashboard surfaces actions + tokens
+// alongside the existing turns + cost. Manifests don't have descendants
+// the way products do (no recursive walk over manifest_dependencies);
+// the "recursive" name is kept for symmetry with product.Store, but the
+// query is a flat task_runs JOIN tasks WHERE manifest_id = m.id.
+func (s *Store) EnrichRecursiveCosts(m *Manifest) {
+	if m == nil {
+		return
+	}
+	row := s.db.QueryRow(`
+		SELECT
+			COUNT(DISTINCT t.id),
+			COALESCE(SUM(tr.turns), 0),
+			COALESCE(SUM(tr.cost_usd), 0),
+			COALESCE(SUM(tr.actions), 0),
+			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
+		FROM tasks t
+		LEFT JOIN task_runs tr ON tr.task_id = t.id
+		WHERE t.manifest_id = ? AND t.deleted_at = ''`,
+		m.ID,
+	)
+	var tasks, turns, actions, tokens int
+	var cost float64
+	if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
+		m.TotalTasks = tasks
+		m.TotalTurns = turns
+		m.TotalCost = cost
+		m.TotalActions = actions
+		m.TotalTokens = tokens
 	}
 }
 
