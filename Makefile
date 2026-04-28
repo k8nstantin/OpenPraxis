@@ -14,6 +14,12 @@ LDFLAGS = -ldflags "-X github.com/k8nstantin/OpenPraxis/cmd.Version=$(VERSION) \
 DASHBOARD_DIR := internal/web/ui/dashboard
 DASHBOARD_NM  := $(DASHBOARD_DIR)/node_modules
 
+# Portal V2 dashboard (operator redesign on shadcn-admin) — same shape,
+# separate tree. Shipped on :9766 alongside Portal A on :8765 via the
+# `--portal-v2-port` serve flag. go:embed pulls dist/ into the binary.
+DASHBOARDV2_DIR := internal/web/ui/dashboard-v2
+DASHBOARDV2_NM  := $(DASHBOARDV2_DIR)/node_modules
+
 # Install npm deps if missing or package.json newer. The explicit touch
 # on the directory keeps mtime comparisons reliable across filesystems
 # where directory mtimes don't bump on every nested write.
@@ -22,11 +28,18 @@ $(DASHBOARD_NM): $(DASHBOARD_DIR)/package.json
 	cd $(DASHBOARD_DIR) && npm install
 	@touch $(DASHBOARD_NM)
 
+$(DASHBOARDV2_NM): $(DASHBOARDV2_DIR)/package.json
+	@echo "  npm install (dashboard-v2)…"
+	cd $(DASHBOARDV2_DIR) && npm install
+	@touch $(DASHBOARDV2_NM)
+
 # Real React build. Vite handles its own incremental caching, so we
 # always invoke it — make doesn't try to track every src/**/*.tsx file.
-frontend: $(DASHBOARD_NM)
+frontend: $(DASHBOARD_NM) $(DASHBOARDV2_NM)
 	@echo "  npm run build (dashboard)…"
 	cd $(DASHBOARD_DIR) && npm run build
+	@echo "  npm run build (dashboard-v2)…"
+	cd $(DASHBOARDV2_DIR) && npm run build
 
 # Vite HMR dev server for frontend work alongside `make run`. Run in a
 # separate terminal — the dev server proxies /api/* to the Go server.
@@ -44,6 +57,8 @@ build: frontend
 clean:
 	rm -f openpraxis
 	rm -rf $(DASHBOARD_DIR)/dist/assets
+	rm -rf $(DASHBOARDV2_DIR)/dist/assets
+	rm -rf $(DASHBOARDV2_DIR)/dist/images
 
 run: build
 	./openpraxis serve
