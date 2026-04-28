@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight, Search } from 'lucide-react'
-import {
-  useProductHierarchy,
-  useProducts,
-} from '@/lib/queries/products'
+import { useQuery } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { productKeys, useProducts } from '@/lib/queries/products'
 import type { HierarchyNode, Product } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -20,15 +18,10 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-rose-500/15 text-rose-500',
 }
 
-// Left-pane navigator. Shows products at the current level only —
-// when no product is selected: every product on the node (operators
-// pick the umbrella to enter); when a product IS selected: that
-// product's `sub_products`. Manifests deliberately do NOT appear
-// here — they get their own top-level menu later.
-//
-// Selection + drill semantics live in the parent ProductsPage; this
-// component is purely presentational + raises onSelect when the
-// operator clicks a row.
+// Tree-style products navigator. All products listed at root; each
+// expandable via chevron to reveal sub-products N levels deep. Click
+// a row → SELECT (right pane updates). Click the chevron → EXPAND /
+// COLLAPSE without selecting. Same UX as Finder / VS Code's file tree.
 export function ProductsListPane({
   selectedId,
   onSelect,
@@ -36,48 +29,38 @@ export function ProductsListPane({
   selectedId?: string
   onSelect: (id: string) => void
 }) {
-  // Show top-level products when nothing is selected; otherwise show
-  // the selected product's sub-products. Both endpoints feed the same
-  // shape (HierarchyNode | Product) — we normalize to a thin row.
   const top = useProducts()
-  const drill = useProductHierarchy(selectedId)
   const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  // Show sub-products of the selected product WHEN it has any. Leaves
-  // (no sub-products) fall back to "all products" so the operator
-  // always has a navigable list to switch context — no dead ends.
-  // Top-level (no selection) also shows all products.
-  const subRows = (drill.data?.sub_products ?? []).map(rowFromHierarchy)
-  const showSubs = selectedId && drill.data && subRows.length > 0
-  const rows: Row[] = useMemo(() => {
-    if (showSubs) return subRows
-    return (top.data ?? []).map(rowFromProduct)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSubs, drill.data, top.data])
-
-  const filtered = useMemo(() => {
+  const filtered = useMemo<Product[]>(() => {
+    if (!top.data) return []
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter(
-      (r) =>
-        r.title.toLowerCase().includes(q) ||
-        r.marker.toLowerCase().includes(q)
+    if (!q) return top.data
+    return top.data.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        p.marker.toLowerCase().includes(q) ||
+        (p.tags ?? []).some((t) => t.toLowerCase().includes(q))
     )
-  }, [rows, query])
+  }, [top.data, query])
 
-  const isLoading = showSubs ? drill.isLoading : top.isLoading
-  const isError = showSubs ? drill.isError : top.isError
-  const error = showSubs ? drill.error : top.error
-
-  const heading = showSubs ? 'Sub-products' : 'All products'
+  const toggle = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
-    <div className='flex h-full flex-col'>
+    <div className='flex h-full min-h-0 flex-col'>
       <div className='border-b p-3'>
         <div className='text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wider'>
-          {heading}
+          Products
           <span className='ml-1.5 font-normal opacity-60'>
-            {isLoading ? '…' : filtered.length}
+            {top.isLoading ? '…' : filtered.length}
           </span>
         </div>
         <div className='relative'>
@@ -90,57 +73,36 @@ export function ProductsListPane({
           />
         </div>
       </div>
-      <ScrollArea className='flex-1'>
-        {isLoading ? (
+      <ScrollArea className='min-h-0 flex-1'>
+        {top.isLoading ? (
           <div className='space-y-1.5 p-2'>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className='h-12 w-full' />
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className='h-10 w-full' />
             ))}
           </div>
-        ) : isError ? (
+        ) : top.isError ? (
           <div className='p-3 text-xs text-rose-400'>
-            Failed: {String(error)}
+            Failed: {String(top.error)}
           </div>
         ) : filtered.length === 0 ? (
           <div className='text-muted-foreground p-3 text-xs'>
-            {selectedId
-              ? 'No sub-products. This product is a leaf.'
-              : query
-                ? 'No matches.'
-                : 'No products yet.'}
+            {query ? 'No matches.' : 'No products yet.'}
           </div>
         ) : (
           <div className='py-1'>
-            {filtered.map((r) => (
-              <button
-                key={r.id}
-                type='button'
-                onClick={() => onSelect(r.id)}
-                className={cn(
-                  'group flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
-                  'hover:bg-accent',
-                  selectedId === r.id && 'bg-accent'
-                )}
-              >
-                <div className='min-w-0 flex-1'>
-                  <div className='flex items-center gap-2'>
-                    <span className='truncate font-medium'>{r.title}</span>
-                  </div>
-                  <code className='text-muted-foreground font-mono text-[11px]'>
-                    {r.marker}
-                  </code>
-                </div>
-                <Badge
-                  variant='secondary'
-                  className={cn(
-                    'shrink-0 text-[10px] uppercase',
-                    STATUS_COLOR[r.status] ?? 'bg-zinc-500/15'
-                  )}
-                >
-                  {r.status}
-                </Badge>
-                <ChevronRight className='text-muted-foreground h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60' />
-              </button>
+            {filtered.map((p) => (
+              <TreeRow
+                key={p.id}
+                id={p.id}
+                marker={p.marker}
+                title={p.title}
+                status={p.status}
+                depth={0}
+                expanded={expanded}
+                selectedId={selectedId}
+                onToggle={toggle}
+                onSelect={onSelect}
+              />
             ))}
           </div>
         )}
@@ -149,27 +111,117 @@ export function ProductsListPane({
   )
 }
 
-type Row = {
+// Recursive tree row. Lazy-fetches children when first expanded; stays
+// cached after collapse so re-expanding is instant.
+function TreeRow({
+  id,
+  marker,
+  title,
+  status,
+  depth,
+  expanded,
+  selectedId,
+  onToggle,
+  onSelect,
+}: {
   id: string
   marker: string
   title: string
   status: string
-}
+  depth: number
+  expanded: Set<string>
+  selectedId?: string
+  onToggle: (id: string) => void
+  onSelect: (id: string) => void
+}) {
+  const isExpanded = expanded.has(id)
+  const hierarchy = useQuery({
+    queryKey: productKeys.hierarchy(id),
+    queryFn: async () => {
+      const res = await fetch(`/api/products/${id}/hierarchy`)
+      if (!res.ok) throw new Error(`hierarchy → ${res.status}`)
+      return (await res.json()) as HierarchyNode
+    },
+    enabled: isExpanded,
+    staleTime: 60 * 1000,
+  })
+  const subs: HierarchyNode[] = hierarchy.data?.sub_products ?? []
 
-function rowFromProduct(p: Product): Row {
-  return {
-    id: p.id,
-    marker: p.marker,
-    title: p.title,
-    status: p.status,
-  }
-}
-
-function rowFromHierarchy(h: HierarchyNode): Row {
-  return {
-    id: h.id,
-    marker: h.marker,
-    title: h.title,
-    status: h.status,
-  }
+  return (
+    <div>
+      <div
+        className={cn(
+          'hover:bg-accent flex items-center gap-1 px-1 text-sm transition-colors',
+          selectedId === id && 'bg-accent'
+        )}
+        style={{ paddingInlineStart: `${depth * 14 + 4}px` }}
+      >
+        <button
+          type='button'
+          onClick={() => onToggle(id)}
+          className='text-muted-foreground hover:text-foreground flex h-7 w-5 shrink-0 items-center justify-center'
+          aria-label={isExpanded ? 'Collapse' : 'Expand'}
+        >
+          {isExpanded ? (
+            <ChevronDown className='h-3.5 w-3.5' />
+          ) : (
+            <ChevronRight className='h-3.5 w-3.5' />
+          )}
+        </button>
+        <button
+          type='button'
+          onClick={() => onSelect(id)}
+          className='flex min-w-0 flex-1 items-center justify-between gap-2 py-1.5 text-left'
+        >
+          <div className='min-w-0'>
+            <div className='truncate font-medium'>{title}</div>
+            <code className='text-muted-foreground font-mono text-[11px]'>
+              {marker}
+            </code>
+          </div>
+          <Badge
+            variant='secondary'
+            className={cn(
+              'shrink-0 text-[10px] uppercase',
+              STATUS_COLOR[status] ?? 'bg-zinc-500/15'
+            )}
+          >
+            {status}
+          </Badge>
+        </button>
+      </div>
+      {isExpanded ? (
+        hierarchy.isLoading ? (
+          <div
+            className='text-muted-foreground py-1 text-xs italic'
+            style={{ paddingInlineStart: `${(depth + 1) * 14 + 4}px` }}
+          >
+            loading…
+          </div>
+        ) : subs.length > 0 ? (
+          subs.map((s) => (
+            <TreeRow
+              key={s.id}
+              id={s.id}
+              marker={s.marker}
+              title={s.title}
+              status={s.status}
+              depth={depth + 1}
+              expanded={expanded}
+              selectedId={selectedId}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))
+        ) : (
+          <div
+            className='text-muted-foreground py-1 text-xs italic'
+            style={{ paddingInlineStart: `${(depth + 1) * 14 + 4}px` }}
+          >
+            no sub-products
+          </div>
+        )
+      ) : null}
+    </div>
+  )
 }
