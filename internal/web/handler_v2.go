@@ -1,17 +1,18 @@
-// Portal V2 handler — dual-port plumbing stub.
+// Portal V2 handler — dual-port architecture.
 //
-// Listens on its own port (default :8766, set by the --portal-v2-port flag
-// in cmd/serve.go) and serves the Vite-style static bundle from
-// `ui/dashboard-v2/dist`. Same Go binary, same database, same MCP server —
-// different frontend tree.
+// Listens on its own port (default :9766, set by the --portal-v2-port
+// flag in cmd/serve.go) and serves:
 //
-// Foundation V2 hasn't shipped yet; for now this returns a hand-rolled
-// stub at `/` so the dual-port architecture can be verified end-to-end
-// before any React work lands.
+//   - The Vite-built React shell from `ui/dashboard-v2/dist` at `/`
+//     (with SPA fallback so HashRouter deep-links survive reload).
+//   - `/api/*` — the same dynamic backend Portal A exposes, mounted
+//     via the shared mountAPI helper. Same Node, same DB, same data.
+//   - `/ws` — the same WebSocket broadcast hub. Both portals see the
+//     same event stream.
 //
-// When the real shadcn-admin scaffold lands in a later chunk, the API +
-// /mcp + /ws routes from `Handler(...)` get factored into a shared mux
-// builder so both portals expose the full backend on their own port.
+// `/mcp` is deliberately NOT mounted here. Agent configs (Claude Code,
+// Cursor, etc.) point at :8765/mcp and there's no caller value in
+// duplicating the agent endpoint on :9766.
 package web
 
 import (
@@ -26,13 +27,28 @@ import (
 //go:embed all:ui/dashboard-v2/dist
 var dashboardV2FS embed.FS
 
-// HandlerV2 returns the HTTP handler for Portal V2. Static-only for the
-// chunk-1 plumbing milestone — no API surface yet. Future chunks add the
-// shared API + MCP + WebSocket mux once the React app starts making real
-// requests.
-func HandlerV2() http.Handler {
+// HandlerV2 returns the HTTP handler for Portal V2 on :9766. Same
+// backend services as Handler() (the Portal A handler), routed onto a
+// fresh mux so the React frontend at `/` doesn't fight the legacy
+// vanilla-JS dashboard mounted at `/` on Portal A.
+func HandlerV2(deps ServerDeps) http.Handler {
 	r := mux.NewRouter()
 
+	// /api/* — same routes as Portal A, same handlers, same data. The
+	// React shell on :9766 fetches /api/* against its own port (no
+	// CORS, no proxy) so requests resolve in-process via the same
+	// handler chain that serves :8765/api/*.
+	api := r.PathPrefix("/api").Subrouter()
+	mountAPI(api, deps)
+
+	// /ws — broadcast hub. Subscriptions opened from the React shell
+	// land in the same hub Portal A subscribers use, so events emit
+	// to both UIs simultaneously.
+	mountWS(r, deps)
+
+	// React shell — Vite build output. Hashed assets (assets/*) and
+	// images (images/*) under their own paths; everything else falls
+	// back to index.html so the TanStack hash router can take over.
 	v2Content, err := fs.Sub(dashboardV2FS, "ui/dashboard-v2/dist")
 	if err != nil {
 		// Embed directive is statically validated, so this is unreachable.
@@ -41,16 +57,13 @@ func HandlerV2() http.Handler {
 		panic(fmt.Sprintf("dashboard-v2 embed sub: %v", err))
 	}
 
-	// SPA fallback: any path that doesn't resolve to a static file falls
-	// back to index.html so HashRouter deep-links (#overview, #active,
-	// etc.) reload cleanly. The hash never reaches the server, so this is
-	// belt-and-suspenders for chunk 1; the real router lands later.
 	fileServer := http.FileServer(http.FS(v2Content))
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// no-store on the entrypoint so updates land on hard-reload
 		// without operators having to bust cache manually. Hashed asset
-		// chunks (when Vite ships real ones) get long-cache headers via
-		// Vite's default fingerprint contract — they don't need this.
+		// chunks (Vite default fingerprint contract) need long-cache
+		// headers eventually but for now the FileServer's defaults are
+		// fine while we iterate.
 		if req.URL.Path == "/" || req.URL.Path == "/index.html" {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}

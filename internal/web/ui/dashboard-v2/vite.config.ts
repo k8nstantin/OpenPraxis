@@ -28,4 +28,24 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  server: {
+    // Dev-mode proxy. `npm run dev` hosts the React app on :5173 with
+    // HMR; production-mode `npm run build` ships dist/ which the Go
+    // binary serves on :9766 alongside /api + /ws (HandlerV2). To keep
+    // dev-mode parity, route /api + /ws through the same backend so
+    // fetch('/api/...') and new WebSocket('/ws') work identically in
+    // both modes. ws:true flips the proxy to handle WebSocket upgrade
+    // frames (otherwise /ws would return 404 in dev).
+    proxy: {
+      '/api': {
+        target: 'http://localhost:9766',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:9766',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
+  },
 })
