@@ -112,21 +112,31 @@ export function useProductDependencies(id: string | undefined) {
   })
 }
 
-// Description revision history is a sub-set of the comments stream
-// filtered to type=description_revision. The Portal A endpoint
-// `/api/descriptions/<entity>/<id>/history` returns the revision rows
-// directly; if that's not exposed yet on the V2 path, callers can
-// derive it client-side from the comments query.
+// Description revision row returned by /api/products/{id}/description/history.
+// Distinct from Comment — has version + body but not type/target.
+export interface DescriptionRevision {
+  id: string
+  version: number
+  author: string
+  body: string
+  created_at: number | string
+  created_at_iso?: string
+}
+
+// GET /api/products/{id}/description/history → `{ items: [...] }`.
+// Earlier draft hit `/api/descriptions/product/<id>/history` which 404s.
+// Correct base path is `/api/{scope}/{id}/description/...` (handlers_
+// description.go line 181). Response is wrapped in `items`.
 export function useProductDescriptionHistory(id: string | undefined) {
   return useQuery({
     queryKey: productKeys.descriptionHistory(id ?? ''),
     queryFn: async () => {
-      const res = await fetch(`/api/descriptions/product/${id}/history`)
-      if (!res.ok) {
-        // Fallback: derive from comments. Caller filters where needed.
-        return [] as Comment[]
-      }
-      return (await res.json()) as Comment[]
+      const res = await fetch(`/api/products/${id}/description/history`)
+      if (!res.ok) throw new Error(`description history → ${res.status}`)
+      const data = (await res.json()) as
+        | { items: DescriptionRevision[] }
+        | DescriptionRevision[]
+      return Array.isArray(data) ? data : (data.items ?? [])
     },
     enabled: !!id,
     staleTime: 60 * 1000,
