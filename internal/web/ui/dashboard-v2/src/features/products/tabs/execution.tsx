@@ -220,6 +220,14 @@ function KnobRow({
       </div>
       <div className='text-muted-foreground flex items-center gap-3 text-xs'>
         <span>{isExplicit ? 'set at product' : 'system default'}</span>
+        {(knob.type === 'int' || knob.type === 'float') &&
+        knob.slider_max !== undefined ? (
+          <span>
+            system maximum {knob.slider_max}
+            {knob.unit ? ` ${knob.unit}` : ''} · default{' '}
+            {String(knob.default)}
+          </span>
+        ) : null}
         {warnings.map((w, i) => (
           <span key={i} className='text-amber-400'>
             {w}
@@ -314,13 +322,18 @@ function EnumSelect({
   onChange: (v: KnobValue) => void
 }) {
   const v = typeof value === 'string' ? value : String(value ?? '')
+  // Radix forbids SelectItem value=""; some catalog enums (default_model)
+  // include "" to mean "agent default". Drop the empty option from the
+  // dropdown; operators clear via Reset, which restores the inherited
+  // (empty) value.
+  const items = (knob.enum_values ?? []).filter((ev) => ev !== '')
   return (
     <Select value={v} onValueChange={onChange}>
       <SelectTrigger className='h-8 w-48 text-sm'>
-        <SelectValue />
+        <SelectValue placeholder='(default)' />
       </SelectTrigger>
       <SelectContent>
-        {(knob.enum_values ?? []).map((ev) => (
+        {items.map((ev) => (
           <SelectItem key={ev} value={ev}>
             {ev}
           </SelectItem>

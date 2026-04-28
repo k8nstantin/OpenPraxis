@@ -1,9 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import {
   useProduct,
   useProductDescriptionHistory,
-  useProductHierarchy,
   useUpdateProduct,
 } from '@/lib/queries/products'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,15 +12,48 @@ import { Button } from '@/components/ui/button'
 import { DescriptionView } from '@/components/description-view'
 import { MarkdownEditor } from '@/components/markdown-editor'
 
-// Main tab — stats grid + description editor + description revision
+// Main tab — stats grid + repo card + description editor + revision
 // history. Same Markup ↔ Rendered toggle as Portal A; Cmd-Enter saves,
 // Escape cancels. PUT /api/products/{id} drops a new SCD-2 description
 // revision row server-side, surfaced in the history card below.
+//
+// Stats: 6 compact cards in operator-priority order — Estimated Cost,
+// Actual, Turns, Actions, Tokens, Model. Estimated/Actions/Tokens are
+// pending server-side wiring (cost-prediction product 019db4ba is the
+// dependency); they render as "—" until those numeric fields surface
+// on the product API.
 export function MainTab({ productId }: { productId: string }) {
   const product = useProduct(productId)
   const history = useProductDescriptionHistory(productId)
-  const hierarchy = useProductHierarchy(productId)
   const update = useUpdateProduct(productId)
+  const [repoInfo, setRepoInfo] = useState<{
+    branch_prefix?: string
+    worktree_base_dir?: string
+    default_model?: string
+    default_agent?: string
+  }>({})
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/products/${productId}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return
+        const out: Record<string, string> = {}
+        for (const e of (d.entries ?? []) as { key: string; value: string }[]) {
+          try {
+            out[e.key] = JSON.parse(e.value)
+          } catch {
+            out[e.key] = e.value
+          }
+        }
+        setRepoInfo(out)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [productId])
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -45,31 +77,64 @@ export function MainTab({ productId }: { productId: string }) {
   }
 
   const p = product.data
-  const subProductCount = hierarchy.data?.sub_products?.length ?? 0
   const created = p?.created_at ? new Date(p.created_at) : null
   const updated = p?.updated_at ? new Date(p.updated_at) : null
 
   return (
     <div className='space-y-3'>
-      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid grid-cols-3 gap-2 lg:grid-cols-6'>
         {product.isLoading || !p ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className='h-20 w-full' />
+          Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className='h-12 w-full' />
           ))
         ) : (
           <>
-            <Stat label='Total cost' value={fmtCost(p.total_cost ?? 0)} />
-            <Stat label='Manifests' value={String(p.total_manifests ?? 0)} />
-            <Stat label='Tasks' value={String(p.total_tasks ?? 0)} />
+            <Stat label='Estimated Cost' value='—' />
+            <Stat label='Actual' value={fmtCost(p.total_cost ?? 0)} />
             <Stat label='Turns' value={String(p.total_turns ?? 0)} />
+            <Stat label='Actions' value='—' />
+            <Stat label='Tokens' value='—' />
+            <Stat
+              label='Model'
+              value={repoInfo.default_model || 'default'}
+            />
           </>
         )}
       </div>
 
       {p ? (
         <Card>
-          <CardContent className='space-y-2 p-3 text-sm'>
-            <Row label='Sub-products' value={String(subProductCount)} />
+          <CardContent className='space-y-1 p-3 text-sm'>
+            <Row
+              label='Repo'
+              value={
+                repoInfo.worktree_base_dir ? (
+                  <code className='font-mono text-xs'>
+                    {repoInfo.worktree_base_dir}
+                  </code>
+                ) : (
+                  <span className='text-muted-foreground'>
+                    (worktree base from settings)
+                  </span>
+                )
+              }
+            />
+            <Row
+              label='Branch prefix'
+              value={
+                <code className='font-mono text-xs'>
+                  {repoInfo.branch_prefix || 'openpraxis'}
+                </code>
+              }
+            />
+            <Row
+              label='Agent'
+              value={
+                <code className='font-mono text-xs'>
+                  {repoInfo.default_agent || 'claude-code'}
+                </code>
+              }
+            />
             <Row
               label='Status'
               value={
@@ -78,32 +143,6 @@ export function MainTab({ productId }: { productId: string }) {
                 </Badge>
               }
             />
-            {p.tags && p.tags.length > 0 ? (
-              <Row
-                label='Tags'
-                value={
-                  <div className='flex flex-wrap justify-end gap-1'>
-                    {p.tags.map((t) => (
-                      <Badge
-                        key={t}
-                        variant='secondary'
-                        className='text-[10px]'
-                      >
-                        {t}
-                      </Badge>
-                    ))}
-                  </div>
-                }
-              />
-            ) : null}
-            {p.source_node ? (
-              <Row
-                label='Source node'
-                value={
-                  <code className='font-mono text-xs'>{p.source_node}</code>
-                }
-              />
-            ) : null}
             {created ? (
               <Row label='Created' value={created.toLocaleString()} />
             ) : null}
@@ -224,11 +263,16 @@ export function MainTab({ productId }: { productId: string }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <Card>
-      <CardContent className='flex flex-col items-start gap-0.5 p-3'>
+      <CardContent className='flex flex-col items-start gap-0 p-2'>
         <span className='text-muted-foreground text-[10px] uppercase tracking-wider'>
           {label}
         </span>
-        <span className='font-mono text-xl font-semibold'>{value}</span>
+        <span
+          className='w-full truncate font-mono text-sm font-semibold'
+          title={value}
+        >
+          {value}
+        </span>
       </CardContent>
     </Card>
   )
