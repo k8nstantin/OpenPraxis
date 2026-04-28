@@ -548,3 +548,138 @@ export function useRestoreDependencySnapshot(
 export function useChangeProductStatus(productId: string | undefined) {
   return useUpdateProduct(productId)
 }
+
+// ── Create-new-and-link mutations ────────────────────────────────────
+//
+// The DAG designer's "Create new" flow needs to create the entity AND
+// link it to the current parent in one operator action. Each helper
+// composes two API calls + a dependency_revision log so the audit
+// trail matches the textual editor.
+
+// Create a new product, then link it as a sub-product of `productId`.
+export function useCreateAndLinkSubProduct(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      title: string
+      snapshot: { upstream: string[]; downstream: string[]; manifests: string[] }
+    }) => {
+      // 1. POST /api/products to create the new product (status defaults to draft)
+      const createRes = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: input.title, status: 'draft' }),
+      })
+      if (!createRes.ok)
+        throw new Error(`create product → ${createRes.status}`)
+      const created = (await createRes.json()) as Product
+
+      // 2. POST link new->this as a downstream dep (new depends on this)
+      const linkRes = await fetch(
+        `/api/products/${created.id}/dependencies/${productId}`,
+        { method: 'POST' }
+      )
+      if (!linkRes.ok && linkRes.status !== 409)
+        throw new Error(`link sub → ${linkRes.status}`)
+
+      // 3. Log dependency_revision capturing the new state
+      if (productId) {
+        const newSnapshot = {
+          ...input.snapshot,
+          downstream: [...input.snapshot.downstream, created.id],
+        }
+        await fetch(`/api/products/${productId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            author: 'operator',
+            type: 'agent_note',
+            body:
+              '<dependency_revision>\n' +
+              JSON.stringify(
+                {
+                  op: 'add',
+                  kind: 'product_downstream',
+                  target: {
+                    id: created.id,
+                    marker: created.marker,
+                    title: created.title,
+                  },
+                  snapshot: newSnapshot,
+                },
+                null,
+                2
+              ) +
+              '\n</dependency_revision>',
+          }),
+        })
+      }
+
+      return created
+    },
+    onSuccess: () => {
+      if (productId) invalidateDepCaches(qc, productId)
+      qc.invalidateQueries({ queryKey: productKeys.list() })
+    },
+  })
+}
+
+// Create a new manifest with project_id = this product, in one shot.
+export function useCreateAndLinkManifest(productId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      title: string
+      snapshot: { upstream: string[]; downstream: string[]; manifests: string[] }
+    }) => {
+      const res = await fetch('/api/manifests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: input.title,
+          project_id: productId,
+          status: 'draft',
+        }),
+      })
+      if (!res.ok) throw new Error(`create manifest → ${res.status}`)
+      const created = (await res.json()) as Manifest
+
+      if (productId) {
+        const newSnapshot = {
+          ...input.snapshot,
+          manifests: [...input.snapshot.manifests, created.id],
+        }
+        await fetch(`/api/products/${productId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            author: 'operator',
+            type: 'agent_note',
+            body:
+              '<dependency_revision>\n' +
+              JSON.stringify(
+                {
+                  op: 'add',
+                  kind: 'manifest',
+                  target: {
+                    id: created.id,
+                    marker: created.marker,
+                    title: created.title,
+                  },
+                  snapshot: newSnapshot,
+                },
+                null,
+                2
+              ) +
+              '\n</dependency_revision>',
+          }),
+        })
+      }
+
+      return created
+    },
+    onSuccess: () => {
+      if (productId) invalidateDepCaches(qc, productId)
+    },
+  })
+}
