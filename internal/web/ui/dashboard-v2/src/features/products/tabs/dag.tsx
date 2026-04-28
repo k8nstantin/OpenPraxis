@@ -1,17 +1,39 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import cytoscape from 'cytoscape'
 // @ts-expect-error — cytoscape-dagre ships without bundled types
 import dagre from 'cytoscape-dagre'
-import { useProductHierarchy } from '@/lib/queries/products'
+import { Pencil, Plus, Unlink, X } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  useAddDownstreamProductDep,
+  useAllManifests,
+  useCreateAndLinkManifest,
+  useCreateAndLinkSubProduct,
+  useLinkManifest,
+  useProductDependencies,
+  useProductHierarchy,
+  useProductManifests,
+  useProducts,
+  useRemoveDownstreamProductDep,
+  useUnlinkManifest,
+} from '@/lib/queries/products'
 import type { HierarchyNode } from '@/lib/types'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-
-// Same library Portal A uses (cytoscape + cytoscape-dagre, vendor-
-// pinned). React mount via useEffect, layout via dagre, tap-to-navigate
-// for sub-products. No new mental model — operators see the same graph
-// shape they're used to.
+import { LinkOrCreateModal } from '../link-or-create-modal'
+import type { PickerRow } from '../dep-picker'
 
 let DAGRE_REGISTERED = false
 function ensureDagre() {
@@ -30,7 +52,15 @@ const STATUS_BORDER: Record<string, string> = {
 }
 
 type CyEl =
-  | { data: { id: string; label: string; status: string; type: string } }
+  | {
+      data: {
+        id: string
+        label: string
+        status: string
+        type: string
+        parent_id?: string
+      }
+    }
   | { data: { id: string; source: string; target: string } }
 
 function toElements(root: HierarchyNode | undefined): CyEl[] {
@@ -43,6 +73,7 @@ function toElements(root: HierarchyNode | undefined): CyEl[] {
         label: n.title,
         status: n.status,
         type: n.type,
+        parent_id: parentId,
       },
     })
     if (parentId) {
@@ -59,11 +90,73 @@ function toElements(root: HierarchyNode | undefined): CyEl[] {
 
 export function DAGTab({ productId }: { productId: string }) {
   const hierarchy = useProductHierarchy(productId)
+  const subs = useProductDependencies(productId)
+  const manifests = useProductManifests(productId)
+  const allProducts = useProducts()
+  const allManifests = useAllManifests()
+
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
   const navigate = useNavigate()
 
+  const [editing, setEditing] = useState(false)
+  const [modal, setModal] = useState<null | 'subproduct' | 'manifest'>(null)
+  const [unlinkConfirm, setUnlinkConfirm] = useState<null | {
+    nodeId: string
+    nodeTitle: string
+    parentId: string
+    isManifest: boolean
+  }>(null)
+
+  const addSub = useAddDownstreamProductDep(productId)
+  const remSub = useRemoveDownstreamProductDep(productId)
+  const linkM = useLinkManifest(productId)
+  const unlinkM = useUnlinkManifest(productId)
+  const createSub = useCreateAndLinkSubProduct(productId)
+  const createM = useCreateAndLinkManifest(productId)
+
   const elements = useMemo(() => toElements(hierarchy.data), [hierarchy.data])
+
+  const snapshot = useMemo(
+    () => ({
+      upstream: [],
+      downstream: (subs.data ?? []).map((d) => d.id),
+      manifests: (manifests.data ?? []).map((m) => m.id),
+    }),
+    [subs.data, manifests.data]
+  )
+
+  const subProductCandidates = useMemo<PickerRow[]>(() => {
+    const exclude = new Set([productId, ...(subs.data ?? []).map((d) => d.id)])
+    return (allProducts.data ?? [])
+      .filter((p) => !exclude.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        marker: p.marker,
+        title: p.title,
+        status: p.status,
+      }))
+  }, [allProducts.data, subs.data, productId])
+
+  const manifestCandidates = useMemo<PickerRow[]>(() => {
+    const exclude = new Set((manifests.data ?? []).map((m) => m.id))
+    return (allManifests.data ?? [])
+      .filter((m) => !exclude.has(m.id))
+      .map((m) => ({
+        id: m.id,
+        marker: m.marker,
+        title: m.title,
+        status: m.status,
+      }))
+  }, [allManifests.data, manifests.data])
+
+  // Stash editing in a ref so cytoscape event handlers (closed over
+  // initial editing value at registration) read live state without
+  // forcing a canvas re-init on every toggle.
+  const editingRef = useRef(editing)
+  useEffect(() => {
+    editingRef.current = editing
+  }, [editing])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -135,7 +228,28 @@ export function DAGTab({ productId }: { productId: string }) {
     cy.on('tap', 'node', (e) => {
       const id = e.target.id() as string
       if (id === productId) return
+      if (editingRef.current) return
       navigate({ to: '/products', search: { id, tab: 'dag' } })
+    })
+
+    cy.on('cxttap', 'node', (e) => {
+      if (!editingRef.current) return
+      const node = e.target as cytoscape.NodeSingular
+      const id = node.id()
+      if (id === productId) return
+      const parentId = node.data('parent_id') as string | undefined
+      const type = node.data('type') as string
+      if (!parentId) return
+      if (parentId !== productId) {
+        toast.message('Drill into the parent to edit its children.')
+        return
+      }
+      setUnlinkConfirm({
+        nodeId: id,
+        nodeTitle: node.data('label') as string,
+        parentId,
+        isManifest: type === 'manifest',
+      })
     })
 
     cyRef.current = cy
@@ -144,6 +258,27 @@ export function DAGTab({ productId }: { productId: string }) {
       cyRef.current = null
     }
   }, [elements, productId, navigate])
+
+  const onUnlinkConfirmed = async () => {
+    if (!unlinkConfirm) return
+    try {
+      const target = {
+        id: unlinkConfirm.nodeId,
+        marker: unlinkConfirm.nodeId.slice(0, 12),
+        title: unlinkConfirm.nodeTitle,
+      }
+      if (unlinkConfirm.isManifest) {
+        await unlinkM.mutateAsync({ target, snapshot })
+        toast.success(`Unlinked manifest "${unlinkConfirm.nodeTitle}"`)
+      } else {
+        await remSub.mutateAsync({ target, snapshot })
+        toast.success(`Unlinked sub-product "${unlinkConfirm.nodeTitle}"`)
+      }
+    } catch (e) {
+      toast.error(`Failed: ${String(e)}`)
+    }
+    setUnlinkConfirm(null)
+  }
 
   if (hierarchy.isLoading) {
     return (
@@ -161,33 +296,162 @@ export function DAGTab({ productId }: { productId: string }) {
       </div>
     )
   }
-  if (elements.length === 0) {
-    return (
-      <Card>
-        <CardContent className='text-muted-foreground p-6 text-sm'>
-          No graph — this product has no sub-products yet.
-        </CardContent>
-      </Card>
-    )
-  }
 
   return (
     <Card>
       <CardContent className='relative p-0'>
-        <div
-          ref={containerRef}
-          className='bg-background h-[calc(100vh-22rem)] min-h-96 w-full rounded-md'
+        {elements.length === 0 ? (
+          <div className='text-muted-foreground p-6 text-sm'>
+            No graph yet — this product has no sub-products. Click{' '}
+            <Pencil className='inline h-3 w-3' /> Edit to add children.
+          </div>
+        ) : (
+          <div
+            ref={containerRef}
+            className='bg-background h-[calc(100vh-22rem)] min-h-96 w-full rounded-md'
+          />
+        )}
+
+        <div className='absolute top-2 right-2 flex items-center gap-1.5'>
+          {editing ? (
+            <>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => setModal('subproduct')}
+              >
+                <Plus className='mr-1 h-3 w-3' />
+                Sub-product
+              </Button>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => setModal('manifest')}
+              >
+                <Plus className='mr-1 h-3 w-3' />
+                Manifest
+              </Button>
+              <Button
+                variant='secondary'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => setEditing(false)}
+              >
+                <X className='mr-1 h-3 w-3' />
+                Done
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant='outline'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className='mr-1 h-3 w-3' />
+              Edit
+            </Button>
+          )}
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7 px-2 text-xs'
+            onClick={() => cyRef.current?.fit(undefined, 32)}
+            disabled={elements.length === 0}
+          >
+            Fit
+          </Button>
+        </div>
+
+        {editing ? (
+          <div className='bg-card/90 absolute bottom-2 left-2 rounded-md border px-3 py-1.5 text-xs backdrop-blur'>
+            Right-click a child node to unlink. Tasks deferred — coming
+            with the Tasks top-level menu.
+          </div>
+        ) : null}
+
+        <LinkOrCreateModal
+          open={modal === 'subproduct'}
+          onOpenChange={(open) => setModal(open ? 'subproduct' : null)}
+          title='Sub-product'
+          description='Pull an existing product in as a sub-product, or create a new one and link it.'
+          candidates={subProductCandidates}
+          loading={allProducts.isLoading}
+          createLabel='Create + link'
+          onLinkExisting={async (row) => {
+            try {
+              await addSub.mutateAsync({ target: row, snapshot })
+              toast.success(`Linked "${row.title}" as sub-product`)
+            } catch (e) {
+              toast.error(`Failed: ${String(e)}`)
+            }
+          }}
+          onCreateNew={async (title) => {
+            try {
+              const c = await createSub.mutateAsync({ title, snapshot })
+              toast.success(`Created + linked "${c.title}"`)
+            } catch (e) {
+              toast.error(`Failed: ${String(e)}`)
+            }
+          }}
         />
-        {/* Fit-to-view affordance — operator-clickable rescue when
-            the dagre layout sprawls past the panel and even maxed-out
-            wheel zoom-out doesn't reveal the whole graph. */}
-        <button
-          type='button'
-          onClick={() => cyRef.current?.fit(undefined, 32)}
-          className='bg-card hover:bg-accent absolute top-2 right-2 rounded-md border px-2 py-1 text-xs shadow-sm'
+
+        <LinkOrCreateModal
+          open={modal === 'manifest'}
+          onOpenChange={(open) => setModal(open ? 'manifest' : null)}
+          title='Manifest'
+          description='Pull an existing manifest under this product, or create a new one.'
+          candidates={manifestCandidates}
+          loading={allManifests.isLoading}
+          createLabel='Create + link'
+          onLinkExisting={async (row) => {
+            try {
+              await linkM.mutateAsync({ target: row, snapshot })
+              toast.success(`Linked manifest "${row.title}"`)
+            } catch (e) {
+              toast.error(`Failed: ${String(e)}`)
+            }
+          }}
+          onCreateNew={async (title) => {
+            try {
+              const c = await createM.mutateAsync({ title, snapshot })
+              toast.success(`Created + linked "${c.title}"`)
+            } catch (e) {
+              toast.error(`Failed: ${String(e)}`)
+            }
+          }}
+        />
+
+        <AlertDialog
+          open={unlinkConfirm !== null}
+          onOpenChange={(open) => !open && setUnlinkConfirm(null)}
         >
-          Fit
-        </button>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Unlink {unlinkConfirm?.isManifest ? 'manifest' : 'sub-product'}
+                ?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Sever the link from this product to{' '}
+                <span className='font-medium'>
+                  {unlinkConfirm?.nodeTitle}
+                </span>
+                . The entity stays alive as standalone — you can re-link
+                it later. Action is logged in revision history.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onUnlinkConfirmed}>
+                <Unlink className='mr-1 h-3 w-3' />
+                Unlink
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   )
