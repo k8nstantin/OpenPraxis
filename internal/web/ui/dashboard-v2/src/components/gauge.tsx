@@ -11,6 +11,7 @@ export function Gauge({
   max,
   step,
   unit,
+  defaultValue,
   onChange,
 }: {
   label?: string
@@ -19,6 +20,7 @@ export function Gauge({
   max: number
   step?: number
   unit?: string
+  defaultValue?: number
   onChange?: (next: number) => void
 }) {
   const range = max - min
@@ -107,6 +109,31 @@ export function Gauge({
           strokeLinecap='round'
         />
         <circle cx={cx} cy={cy} r={2.5} fill='currentColor' />
+        {defaultValue !== undefined && range > 0 ? (() => {
+          const df = Math.max(0, Math.min(1, (defaultValue - min) / range))
+          const dt = -Math.PI / 2 + Math.PI * df
+          const innerR = R - 5
+          const outerR = R + 5
+          const x1 = cx + innerR * Math.sin(dt)
+          const y1 = cy - innerR * Math.cos(dt)
+          const x2 = cx + outerR * Math.sin(dt)
+          const y2 = cy - outerR * Math.cos(dt)
+          // Default tick — always green so the operator can see at a
+          // glance how far the needle has been dialed off the catalog
+          // default. Independent of the surrounding `currentColor`
+          // (which the deviation tone hijacks).
+          return (
+            <line
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke='#10b981'
+              strokeWidth={1.5}
+              strokeLinecap='round'
+            />
+          )
+        })() : null}
         <text
           x={cx - R}
           y={58}

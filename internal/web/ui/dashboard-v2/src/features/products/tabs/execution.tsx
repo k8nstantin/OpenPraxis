@@ -174,8 +174,18 @@ function NumericKnobCell({
   const step = knob.slider_step ?? (isInt ? 1 : 0.01)
   const num = numericOr(value, knob.default)
   const def = numericOr(knob.default, min)
-  const atDefault = Math.abs(num - def) < (step ?? 0.0001) / 2
-  const tone = atDefault ? 'text-emerald-500' : 'text-rose-500'
+  // Deviation tier as a fraction of the slider range. Catalog
+  // defaults are picked to match expected operating regimes, so the
+  // bands stay tight: ≤10% → green (within tolerance), 10–30% → amber
+  // (notable), >30% → rose (off the recipe).
+  const range = max - min
+  const dev = range > 0 ? Math.abs(num - def) / range : 0
+  const tone =
+    dev <= 0.1
+      ? 'text-emerald-500'
+      : dev <= 0.3
+        ? 'text-amber-500'
+        : 'text-rose-500'
 
   const scheduleSave = (next: number) => {
     const v = isInt ? Math.round(next) : next
@@ -235,6 +245,7 @@ function NumericKnobCell({
         max={max}
         step={step}
         unit={knob.unit}
+        defaultValue={def}
         onChange={scheduleSave}
       />
       <div className='flex items-center justify-between gap-1 px-1'>

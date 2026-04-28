@@ -10,7 +10,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DescriptionView } from '@/components/description-view'
-import { Gauge } from '@/components/gauge'
 import { MarkdownEditor } from '@/components/markdown-editor'
 
 // Main tab — stats grid + repo card + description editor + revision
@@ -30,33 +29,25 @@ export function MainTab({ productId }: { productId: string }) {
   const [repoInfo, setRepoInfo] = useState<Record<string, string | number>>(
     {}
   )
-  const [catalog, setCatalog] = useState<KnobDef[]>([])
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      fetch(`/api/products/${productId}/settings`).then((r) =>
-        r.ok ? r.json() : null
-      ),
-      fetch('/api/settings/catalog').then((r) => (r.ok ? r.json() : null)),
-    ])
-      .then(([s, c]) => {
-        if (cancelled) return
-        if (s) {
-          const out: Record<string, string | number> = {}
-          for (const e of (s.entries ?? []) as {
-            key: string
-            value: string
-          }[]) {
-            try {
-              out[e.key] = JSON.parse(e.value)
-            } catch {
-              out[e.key] = e.value
-            }
+    fetch(`/api/products/${productId}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return
+        const out: Record<string, string | number> = {}
+        for (const e of (d.entries ?? []) as {
+          key: string
+          value: string
+        }[]) {
+          try {
+            out[e.key] = JSON.parse(e.value)
+          } catch {
+            out[e.key] = e.value
           }
-          setRepoInfo(out)
         }
-        if (c?.knobs) setCatalog(c.knobs as KnobDef[])
+        setRepoInfo(out)
       })
       .catch(() => {})
     return () => {
@@ -89,23 +80,6 @@ export function MainTab({ productId }: { productId: string }) {
   const created = p?.created_at ? new Date(p.created_at) : null
   const updated = p?.updated_at ? new Date(p.updated_at) : null
 
-  // Read-only speedometer gauges for the operationally-relevant int
-  // knobs. Editing stays in the Execution Control tab — these are a
-  // dashboard glance: needle position = current value, min on left,
-  // max on right. Skip meta knobs (prompt_*, scheduler_*) and pure
-  // bool/enum knobs.
-  const GAUGE_KEYS = [
-    'max_parallel',
-    'max_turns',
-    'max_cost_usd',
-    'daily_budget_usd',
-    'timeout_minutes',
-    'retry_on_failure',
-  ]
-  const gauges = GAUGE_KEYS.map((k) =>
-    catalog.find((c) => c.key === k)
-  ).filter((k): k is KnobDef => !!k)
-
   return (
     <div className='space-y-2'>
       <div className='grid grid-cols-3 gap-1 lg:grid-cols-6'>
@@ -127,30 +101,6 @@ export function MainTab({ productId }: { productId: string }) {
           </>
         )}
       </div>
-
-      {gauges.length > 0 ? (
-        <div className='grid grid-cols-3 gap-2 lg:grid-cols-6'>
-          {gauges.map((knob) => {
-            const v = repoInfo[knob.key]
-            const num =
-              typeof v === 'number'
-                ? v
-                : typeof knob.default === 'number'
-                  ? knob.default
-                  : 0
-            return (
-              <Gauge
-                key={knob.key}
-                label={knob.key}
-                value={num}
-                min={knob.slider_min ?? 0}
-                max={knob.slider_max ?? 100}
-                unit={knob.unit}
-              />
-            )
-          })}
-        </div>
-      ) : null}
 
       {p ? (
         <Card className='gap-0 py-0'>
@@ -351,11 +301,3 @@ function fmtTime(ts: number | string): string {
   return new Date(t).toLocaleString()
 }
 
-interface KnobDef {
-  key: string
-  type: string
-  default: string | number | boolean | string[]
-  unit?: string
-  slider_min?: number
-  slider_max?: number
-}
