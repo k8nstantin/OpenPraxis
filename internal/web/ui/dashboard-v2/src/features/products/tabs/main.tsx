@@ -81,8 +81,8 @@ export function MainTab({ productId }: { productId: string }) {
   const updated = p?.updated_at ? new Date(p.updated_at) : null
 
   return (
-    <div className='space-y-3'>
-      <div className='grid grid-cols-3 gap-2 lg:grid-cols-6'>
+    <div className='space-y-2'>
+      <div className='grid grid-cols-3 gap-1 lg:grid-cols-6'>
         {product.isLoading || !p ? (
           Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className='h-6 w-full' />
@@ -103,8 +103,8 @@ export function MainTab({ productId }: { productId: string }) {
       </div>
 
       {p ? (
-        <Card>
-          <CardContent className='space-y-1 p-3 text-sm'>
+        <Card className='gap-0 py-0'>
+          <CardContent className='space-y-0.5 px-3 py-2 text-sm'>
             <Row
               label='Repo'
               value={
@@ -153,8 +153,8 @@ export function MainTab({ productId }: { productId: string }) {
         </Card>
       ) : null}
 
-      <Card>
-        <CardContent className='space-y-2 p-3'>
+      <Card className='gap-0 py-0'>
+        <CardContent className='space-y-2 px-3 py-2'>
           {!editing && !product.isLoading ? (
             <div className='flex justify-end'>
               <Button
@@ -219,8 +219,8 @@ export function MainTab({ productId }: { productId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className='space-y-2 p-3'>
+      <Card className='gap-0 py-0'>
+        <CardContent className='space-y-1 px-3 py-2'>
           <div className='flex items-center justify-between'>
             <span className='text-muted-foreground text-xs uppercase tracking-wider'>
               Revisions
@@ -262,19 +262,17 @@ export function MainTab({ productId }: { productId: string }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card>
-      <CardContent className='flex items-center justify-between gap-2 px-2 py-1'>
-        <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
-          {label}
-        </span>
-        <span
-          className='truncate font-mono text-xs font-semibold'
-          title={value}
-        >
-          {value}
-        </span>
-      </CardContent>
-    </Card>
+    <div className='bg-card flex items-center justify-between gap-2 rounded-md border px-2 py-1'>
+      <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
+        {label}
+      </span>
+      <span
+        className='truncate font-mono text-xs font-semibold'
+        title={value}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 
