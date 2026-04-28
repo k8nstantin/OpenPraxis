@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   Comment,
   HierarchyNode,
@@ -130,5 +130,57 @@ export function useProductDescriptionHistory(id: string | undefined) {
     },
     enabled: !!id,
     staleTime: 60 * 1000,
+  })
+}
+
+// PUT /api/products/{id} — update fields. Used by the Description
+// edit save path and any future field-edit affordance.
+export function useUpdateProduct(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (patch: Partial<Product>) => {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error(`update product → ${res.status}`)
+      return (await res.json()) as Product
+    },
+    onSuccess: () => {
+      // Invalidate detail + list so the new title / description / status
+      // shows on next render. Hierarchy + comments aren't affected here
+      // (the description edit creates a description_revision comment
+      // server-side; that invalidation is in useCreateProductComment).
+      if (id) qc.invalidateQueries({ queryKey: productKeys.detail(id) })
+      qc.invalidateQueries({ queryKey: productKeys.list() })
+      if (id) qc.invalidateQueries({ queryKey: productKeys.comments(id) })
+      if (id)
+        qc.invalidateQueries({ queryKey: productKeys.descriptionHistory(id) })
+    },
+  })
+}
+
+// POST /api/products/{id}/comments — compose a new comment. Used by
+// the Comments tab composer.
+export function useCreateProductComment(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      author: string
+      type: string
+      body: string
+    }) => {
+      const res = await fetch(`/api/products/${id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      })
+      if (!res.ok) throw new Error(`post comment → ${res.status}`)
+      return (await res.json()) as Comment
+    },
+    onSuccess: () => {
+      if (id) qc.invalidateQueries({ queryKey: productKeys.comments(id) })
+    },
   })
 }
