@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 
 // Compact value formatting for the needle-tip badge — keeps the
 // label inside the 12px disc. 1234 → 1.2k, 1.234M → 1.2M, 0.123 → .12.
@@ -84,6 +84,7 @@ export function Gauge({
   const arcLen = Math.PI * R
   const interactive = !!onChange
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const gradId = `gauge-grad-${useId().replace(/:/g, '')}`
 
   const updateFromPointer = (clientX: number, clientY: number) => {
     if (!svgRef.current || !onChange) return
@@ -130,18 +131,30 @@ export function Gauge({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
       >
+        <defs>
+          <linearGradient id={gradId} x1='0%' y1='0%' x2='100%' y2='0%'>
+            <stop offset='0%' stopColor='#10b981' stopOpacity={0.5} />
+            <stop offset='66%' stopColor='#f59e0b' stopOpacity={0.5} />
+            <stop offset='100%' stopColor='#ef4444' stopOpacity={0.6} />
+          </linearGradient>
+        </defs>
+        {/* Background arc — left-to-right green→amber→red gradient
+            so the operator can see the value-zone progression at a
+            glance. The gradient is along the SVG x-axis, which on a
+            semicircle maps cleanly to the arc's left-to-right sweep. */}
         <path
           d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
-          stroke='currentColor'
-          strokeOpacity={0.15}
+          stroke={`url(#${gradId})`}
           strokeWidth={6}
           strokeLinecap='round'
           fill='none'
         />
+        {/* Filled arc up to the current value — deviation tone via
+            currentColor; sits on top of the gradient bg. */}
         <path
           d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
           stroke='currentColor'
-          strokeOpacity={0.7}
+          strokeOpacity={0.95}
           strokeWidth={6}
           strokeLinecap='round'
           fill='none'
