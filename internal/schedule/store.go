@@ -182,16 +182,12 @@ func (s *Store) init() error {
 		return fmt.Errorf("create idx_sched_history: %w", err)
 	}
 
-	// One-shot backfill of legacy task schedule fields. Idempotent —
-	// the WHERE NOT EXISTS guard skips any task that already has a
-	// current row, so re-runs on every boot are no-ops once the
-	// initial import has landed. Failures here are non-fatal in spirit
-	// but we surface them so an operator notices a broken DB; the
-	// "no such table: tasks" case is already squelched inside the
-	// helper for test bootstrap paths.
-	if _, err := BackfillFromTasks(context.Background(), s.db); err != nil {
-		return fmt.Errorf("backfill schedules: %w", err)
-	}
+	// NOTE: legacy task scheduling fields (tasks.next_run_at, tasks.schedule)
+	// stay live during this PR — the runner still reads them. The follow-up
+	// PR cuts the runner over to read from the schedules table and runs a
+	// one-time backfill at that point. This PR keeps init() side-effect-
+	// free aside from the migration so an op-restart with no operator
+	// activity is genuinely a no-op.
 	return nil
 }
 

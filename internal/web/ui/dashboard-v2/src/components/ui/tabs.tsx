@@ -48,7 +48,9 @@ function TabsTrigger({
         // Base — folder shape: top-rounded only, sides + top border,
         // small lift on hover. The `-mb-px` pulls the tab down by a
         // pixel so its bottom edge sits ON the TabsList's border-b.
-        'relative -mb-px inline-flex items-center gap-1.5 whitespace-nowrap rounded-t-md border border-transparent px-3 py-1.5 text-sm font-medium transition-colors',
+        // `flex-1` so the strip distributes evenly across the row
+        // instead of cramming labels on the left.
+        'relative -mb-px inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-t-md border border-transparent px-3 py-1.5 text-sm font-medium transition-colors',
         // Inactive — muted bg, subtle border, hover lifts color.
         'bg-muted/40 hover:bg-muted/70 hover:text-foreground',
         // Active — match the content surface, draw top + sides, hide

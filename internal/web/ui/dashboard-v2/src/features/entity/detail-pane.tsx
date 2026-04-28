@@ -10,6 +10,7 @@ import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
 import { MainTab } from './tabs/main'
+import { ScheduleTab } from './tabs/schedule'
 
 // Seven tabs in operator-priority order — same set across product /
 // manifest / task. Schedule + Stats are placeholders pending the
@@ -124,7 +125,7 @@ export function EntityDetailPane({
               <DAGTab kind={kind} entityId={entityId} />
             </TabsContent>
             <TabsContent value='schedule'>
-              <SchedulePlaceholder />
+              <ScheduleTab kind={kind} entityId={entityId} />
             </TabsContent>
             <TabsContent value='stats'>
               <StatsPlaceholder />
@@ -132,21 +133,6 @@ export function EntityDetailPane({
           </Tabs>
         </div>
       </ScrollArea>
-    </div>
-  )
-}
-
-// Placeholder until the central SCD-2 `schedules` table + `?as_of=`
-// time-travel land in the next backend PR. Same on every entity kind.
-function SchedulePlaceholder() {
-  return (
-    <div className='text-muted-foreground rounded-md border bg-card p-6 text-sm'>
-      <div className='mb-2 font-medium text-foreground'>Schedule</div>
-      <p>
-        When + how often this entity should fire. Backed by the central
-        SCD-2 <code className='font-mono text-xs'>schedules</code> table
-        — keyed by entity UUID. Pending the backend-decoupling PR.
-      </p>
     </div>
   )
 }
