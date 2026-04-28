@@ -1,5 +1,18 @@
 import { useRef } from 'react'
 
+// Compact value formatting for the needle-tip badge — keeps the
+// label inside the 12px disc. 1234 → 1.2k, 1.234M → 1.2M, 0.123 → .12.
+function fmtTip(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
+  if (abs >= 1_000) return (v / 1_000).toFixed(1) + 'k'
+  if (Number.isInteger(v)) return String(v)
+  if (abs >= 10) return v.toFixed(0)
+  if (abs >= 1) return v.toFixed(1)
+  return v.toFixed(2)
+}
+
 // Tick mark crossing the arc at the fraction (value-min)/range, painted
 // in `color` (hard-coded so deviation tone on the wrapper doesn't
 // repaint it). Used for both the default tick (green) on Execution
@@ -141,10 +154,30 @@ export function Gauge({
           x2={nx}
           y2={ny}
           stroke='currentColor'
-          strokeWidth={1.5}
+          strokeWidth={2.5}
           strokeLinecap='round'
         />
-        <circle cx={cx} cy={cy} r={2.5} fill='currentColor' />
+        <circle cx={cx} cy={cy} r={3} fill='currentColor' />
+        {/* Number at the needle tip — small disc with the value
+            stamped on it so the operator can read position even at
+            tight grid sizes. Placed slightly outside the arc so it
+            doesn't overlap the needle line. */}
+        <circle
+          cx={cx + (R + 6) * Math.sin(theta)}
+          cy={cy - (R + 6) * Math.cos(theta)}
+          r={6}
+          fill='currentColor'
+        />
+        <text
+          x={cx + (R + 6) * Math.sin(theta)}
+          y={cy - (R + 6) * Math.cos(theta) + 2}
+          textAnchor='middle'
+          fontSize='6'
+          fontWeight='bold'
+          fill='white'
+        >
+          {fmtTip(value)}
+        </text>
         {defaultValue !== undefined && range > 0
           ? renderTick(cx, cy, R, min, range, defaultValue, '#10b981')
           : null}
