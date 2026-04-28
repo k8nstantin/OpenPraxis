@@ -1,36 +1,115 @@
+import { useState } from 'react'
+import { Pencil } from 'lucide-react'
 import {
   useProduct,
   useProductDescriptionHistory,
+  useUpdateProduct,
 } from '@/lib/queries/products'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { DescriptionView } from '@/components/description-view'
+import { MarkdownEditor } from '@/components/markdown-editor'
 
-// Description tab — current body up top, revision history below.
-// Revisions are SCD-2 description rows from /api/descriptions/.
+// Description tab — view (markup ↔ rendered toggle, same as Portal A)
+// + inline edit. Click pencil → swap to MarkdownEditor with the same
+// toolbar + shortcuts Portal A uses (Cmd-Enter saves, Escape cancels).
+// Save → PUT /api/products/{id}; SCD-2 description revision row
+// auto-created server-side, surfaces in revision history below.
 export function DescriptionTab({ productId }: { productId: string }) {
   const product = useProduct(productId)
   const history = useProductDescriptionHistory(productId)
+  const update = useUpdateProduct(productId)
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const startEdit = () => {
+    setDraft(product.data?.description ?? '')
+    setEditing(true)
+  }
+  const cancel = () => {
+    setEditing(false)
+    setDraft('')
+  }
+  const save = async () => {
+    try {
+      await update.mutateAsync({ description: draft })
+      setEditing(false)
+      setDraft('')
+    } catch (e) {
+      console.error(e)
+    }
+  }
 
   return (
     <div className='space-y-3'>
       <Card>
-        <CardHeader className='py-3'>
+        <CardHeader className='flex flex-row items-center justify-between space-y-0 py-3'>
           <CardTitle className='text-sm font-medium'>
             Current description
           </CardTitle>
+          {!editing && !product.isLoading ? (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={startEdit}
+            >
+              <Pencil className='mr-1 h-3 w-3' />
+              Edit
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent className='pt-0 pb-3'>
           {product.isLoading ? (
             <Skeleton className='h-24 w-full' />
-          ) : product.data?.description ? (
-            <pre className='font-mono text-sm whitespace-pre-wrap break-words'>
-              {product.data.description}
-            </pre>
-          ) : (
-            <div className='text-muted-foreground text-sm italic'>
-              No description set.
+          ) : editing ? (
+            <div className='space-y-2'>
+              <MarkdownEditor
+                value={draft}
+                onChange={setDraft}
+                onSave={save}
+                onCancel={cancel}
+                autoFocus
+                placeholder='Product description in markdown…'
+              />
+              <div className='flex items-center justify-end gap-2'>
+                {update.isError ? (
+                  <span className='mr-auto text-xs text-rose-400'>
+                    Save failed: {String(update.error)}
+                  </span>
+                ) : null}
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  onClick={cancel}
+                  disabled={update.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type='button'
+                  size='sm'
+                  onClick={save}
+                  disabled={update.isPending}
+                >
+                  {update.isPending ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
             </div>
+          ) : (
+            <DescriptionView
+              raw={product.data?.description}
+              rendered={
+                (product.data as Record<string, unknown> | undefined)?.[
+                  'description_html'
+                ] as string | undefined
+              }
+            />
           )}
         </CardContent>
       </Card>

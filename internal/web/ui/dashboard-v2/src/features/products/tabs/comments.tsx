@@ -1,9 +1,13 @@
 import { useMemo, useState } from 'react'
-import { useProductComments } from '@/lib/queries/products'
+import {
+  useCreateProductComment,
+  useProductComments,
+} from '@/lib/queries/products'
 import type { Comment } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -11,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { MarkdownEditor } from '@/components/markdown-editor'
 
 const TYPE_LABEL: Record<string, string> = {
   execution_review: 'Execution Review',
@@ -22,17 +27,32 @@ const TYPE_LABEL: Record<string, string> = {
   link: 'Link',
 }
 
+// Compose-time type allowlist. The full read filter shows every type
+// the API has ever produced (including agent-only ones like
+// description_revision, watcher_finding); the compose dropdown is
+// narrower so operators only pick types meant for human authoring.
+const COMPOSE_TYPES: Array<keyof typeof TYPE_LABEL> = [
+  'user_note',
+  'decision',
+  'agent_note',
+]
+
 function fmtTime(ts: number | string): string {
   const t = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)
   if (!Number.isFinite(t)) return '—'
   return new Date(t).toLocaleString()
 }
 
-// Comments tab — full thread with type filter. Newest first. Compose
-// surface lands in a follow-up; for now this is read-only.
+// Comments tab — full thread + compose. Same MarkdownEditor used
+// across description-edit and any future markdown surface (manifests,
+// tasks). Cmd-Enter posts; Escape clears.
 export function CommentsTab({ productId }: { productId: string }) {
   const comments = useProductComments(productId)
+  const create = useCreateProductComment(productId)
   const [filter, setFilter] = useState<string>('all')
+  const [composeBody, setComposeBody] = useState('')
+  const [composeType, setComposeType] =
+    useState<keyof typeof TYPE_LABEL>('user_note')
 
   const types = useMemo(() => {
     if (!comments.data) return [] as string[]
@@ -52,8 +72,83 @@ export function CommentsTab({ productId }: { productId: string }) {
     })
   }, [comments.data, filter])
 
+  const post = async () => {
+    const body = composeBody.trim()
+    if (!body) return
+    try {
+      await create.mutateAsync({
+        author: 'operator',
+        type: composeType,
+        body,
+      })
+      setComposeBody('')
+    } catch (e) {
+      console.error(e)
+    }
+  }
+  const cancel = () => setComposeBody('')
+
   return (
     <div className='space-y-3'>
+      <Card>
+        <CardHeader className='py-3'>
+          <CardTitle className='text-sm font-medium'>Add comment</CardTitle>
+        </CardHeader>
+        <CardContent className='pt-0 pb-3'>
+          <div className='space-y-2'>
+            <MarkdownEditor
+              value={composeBody}
+              onChange={setComposeBody}
+              onSave={post}
+              onCancel={cancel}
+              compact
+              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to clear)'
+            />
+            <div className='flex items-center justify-end gap-2'>
+              {create.isError ? (
+                <span className='mr-auto text-xs text-rose-400'>
+                  Post failed: {String(create.error)}
+                </span>
+              ) : null}
+              <Select
+                value={composeType}
+                onValueChange={(v) =>
+                  setComposeType(v as keyof typeof TYPE_LABEL)
+                }
+              >
+                <SelectTrigger className='h-7 w-36 text-xs'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMPOSE_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {TYPE_LABEL[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={cancel}
+                disabled={create.isPending || !composeBody}
+              >
+                Clear
+              </Button>
+              <Button
+                type='button'
+                size='sm'
+                onClick={post}
+                disabled={create.isPending || !composeBody.trim()}
+              >
+                {create.isPending ? 'Posting…' : 'Post'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className='flex items-center justify-between gap-3'>
         <div className='text-muted-foreground text-sm'>
           {comments.isLoading
