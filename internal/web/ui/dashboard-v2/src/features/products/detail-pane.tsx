@@ -56,7 +56,8 @@ export function ProductDetailPane({
   }
 
   return (
-    <ScrollArea className='h-full'>
+    <div className='flex h-full flex-col'>
+      <ScrollArea className='flex-1'>
       <div className='space-y-4 p-4'>
         <ProductsBreadcrumb
           productId={productId}
@@ -124,6 +125,7 @@ export function ProductDetailPane({
           </TabsContent>
         </Tabs>
       </div>
-    </ScrollArea>
+      </ScrollArea>
+    </div>
   )
 }
