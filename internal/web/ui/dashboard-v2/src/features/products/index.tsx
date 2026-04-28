@@ -80,14 +80,14 @@ export function ProductsPage() {
         <div className='mb-3 flex items-center justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Products</h1>
         </div>
-        <div className='bg-card grid h-[calc(100vh-10rem)] grid-cols-1 overflow-hidden rounded-lg border lg:grid-cols-[320px_1fr]'>
-          <div className='border-b lg:border-r lg:border-b-0'>
+        <div className='bg-card grid h-[calc(100vh-10rem)] grid-cols-1 overflow-hidden rounded-lg border lg:grid-cols-[320px_minmax(0,1fr)]'>
+          <div className='h-full min-h-0 overflow-hidden border-b lg:border-r lg:border-b-0'>
             <ProductsListPane
               selectedId={selectedId}
               onSelect={setSelected}
             />
           </div>
-          <div className='min-h-0'>
+          <div className='h-full min-h-0 overflow-hidden'>
             <ProductDetailPane
               productId={selectedId}
               tab={tab}
