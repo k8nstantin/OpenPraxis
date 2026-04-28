@@ -8,9 +8,9 @@ import { ProductsPage } from '@/features/products'
 const productsSearch = z.object({
   id: z.string().optional(),
   tab: z
-    .enum(['description', 'comments', 'dependencies', 'dag', 'stats'])
+    .enum(['main', 'execution', 'comments', 'dependencies', 'dag'])
     .optional()
-    .default('description'),
+    .default('main'),
 })
 
 export const Route = createFileRoute('/_authenticated/products')({

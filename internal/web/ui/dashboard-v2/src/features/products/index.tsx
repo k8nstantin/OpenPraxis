@@ -19,8 +19,8 @@ import {
 //   ┌──────────────┬─────────────────────────────────────┐
 //   │ products     │ breadcrumb / title / status         │
 //   │ tree         │ ┌─────────────────────────────────┐ │
-//   │ (drill-in)   │ │ Description · Comments ·        │ │
-//   │              │ │ Dependencies · DAG · Stats      │ │
+//   │ (drill-in)   │ │ Main · Execution Control ·      │ │
+//   │              │ │ Comments · Dependencies · DAG   │ │
 //   │              │ ├─────────────────────────────────┤ │
 //   │              │ │  selected tab content           │ │
 //   │              │ └─────────────────────────────────┘ │
@@ -30,7 +30,7 @@ import {
 // First visit (no `?id`) → restore last-viewed from localStorage so
 // operators come back to where they were.
 
-const DEFAULT_TAB: ProductsTabId = 'description'
+const DEFAULT_TAB: ProductsTabId = 'main'
 const PANEL_GROUP_ID = 'portal-v2.products.panels'
 
 export function ProductsPage() {

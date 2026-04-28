@@ -200,15 +200,18 @@ export function useCreateProductComment(id: string | undefined) {
 // Three edge directions managed from the Dependencies editor:
 //
 //   1. Upstream product   — THIS product depends on X
-//      POST   /api/products/{this}/dependencies/{X}
+//      POST   /api/products/{this}/dependencies   body {depends_on_id: X}
 //      DELETE /api/products/{this}/dependencies/{X}
 //
 //   2. Downstream product — X depends on THIS (X becomes a sub-product)
-//      POST   /api/products/{X}/dependencies/{this}
+//      POST   /api/products/{X}/dependencies   body {depends_on_id: this}
 //      DELETE /api/products/{X}/dependencies/{this}
 //
 //   3. Owned manifest     — re-parent manifest.project_id = THIS
 //      PUT /api/manifests/{m} with body { project_id: this | "" }
+//
+// NOTE: the POST endpoint is body-style only — POSTing to the path-style
+// `/dependencies/{X}` URL returns 404 (only DELETE accepts that shape).
 //
 // Every mutation posts a `dependency_revision` agent_note comment on
 // THIS product with an op + snapshot so the revision history can show
@@ -260,10 +263,11 @@ export function useAddUpstreamProductDep(productId: string | undefined) {
       target: { id: string; marker: string; title: string }
       snapshot: DepRevisionPayload['snapshot']
     }) => {
-      const res = await fetch(
-        `/api/products/${productId}/dependencies/${input.target.id}`,
-        { method: 'POST' }
-      )
+      const res = await fetch(`/api/products/${productId}/dependencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depends_on_id: input.target.id }),
+      })
       if (!res.ok && res.status !== 409)
         throw new Error(`add upstream → ${res.status}`)
       if (productId)
@@ -312,8 +316,12 @@ export function useAddDownstreamProductDep(productId: string | undefined) {
       snapshot: DepRevisionPayload['snapshot']
     }) => {
       const res = await fetch(
-        `/api/products/${input.target.id}/dependencies/${productId}`,
-        { method: 'POST' }
+        `/api/products/${input.target.id}/dependencies`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ depends_on_id: productId }),
+        }
       )
       if (!res.ok && res.status !== 409)
         throw new Error(`add downstream → ${res.status}`)
@@ -463,10 +471,11 @@ export function useRestoreDependencySnapshot(
 
       // Sub-product re-parents (downstream — X depends on this).
       for (const subId of subsToAdd) {
-        const r = await fetch(
-          `/api/products/${subId}/dependencies/${productId}`,
-          { method: 'POST' }
-        )
+        const r = await fetch(`/api/products/${subId}/dependencies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ depends_on_id: productId }),
+        })
         if (!r.ok && r.status !== 409) {
           throw new Error(`restore: add sub ${subId} → ${r.status}`)
         }
@@ -576,8 +585,12 @@ export function useCreateAndLinkSubProduct(productId: string | undefined) {
 
       // 2. POST link new->this as a downstream dep (new depends on this)
       const linkRes = await fetch(
-        `/api/products/${created.id}/dependencies/${productId}`,
-        { method: 'POST' }
+        `/api/products/${created.id}/dependencies`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ depends_on_id: productId }),
+        }
       )
       if (!linkRes.ok && linkRes.status !== 409)
         throw new Error(`link sub → ${linkRes.status}`)

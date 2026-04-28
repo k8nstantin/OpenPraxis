@@ -1,6 +1,5 @@
 import { useProduct } from '@/lib/queries/products'
 import { Boxes } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -9,32 +8,21 @@ import { ProductStatusControl } from './status-control'
 import { CommentsTab } from './tabs/comments'
 import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
-import { DescriptionTab } from './tabs/description'
-import { StatsTab } from './tabs/stats'
+import { ExecutionTab } from './tabs/execution'
+import { MainTab } from './tabs/main'
 
-// Five tabs in operator-priority order. Most-checked first; lightest
-// glance-able tab last. The old Main tab was removed because every
-// thing it surfaced (sub-products, manifests, ideas) is reachable
-// elsewhere — sub-products via drill-in from the left pane, manifests
-// + sub-products via Dependencies, raw counts via Stats.
+// Five tabs in operator-priority order. Main combines stats + the
+// editable description (with revision history). Execution exposes the
+// full settings catalog scoped to this product.
 const TAB_IDS = [
-  'description',
+  'main',
+  'execution',
   'comments',
   'dependencies',
   'dag',
-  'stats',
 ] as const
 
 export type ProductsTabId = (typeof TAB_IDS)[number]
-
-const STATUS_COLOR: Record<string, string> = {
-  open: 'bg-emerald-500/15 text-emerald-500',
-  in_progress: 'bg-sky-500/15 text-sky-500',
-  draft: 'bg-amber-500/15 text-amber-500',
-  closed: 'bg-zinc-500/15 text-zinc-400',
-  archived: 'bg-zinc-500/10 text-zinc-500',
-  cancelled: 'bg-rose-500/15 text-rose-500',
-}
 
 // Right-pane content for the master-detail Products layout. Renders
 // breadcrumb + title + status + 5-tab strip for the selected product.
@@ -102,15 +90,18 @@ export function ProductDetailPane({
             className='space-y-2'
           >
             <TabsList>
-              <TabsTrigger value='description'>Description</TabsTrigger>
+              <TabsTrigger value='main'>Main</TabsTrigger>
+              <TabsTrigger value='execution'>Execution Control</TabsTrigger>
               <TabsTrigger value='comments'>Comments</TabsTrigger>
               <TabsTrigger value='dependencies'>Dependencies</TabsTrigger>
               <TabsTrigger value='dag'>DAG</TabsTrigger>
-              <TabsTrigger value='stats'>Stats</TabsTrigger>
             </TabsList>
 
-            <TabsContent value='description'>
-              <DescriptionTab productId={productId} />
+            <TabsContent value='main'>
+              <MainTab productId={productId} />
+            </TabsContent>
+            <TabsContent value='execution'>
+              <ExecutionTab productId={productId} />
             </TabsContent>
             <TabsContent value='comments'>
               <CommentsTab productId={productId} />
@@ -120,9 +111,6 @@ export function ProductDetailPane({
             </TabsContent>
             <TabsContent value='dag'>
               <DAGTab productId={productId} />
-            </TabsContent>
-            <TabsContent value='stats'>
-              <StatsTab productId={productId} />
             </TabsContent>
           </Tabs>
         </div>

@@ -436,7 +436,7 @@ function DepSection({
                 {rowHref ? (
                   <Link
                     to={rowHref}
-                    search={{ id: r.id, tab: 'description' }}
+                    search={{ id: r.id, tab: 'main' }}
                     className='min-w-0 flex-1'
                   >
                     <div className='truncate font-medium'>{r.title}</div>

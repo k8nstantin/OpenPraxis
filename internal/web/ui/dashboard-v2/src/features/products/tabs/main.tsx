@@ -3,23 +3,24 @@ import { Pencil } from 'lucide-react'
 import {
   useProduct,
   useProductDescriptionHistory,
+  useProductHierarchy,
   useUpdateProduct,
 } from '@/lib/queries/products'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DescriptionView } from '@/components/description-view'
 import { MarkdownEditor } from '@/components/markdown-editor'
 
-// Description tab — view (markup ↔ rendered toggle, same as Portal A)
-// + inline edit. Click pencil → swap to MarkdownEditor with the same
-// toolbar + shortcuts Portal A uses (Cmd-Enter saves, Escape cancels).
-// Save → PUT /api/products/{id}; SCD-2 description revision row
-// auto-created server-side, surfaces in revision history below.
-export function DescriptionTab({ productId }: { productId: string }) {
+// Main tab — stats grid + description editor + description revision
+// history. Same Markup ↔ Rendered toggle as Portal A; Cmd-Enter saves,
+// Escape cancels. PUT /api/products/{id} drops a new SCD-2 description
+// revision row server-side, surfaced in the history card below.
+export function MainTab({ productId }: { productId: string }) {
   const product = useProduct(productId)
   const history = useProductDescriptionHistory(productId)
+  const hierarchy = useProductHierarchy(productId)
   const update = useUpdateProduct(productId)
 
   const [editing, setEditing] = useState(false)
@@ -43,27 +44,92 @@ export function DescriptionTab({ productId }: { productId: string }) {
     }
   }
 
+  const p = product.data
+  const subProductCount = hierarchy.data?.sub_products?.length ?? 0
+  const created = p?.created_at ? new Date(p.created_at) : null
+  const updated = p?.updated_at ? new Date(p.updated_at) : null
+
   return (
     <div className='space-y-3'>
+      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+        {product.isLoading || !p ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className='h-20 w-full' />
+          ))
+        ) : (
+          <>
+            <Stat label='Total cost' value={fmtCost(p.total_cost ?? 0)} />
+            <Stat label='Manifests' value={String(p.total_manifests ?? 0)} />
+            <Stat label='Tasks' value={String(p.total_tasks ?? 0)} />
+            <Stat label='Turns' value={String(p.total_turns ?? 0)} />
+          </>
+        )}
+      </div>
+
+      {p ? (
+        <Card>
+          <CardContent className='space-y-2 p-3 text-sm'>
+            <Row label='Sub-products' value={String(subProductCount)} />
+            <Row
+              label='Status'
+              value={
+                <Badge variant='outline' className='text-[10px] uppercase'>
+                  {p.status}
+                </Badge>
+              }
+            />
+            {p.tags && p.tags.length > 0 ? (
+              <Row
+                label='Tags'
+                value={
+                  <div className='flex flex-wrap justify-end gap-1'>
+                    {p.tags.map((t) => (
+                      <Badge
+                        key={t}
+                        variant='secondary'
+                        className='text-[10px]'
+                      >
+                        {t}
+                      </Badge>
+                    ))}
+                  </div>
+                }
+              />
+            ) : null}
+            {p.source_node ? (
+              <Row
+                label='Source node'
+                value={
+                  <code className='font-mono text-xs'>{p.source_node}</code>
+                }
+              />
+            ) : null}
+            {created ? (
+              <Row label='Created' value={created.toLocaleString()} />
+            ) : null}
+            {updated ? (
+              <Row label='Updated' value={updated.toLocaleString()} />
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
-        <CardHeader className='flex flex-row items-center justify-between space-y-0 py-3'>
-          <CardTitle className='text-sm font-medium'>
-            Current description
-          </CardTitle>
+        <CardContent className='space-y-2 p-3'>
           {!editing && !product.isLoading ? (
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              className='h-7 px-2 text-xs'
-              onClick={startEdit}
-            >
-              <Pencil className='mr-1 h-3 w-3' />
-              Edit
-            </Button>
+            <div className='flex justify-end'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={startEdit}
+              >
+                <Pencil className='mr-1 h-3 w-3' />
+                Edit
+              </Button>
+            </div>
           ) : null}
-        </CardHeader>
-        <CardContent className='pt-0 pb-3'>
           {product.isLoading ? (
             <Skeleton className='h-24 w-full' />
           ) : editing ? (
@@ -115,15 +181,15 @@ export function DescriptionTab({ productId }: { productId: string }) {
       </Card>
 
       <Card>
-        <CardHeader className='py-3'>
-          <CardTitle className='flex items-center justify-between text-sm font-medium'>
-            <span>Revision history</span>
+        <CardContent className='space-y-2 p-3'>
+          <div className='flex items-center justify-between'>
+            <span className='text-muted-foreground text-xs uppercase tracking-wider'>
+              Revisions
+            </span>
             <Badge variant='outline' className='text-[10px]'>
               {history.data?.length ?? 0}
             </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className='pt-0 pb-3'>
+          </div>
           {history.isLoading ? (
             <Skeleton className='h-12 w-full' />
           ) : !history.data || history.data.length === 0 ? (
@@ -153,6 +219,38 @@ export function DescriptionTab({ productId }: { productId: string }) {
       </Card>
     </div>
   )
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <Card>
+      <CardContent className='flex flex-col items-start gap-0.5 p-3'>
+        <span className='text-muted-foreground text-[10px] uppercase tracking-wider'>
+          {label}
+        </span>
+        <span className='font-mono text-xl font-semibold'>{value}</span>
+      </CardContent>
+    </Card>
+  )
+}
+
+function Row({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
+  return (
+    <div className='flex items-center justify-between gap-3'>
+      <span className='text-muted-foreground'>{label}</span>
+      <div className='text-foreground'>{value}</div>
+    </div>
+  )
+}
+
+function fmtCost(n: number): string {
+  return '$' + n.toFixed(2)
 }
 
 function fmtTime(ts: number | string): string {
