@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenPraxis Portal V2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0a;
+      --panel: #141414;
+      --border: #2a2a2a;
+      --text: #e5e5e5;
+      --muted: #888;
+      --accent: #5e9eff;
+      --green: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 64px 32px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin: 0 0 4px 0;
+    }
+    .lede {
+      color: var(--muted);
+      margin: 0 0 32px 0;
+      font-size: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin: 0 0 16px 0;
+    }
+    .panel h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 0 0 12px 0;
+      font-weight: 600;
+    }
+    code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      background: #1f1f1f;
+      padding: 1px 6px;
+      border-radius: 3px;
+      color: var(--accent);
+    }
+    ul.routes {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      columns: 2;
+      column-gap: 24px;
+    }
+    ul.routes li {
+      padding: 4px 0;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    ul.routes li code { color: var(--accent); background: transparent; padding: 0; }
+    .ok { color: var(--green); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>OpenPraxis Portal V2</h1>
+    <p class="lede">Foundation scaffold pending. This is the dual-port plumbing stub.</p>
+
+    <div class="panel">
+      <h2>Status</h2>
+      <p><span class="ok">●</span> Portal V2 listener up. Same Go binary, same DB, same backend as Portal A.</p>
+      <p>Portal A still live on <code>:8765</code> (legacy + experiment). Portal V2 is here on the configured port.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Hash routes (planned)</h2>
+      <ul class="routes">
+        <li><code>#overview</code></li>
+        <li><code>#active</code></li>
+        <li><code>#catalog</code></li>
+        <li><code>#inbox</code></li>
+        <li><code>#recall</code></li>
+        <li><code>#productivity</code></li>
+        <li><code>#audit</code></li>
+        <li><code>#activity</code></li>
+        <li><code>#settings</code></li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <h2>Next chunk</h2>
+      <p>Scaffold shadcn-admin shell into <code>internal/web/ui/dashboard-v2/</code>, replace this stub with a real React app, wire the API client to this same port.</p>
+    </div>
+  </div>
+</body>
+</html>

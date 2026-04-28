@@ -26,6 +26,7 @@ import (
 )
 
 var noBrowser bool
+var portalV2Port int
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -166,6 +167,29 @@ var serveCmd = &cobra.Command{
 				slog.Error("HTTP server failed", "error", err)
 			}
 		}()
+
+		// --- Portal V2 listener (dual-port architecture) ---
+		// Same Go binary, same DB, same backend services — different frontend
+		// tree at `internal/web/ui/dashboard-v2/`. Static-only for now (chunk 1
+		// plumbing); the real shadcn-admin scaffold lands in a later chunk
+		// once we've verified the dual-port pattern.
+		var portalV2Server *http.Server
+		if portalV2Port > 0 {
+			v2Addr := fmt.Sprintf("%s:%d", cfg.Server.Host, portalV2Port)
+			portalV2Server = &http.Server{
+				Addr:         v2Addr,
+				Handler:      web.HandlerV2(),
+				ReadTimeout:  30 * time.Second,
+				WriteTimeout: 30 * time.Second,
+			}
+			fmt.Printf("  Portal V2:  http://%s:%d\n", cfg.Server.Host, portalV2Port)
+			go func() {
+				slog.Info("Portal V2 listening", "addr", v2Addr)
+				if err := portalV2Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("Portal V2 failed", "error", err)
+				}
+			}()
+		}
 
 		// Task runner — spawns autonomous agents. RecoverInFlight is the
 		// RC/M5 replacement for the blanket CleanupOrphaned sweep: it
@@ -384,6 +408,9 @@ var serveCmd = &cobra.Command{
 		defer shutdownCancel()
 		httpServer.Shutdown(shutdownCtx)
 		syncHTTP.Shutdown(shutdownCtx)
+		if portalV2Server != nil {
+			portalV2Server.Shutdown(shutdownCtx)
+		}
 
 		return nil
 	},
@@ -392,6 +419,10 @@ var serveCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open the dashboard in the browser")
+	// Portal V2 is the redesigned operator dashboard built fresh on shadcn-admin
+	// in `internal/web/ui/dashboard-v2/`. Defaults to :8766 alongside the legacy
+	// portal on :8765. Set 0 to disable while the v2 work is in flight.
+	serveCmd.Flags().IntVar(&portalV2Port, "portal-v2-port", 8766, "Portal V2 listener port (0 to disable)")
 }
 
 func openBrowser(url string) {
