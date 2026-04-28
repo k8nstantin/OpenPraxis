@@ -3,7 +3,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProductsListPane } from './list-pane'
-import { ProductDetailPane } from './detail-pane'
+import { ProductDetailPane, type ProductsTabId } from './detail-pane'
 import {
   readLastViewedProductId,
   writeLastViewedProductId,
@@ -14,8 +14,9 @@ import {
 //   ┌──────────────┬─────────────────────────────────────┐
 //   │ list of      │ breadcrumb / title / status         │
 //   │ current      │ ┌─────────────────────────────────┐ │
-//   │ level's      │ │ Main · Desc · ... · DAG         │ │
-//   │ children     │ ├─────────────────────────────────┤ │
+//   │ level's      │ │ Description · Comments ·        │ │
+//   │ children     │ │ Dependencies · DAG · Stats      │ │
+//   │              │ ├─────────────────────────────────┤ │
 //   │              │ │  selected tab content           │ │
 //   │              │ └─────────────────────────────────┘ │
 //   └──────────────┴─────────────────────────────────────┘
@@ -23,26 +24,21 @@ import {
 //
 // Click a row in the list → drill in: URL `?id=<id>` updates →
 // breadcrumb extends → list swaps to ITS sub-products → detail
-// pane shows ITS 6 tabs.
+// pane shows ITS 5 tabs.
 //
 // First visit (no `?id`) → restore last-viewed from localStorage so
 // operators come back to where they were. If there's no last-viewed,
 // the detail pane shows an empty state and the operator picks from
 // the list.
-type ProductsTab =
-  | 'main'
-  | 'description'
-  | 'stats'
-  | 'comments'
-  | 'dependencies'
-  | 'dag'
+
+const DEFAULT_TAB: ProductsTabId = 'description'
 
 export function ProductsPage() {
   const search = useSearch({ from: '/_authenticated/products' })
   const navigate = useNavigate({ from: '/_authenticated/products' })
 
   const selectedId = search.id
-  const tab = (search.tab ?? 'main') as ProductsTab
+  const tab = (search.tab ?? DEFAULT_TAB) as ProductsTabId
 
   // First-load fallback: restore last-viewed product from localStorage
   // when the URL doesn't already specify an id. Operators don't work
@@ -51,7 +47,10 @@ export function ProductsPage() {
     if (!selectedId) {
       const last = readLastViewedProductId()
       if (last) {
-        navigate({ to: '/products', search: { id: last, tab: 'main' } })
+        navigate({
+          to: '/products',
+          search: { id: last, tab: DEFAULT_TAB },
+        })
       }
     }
     // we only want this on mount + when selectedId changes from undefined
@@ -67,9 +66,9 @@ export function ProductsPage() {
   }, [selectedId])
 
   const setSelected = (id: string) => {
-    navigate({ to: '/products', search: { id, tab: 'main' } })
+    navigate({ to: '/products', search: { id, tab: DEFAULT_TAB } })
   }
-  const setTab = (next: ProductsTab) => {
+  const setTab = (next: ProductsTabId) => {
     navigate({ to: '/products', search: { id: selectedId, tab: next } })
   }
 

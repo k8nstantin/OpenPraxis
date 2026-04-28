@@ -7,24 +7,22 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 
 // Description tab — current body up top, revision history below.
-//
-// Revisions stream is the SCD-2 description versioning we already
-// store as type=description_revision comments. The /api/descriptions/
-// endpoint returns the formal revision rows; if it isn't wired for
-// products yet the history is empty (graceful degradation).
+// Revisions are SCD-2 description rows from /api/descriptions/.
 export function DescriptionTab({ productId }: { productId: string }) {
   const product = useProduct(productId)
   const history = useProductDescriptionHistory(productId)
 
   return (
-    <div className='space-y-4'>
+    <div className='space-y-3'>
       <Card>
-        <CardHeader>
-          <CardTitle className='text-base'>Current description</CardTitle>
+        <CardHeader className='py-3'>
+          <CardTitle className='text-sm font-medium'>
+            Current description
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className='pt-0 pb-3'>
           {product.isLoading ? (
-            <Skeleton className='h-32 w-full' />
+            <Skeleton className='h-24 w-full' />
           ) : product.data?.description ? (
             <pre className='font-mono text-sm whitespace-pre-wrap break-words'>
               {product.data.description}
@@ -38,17 +36,17 @@ export function DescriptionTab({ productId }: { productId: string }) {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className='flex items-center justify-between text-base'>
+        <CardHeader className='py-3'>
+          <CardTitle className='flex items-center justify-between text-sm font-medium'>
             <span>Revision history</span>
             <Badge variant='outline' className='text-[10px]'>
               {history.data?.length ?? 0}
             </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className='pt-0 pb-3'>
           {history.isLoading ? (
-            <Skeleton className='h-16 w-full' />
+            <Skeleton className='h-12 w-full' />
           ) : !history.data || history.data.length === 0 ? (
             <div className='text-muted-foreground text-sm'>
               No prior revisions recorded.
@@ -56,7 +54,7 @@ export function DescriptionTab({ productId }: { productId: string }) {
           ) : (
             <div className='divide-y'>
               {history.data.map((rev) => (
-                <div key={rev.id} className='space-y-1 py-3 text-sm'>
+                <div key={rev.id} className='space-y-1 py-2 text-sm'>
                   <div className='flex items-center justify-between'>
                     <code className='font-mono text-[11px]'>
                       {rev.author.slice(0, 16)}

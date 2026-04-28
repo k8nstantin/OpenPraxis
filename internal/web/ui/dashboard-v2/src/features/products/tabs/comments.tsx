@@ -78,22 +78,22 @@ export function CommentsTab({ productId }: { productId: string }) {
       <Card>
         <CardContent className='p-0'>
           {comments.isLoading ? (
-            <div className='space-y-2 p-4'>
-              <Skeleton className='h-16 w-full' />
-              <Skeleton className='h-16 w-full' />
+            <div className='space-y-2 p-3'>
+              <Skeleton className='h-12 w-full' />
+              <Skeleton className='h-12 w-full' />
             </div>
           ) : comments.isError ? (
-            <div className='p-4 text-sm text-rose-400'>
+            <div className='p-3 text-sm text-rose-400'>
               Failed: {String(comments.error)}
             </div>
           ) : visible.length === 0 ? (
-            <div className='text-muted-foreground p-4 text-sm'>
+            <div className='text-muted-foreground p-3 text-sm'>
               No comments.
             </div>
           ) : (
             <div className='divide-y'>
               {visible.map((c) => (
-                <div key={c.id} className='space-y-1.5 p-4 text-sm'>
+                <div key={c.id} className='space-y-1 p-3 text-sm'>
                   <div className='flex items-center justify-between gap-2'>
                     <div className='flex items-center gap-2'>
                       <code className='font-mono text-[11px]'>
