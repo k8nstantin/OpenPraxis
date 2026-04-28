@@ -1,13 +1,8 @@
 import { useEffect } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-// react-resizable-panels v3 renamed exports: Group / Panel / Separator
-// (was PanelGroup / Panel / PanelResizeHandle in v2 docs). Alias on
-// import so JSX call sites read the same as v2 docs.
-import {
-  Group as PanelGroup,
-  Panel,
-  Separator as PanelResizeHandle,
-} from 'react-resizable-panels'
+// react-resizable-panels v2 — stable, well-documented API. v4 is a
+// breaking rewrite with renamed primitives + altered drag semantics.
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProductsListPane } from './list-pane'
@@ -90,7 +85,17 @@ export function ProductsPage() {
                 onSelect={setSelected}
               />
             </Panel>
-            <PanelResizeHandle className='bg-border hover:bg-primary/50 data-[resize-handle-active=true]:bg-primary w-px transition-colors' />
+            <PanelResizeHandle className='group bg-border hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary relative w-1 cursor-col-resize transition-colors'>
+              {/* Grip indicator — three dots vertically centered. Shows
+                  the divider is interactive, follows VS Code / Linear
+                  pattern. Only visible on hover so the resting state
+                  stays clean. */}
+              <div className='absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'>
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+              </div>
+            </PanelResizeHandle>
             <Panel defaultSize={78} minSize={40}>
               <ProductDetailPane
                 productId={selectedId}
