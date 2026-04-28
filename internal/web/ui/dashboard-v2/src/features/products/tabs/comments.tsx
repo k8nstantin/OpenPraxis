@@ -54,23 +54,31 @@ export function CommentsTab({ productId }: { productId: string }) {
   const [composeType, setComposeType] =
     useState<keyof typeof TYPE_LABEL>('user_note')
 
-  const types = useMemo(() => {
-    if (!comments.data) return [] as string[]
-    return Array.from(new Set(comments.data.map((c) => c.type)))
+  // Hide internal change-log records that the Dependencies tab posts
+  // (agent_notes wrapped in <dependency_revision>). They live in
+  // the Dependencies > Revision history surface — they're operational
+  // events, not real comments. Filter at the source so type counts +
+  // the filter dropdown don't reflect them either.
+  const real = useMemo<Comment[]>(() => {
+    if (!comments.data) return []
+    return comments.data.filter(
+      (c) => !(c.body ?? '').includes('<dependency_revision>')
+    )
   }, [comments.data])
 
+  const types = useMemo(() => {
+    return Array.from(new Set(real.map((c) => c.type)))
+  }, [real])
+
   const visible = useMemo<Comment[]>(() => {
-    if (!comments.data) return []
     const list =
-      filter === 'all'
-        ? comments.data
-        : comments.data.filter((c) => c.type === filter)
+      filter === 'all' ? real : real.filter((c) => c.type === filter)
     return list.slice().sort((a, b) => {
       const ta = typeof a.created_at === 'number' ? a.created_at : 0
       const tb = typeof b.created_at === 'number' ? b.created_at : 0
       return tb - ta
     })
-  }, [comments.data, filter])
+  }, [real, filter])
 
   const post = async () => {
     const body = composeBody.trim()
@@ -153,7 +161,7 @@ export function CommentsTab({ productId }: { productId: string }) {
         <div className='text-muted-foreground text-sm'>
           {comments.isLoading
             ? 'Loading…'
-            : `${visible.length} of ${comments.data?.length ?? 0}`}
+            : `${visible.length} of ${real.length}`}
         </div>
         <Select value={filter} onValueChange={setFilter}>
           <SelectTrigger className='w-56'>
