@@ -207,17 +207,23 @@
       var costPts = [], turnPts = [], actionPts = [], cpuPts = [], rssPts = [];
       var priorCost = 0, priorTurns = 0, priorActions = 0;
 
-      // Per-tick DELTAS (rate of change) — visually matches CPU/RSS
-      // (oscillating), not monotonic-cumulative which renders as a
-      // smooth slope. Right-side numbers are CUMULATIVE totals across
-      // all runs, displayed via displayValue override on the sparkline
-      // so the chart shape doesn't dictate the headline figure.
-      // cpu/rss stay absolute (physical metrics).
+      // Cumulative running totals across the full task lifecycle. Each
+      // host-sampler tick contributes one point to ALL FIVE series so the
+      // X-axis density matches across cost / turns / actions / cpu% /
+      // rss mb — same number of circles at the same X positions on the
+      // sparklines. cpu% and rss are physical metrics (instant per-tick
+      // value); cost/turns/actions are monotone running sums — each
+      // subsampled point has a unique Y, so all 20 circles render
+      // visibly instead of clustering at y=0 the way per-tick deltas
+      // did when the values within a 5-second window were small.
+      //
+      // Legacy-run fallback: runs without host_samples (older sampler,
+      // or runs where the sampler crashed) get a single synthesized
+      // endpoint at run completion using the run row's recorded counters
+      // so the cumulative line stays connected and ends honest.
       sortedRuns.forEach(function (r, ri) {
         var samples = sortedSamples[ri] || [];
         if (samples.length === 0) {
-          // Legacy run with no host_samples — synthesize endpoint with
-          // final counters so the line still has a delta to render.
           samples = [{
             ts: r.completed_at || r.started_at || '',
             cost_usd: r.cost_usd || 0,
@@ -227,26 +233,22 @@
             rss_mb: 0,
           }];
         }
-        var prevCost = 0, prevTurns = 0, prevActions = 0;
         samples.forEach(function (sm) {
           var rn = r.run_number;
           var t = (sm.ts || '').slice(11, 19);
-          var dC = Math.max(0, (sm.cost_usd || 0) - prevCost);
-          var dT = Math.max(0, (sm.turns || 0) - prevTurns);
-          var dA = Math.max(0, (sm.actions || 0) - prevActions);
-          prevCost = sm.cost_usd || 0;
-          prevTurns = sm.turns || 0;
-          prevActions = sm.actions || 0;
-          costPts.push({ run: rn, y: dC,
-            tooltip: '+' + fmtCost(dC) + ' tick (run #' + rn + ' at ' + t + ')' });
-          turnPts.push({ run: rn, y: dT,
-            tooltip: '+' + dT + ' turns (run #' + rn + ' at ' + t + ')' });
-          actionPts.push({ run: rn, y: dA,
-            tooltip: '+' + dA + ' actions (run #' + rn + ' at ' + t + ')' });
+          var cumC = priorCost + (sm.cost_usd || 0);
+          var cumT = priorTurns + (sm.turns || 0);
+          var cumA = priorActions + (sm.actions || 0);
+          costPts.push({ run: rn, y: cumC,
+            tooltip: fmtCost(cumC) + ' total at ' + t + ' (run #' + rn + ')' });
+          turnPts.push({ run: rn, y: cumT,
+            tooltip: cumT + ' turns total at ' + t + ' (run #' + rn + ')' });
+          actionPts.push({ run: rn, y: cumA,
+            tooltip: cumA + ' actions total at ' + t + ' (run #' + rn + ')' });
           cpuPts.push({ run: rn, y: sm.cpu_pct || 0,
-            tooltip: (sm.cpu_pct || 0).toFixed(1) + '% (run #' + rn + ' at ' + t + ')' });
+            tooltip: (sm.cpu_pct || 0).toFixed(1) + '% at ' + t + ' (run #' + rn + ')' });
           rssPts.push({ run: rn, y: sm.rss_mb || 0,
-            tooltip: Math.round(sm.rss_mb || 0) + ' MB (run #' + rn + ' at ' + t + ')' });
+            tooltip: Math.round(sm.rss_mb || 0) + ' MB at ' + t + ' (run #' + rn + ')' });
         });
         priorCost += r.cost_usd || 0;
         priorTurns += r.turns || 0;
