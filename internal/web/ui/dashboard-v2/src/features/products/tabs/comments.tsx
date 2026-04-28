@@ -4,8 +4,9 @@ import {
   useProductComments,
 } from '@/lib/queries/products'
 import type { Comment } from '@/lib/types'
+import { Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import {
@@ -80,6 +81,12 @@ export function CommentsTab({ productId }: { productId: string }) {
     })
   }, [real, filter])
 
+  const [composing, setComposing] = useState(false)
+  const open = () => setComposing(true)
+  const close = () => {
+    setComposing(false)
+    setComposeBody('')
+  }
   const post = async () => {
     const body = composeBody.trim()
     if (!body) return
@@ -89,28 +96,60 @@ export function CommentsTab({ productId }: { productId: string }) {
         type: composeType,
         body,
       })
-      setComposeBody('')
+      close()
     } catch (e) {
       console.error(e)
     }
   }
-  const cancel = () => setComposeBody('')
 
   return (
-    <div className='space-y-3'>
-      <Card>
-        <CardHeader className='py-3'>
-          <CardTitle className='text-sm font-medium'>Add comment</CardTitle>
-        </CardHeader>
-        <CardContent className='pt-0 pb-3'>
-          <div className='space-y-2'>
+    <div className='space-y-2'>
+      <div className='flex items-center justify-between gap-3'>
+        <div className='text-muted-foreground text-sm'>
+          {comments.isLoading
+            ? 'Loading…'
+            : `${visible.length} of ${real.length}`}
+        </div>
+        <div className='flex items-center gap-2'>
+          <Select value={filter} onValueChange={setFilter}>
+            <SelectTrigger className='h-8 w-48 text-xs'>
+              <SelectValue placeholder='Filter by type' />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All types</SelectItem>
+              {types.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TYPE_LABEL[t] ?? t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!composing ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={open}
+              className='h-8 text-xs'
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              Add comment
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {composing ? (
+        <Card className='gap-0 py-0'>
+          <CardContent className='space-y-2 px-3 py-2'>
             <MarkdownEditor
               value={composeBody}
               onChange={setComposeBody}
               onSave={post}
-              onCancel={cancel}
+              onCancel={close}
               compact
-              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to clear)'
+              autoFocus
+              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to cancel)'
             />
             <div className='flex items-center justify-end gap-2'>
               {create.isError ? (
@@ -139,10 +178,10 @@ export function CommentsTab({ productId }: { productId: string }) {
                 type='button'
                 variant='ghost'
                 size='sm'
-                onClick={cancel}
-                disabled={create.isPending || !composeBody}
+                onClick={close}
+                disabled={create.isPending}
               >
-                Clear
+                Cancel
               </Button>
               <Button
                 type='button'
@@ -153,32 +192,11 @@ export function CommentsTab({ productId }: { productId: string }) {
                 {create.isPending ? 'Posting…' : 'Post'}
               </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <div className='flex items-center justify-between gap-3'>
-        <div className='text-muted-foreground text-sm'>
-          {comments.isLoading
-            ? 'Loading…'
-            : `${visible.length} of ${real.length}`}
-        </div>
-        <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className='w-56'>
-            <SelectValue placeholder='Filter by type' />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='all'>All types</SelectItem>
-            {types.map((t) => (
-              <SelectItem key={t} value={t}>
-                {TYPE_LABEL[t] ?? t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <Card>
+      <Card className='gap-0 py-0'>
         <CardContent className='p-0'>
           {comments.isLoading ? (
             <div className='space-y-2 p-3'>
