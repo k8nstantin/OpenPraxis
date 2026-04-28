@@ -91,11 +91,22 @@ export function useProductComments(id: string | undefined) {
   })
 }
 
+// /api/products/{id}/dependencies returns `{ deps: [...] }` (wrapped),
+// not a bare array. Normalize so callers always see ProductDependency[].
+// (Once the endpoint shape is stabilized + tygo-typed we can drop the
+// unwrap; for now the runtime check costs nothing and survives a future
+// schema flip in either direction.)
 export function useProductDependencies(id: string | undefined) {
   return useQuery({
     queryKey: productKeys.deps(id ?? ''),
-    queryFn: () =>
-      fetchJSON<ProductDependency[]>(`/api/products/${id}/dependencies`),
+    queryFn: async () => {
+      const res = await fetch(`/api/products/${id}/dependencies`)
+      if (!res.ok) throw new Error(`dependencies → ${res.status}`)
+      const data = (await res.json()) as
+        | ProductDependency[]
+        | { deps: ProductDependency[] }
+      return Array.isArray(data) ? data : (data.deps ?? [])
+    },
     enabled: !!id,
     staleTime: 30 * 1000,
   })
