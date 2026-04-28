@@ -97,56 +97,59 @@ export function MainTab({ productId }: { productId: string }) {
 
   return (
     <div className='space-y-2'>
-      <div className='grid grid-cols-3 gap-1 lg:grid-cols-6'>
-        {product.isLoading || !p ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className='h-6 w-full' />
-          ))
-        ) : (
-          <>
-            <Stat label='Estimated Cost' value='—' />
-            <Stat label='Actual' value={fmtCost(actual)} />
-            <Stat label='Turns' value={String(p.total_turns ?? 0)} />
-            <Stat label='Actions' value='—' />
-            <Stat label='Tokens' value='—' />
-            <Stat
-              label='Model'
-              value={repoInfo.default_model || 'default'}
-            />
-          </>
-        )}
-      </div>
-
       {p ? (
-        <div className='grid grid-cols-2 gap-2'>
-          <div className={`flex flex-col items-stretch ${costTone(0)} opacity-50`}>
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
+          <div
+            className={`flex flex-col items-stretch ${costTone(0)} opacity-50`}
+            title='pending estimator backend (recompute hook + history)'
+          >
             <Gauge
-              label='estimated cost'
+              label='estimated'
               value={0}
               min={0}
               max={costMax}
               unit='USD'
               redLine={budget}
             />
-            <div className='text-muted-foreground px-1 pt-0.5 text-center text-[10px]'>
-              pending estimator
-            </div>
           </div>
           <div className={`flex flex-col items-stretch ${costTone(actual)}`}>
             <Gauge
-              label='actual cost'
+              label='actual'
               value={actual}
               min={0}
               max={costMax}
               unit='USD'
               redLine={budget}
             />
-            <div className='text-muted-foreground px-1 pt-0.5 text-center text-[10px]'>
-              red line = daily budget ({fmtCost(budget)})
-            </div>
+          </div>
+          <div className='flex flex-col items-stretch text-emerald-500'>
+            <Gauge
+              label='turns'
+              value={p.total_turns ?? 0}
+              min={0}
+              max={Math.max(50, (p.total_turns ?? 0) * 1.5)}
+            />
+          </div>
+          <div
+            className='flex flex-col items-stretch text-emerald-500 opacity-50'
+            title='pending total_actions on product API'
+          >
+            <Gauge label='actions' value={0} min={0} max={1000} />
+          </div>
+          <div
+            className='flex flex-col items-stretch text-emerald-500 opacity-50'
+            title='pending total_tokens on product API'
+          >
+            <Gauge label='tokens' value={0} min={0} max={1000000} />
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className='h-24 w-full' />
+          ))}
+        </div>
+      )}
 
       {p ? (
         <Card className='gap-0 py-0'>
