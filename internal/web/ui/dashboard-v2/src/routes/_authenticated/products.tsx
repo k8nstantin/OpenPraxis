@@ -1,6 +1,19 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { ProductsList } from '@/features/products/list'
+import { z } from 'zod'
+import { ProductsPage } from '@/features/products'
+
+// Master-detail Products page. Both selection (`id`) and active tab
+// (`tab`) live as search params so the URL is shareable / reload-safe
+// and the browser-back stack actually works.
+const productsSearch = z.object({
+  id: z.string().optional(),
+  tab: z
+    .enum(['main', 'description', 'stats', 'comments', 'dependencies', 'dag'])
+    .optional()
+    .default('main'),
+})
 
 export const Route = createFileRoute('/_authenticated/products')({
-  component: ProductsList,
+  validateSearch: productsSearch,
+  component: ProductsPage,
 })

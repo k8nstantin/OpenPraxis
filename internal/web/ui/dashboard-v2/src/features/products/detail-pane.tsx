@@ -1,8 +1,7 @@
-import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useProduct } from '@/lib/queries/products'
-import { Header } from '@/components/layout/header'
-import { Main } from '@/components/layout/main'
+import { Boxes } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ProductsBreadcrumb } from './breadcrumb'
@@ -31,31 +30,40 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-rose-500/15 text-rose-500',
 }
 
-// Per-product detail page. Six tabs, each its own component, all
-// reading from react-query so switching tabs doesn't refetch unless
-// the cache is stale. Title + status + breadcrumb live ABOVE the
-// tab strip — they're the "where am I" anchor regardless of which
-// tab is active.
-export function ProductDetail() {
-  const { productId } = useParams({ from: '/_authenticated/products/$productId' })
-  const search = useSearch({ from: '/_authenticated/products/$productId' })
-  const navigate = useNavigate({ from: '/_authenticated/products/$productId' })
+// Right-pane content for the master-detail Products layout. Renders
+// breadcrumb + title + status + 6-tab strip for the selected product.
+// No outer Header/Main — the parent ProductsPage owns those wrappers.
+export function ProductDetailPane({
+  productId,
+  tab,
+  onTabChange,
+}: {
+  productId?: string
+  tab: (typeof TAB_IDS)[number]
+  onTabChange: (tab: (typeof TAB_IDS)[number]) => void
+}) {
   const product = useProduct(productId)
 
-  const setTab = (tab: (typeof TAB_IDS)[number]) => {
-    navigate({ search: { tab } })
+  if (!productId) {
+    return (
+      <div className='text-muted-foreground flex h-full flex-col items-center justify-center gap-3 p-6 text-center'>
+        <Boxes className='h-12 w-12 opacity-30' />
+        <div className='text-sm'>
+          Pick a product from the list to see its tabs.
+        </div>
+      </div>
+    )
   }
 
   return (
-    <>
-      <Header />
-      <Main>
+    <ScrollArea className='h-full'>
+      <div className='space-y-4 p-4'>
         <ProductsBreadcrumb
           productId={productId}
           productTitle={product.data?.title}
         />
 
-        <div className='mt-3 mb-4'>
+        <div>
           {product.isLoading ? (
             <Skeleton className='h-8 w-1/2' />
           ) : product.isError ? (
@@ -83,8 +91,8 @@ export function ProductDetail() {
         </div>
 
         <Tabs
-          value={search.tab ?? 'main'}
-          onValueChange={(v) => setTab(v as (typeof TAB_IDS)[number])}
+          value={tab}
+          onValueChange={(v) => onTabChange(v as (typeof TAB_IDS)[number])}
           className='space-y-4'
         >
           <TabsList>
@@ -115,7 +123,7 @@ export function ProductDetail() {
             <DAGTab productId={productId} />
           </TabsContent>
         </Tabs>
-      </Main>
-    </>
+      </div>
+    </ScrollArea>
   )
 }
