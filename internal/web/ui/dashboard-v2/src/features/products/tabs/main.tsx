@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DescriptionView } from '@/components/description-view'
+import { Gauge } from '@/components/gauge'
 import { MarkdownEditor } from '@/components/markdown-editor'
 
 // Main tab — stats grid + repo card + description editor + revision
@@ -80,6 +81,20 @@ export function MainTab({ productId }: { productId: string }) {
   const created = p?.created_at ? new Date(p.created_at) : null
   const updated = p?.updated_at ? new Date(p.updated_at) : null
 
+  // Resolved daily budget from settings — defaults to the catalog
+  // default (100 USD) when the operator hasn't set a product-scope
+  // override. Drives both cost gauges' red-line + tone.
+  const budgetRaw = repoInfo.daily_budget_usd
+  const budget = typeof budgetRaw === 'number' && budgetRaw > 0 ? budgetRaw : 100
+  const actual = p?.total_cost ?? 0
+  const costMax = budget * 1.5
+  const costTone = (v: number) =>
+    v >= budget
+      ? 'text-rose-500'
+      : v >= budget * 0.8
+        ? 'text-amber-500'
+        : 'text-emerald-500'
+
   return (
     <div className='space-y-2'>
       <div className='grid grid-cols-3 gap-1 lg:grid-cols-6'>
@@ -90,7 +105,7 @@ export function MainTab({ productId }: { productId: string }) {
         ) : (
           <>
             <Stat label='Estimated Cost' value='—' />
-            <Stat label='Actual' value={fmtCost(p.total_cost ?? 0)} />
+            <Stat label='Actual' value={fmtCost(actual)} />
             <Stat label='Turns' value={String(p.total_turns ?? 0)} />
             <Stat label='Actions' value='—' />
             <Stat label='Tokens' value='—' />
@@ -101,6 +116,37 @@ export function MainTab({ productId }: { productId: string }) {
           </>
         )}
       </div>
+
+      {p ? (
+        <div className='grid grid-cols-2 gap-2'>
+          <div className={`flex flex-col items-stretch ${costTone(0)} opacity-50`}>
+            <Gauge
+              label='estimated cost'
+              value={0}
+              min={0}
+              max={costMax}
+              unit='USD'
+              redLine={budget}
+            />
+            <div className='text-muted-foreground px-1 pt-0.5 text-center text-[10px]'>
+              pending estimator
+            </div>
+          </div>
+          <div className={`flex flex-col items-stretch ${costTone(actual)}`}>
+            <Gauge
+              label='actual cost'
+              value={actual}
+              min={0}
+              max={costMax}
+              unit='USD'
+              redLine={budget}
+            />
+            <div className='text-muted-foreground px-1 pt-0.5 text-center text-[10px]'>
+              red line = daily budget ({fmtCost(budget)})
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {p ? (
         <Card className='gap-0 py-0'>

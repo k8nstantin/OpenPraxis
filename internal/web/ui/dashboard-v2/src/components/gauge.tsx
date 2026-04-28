@@ -1,5 +1,39 @@
 import { useRef } from 'react'
 
+// Tick mark crossing the arc at the fraction (value-min)/range, painted
+// in `color` (hard-coded so deviation tone on the wrapper doesn't
+// repaint it). Used for both the default tick (green) on Execution
+// Control and the budget red-line on the Main cost gauges.
+function renderTick(
+  cx: number,
+  cy: number,
+  R: number,
+  min: number,
+  range: number,
+  v: number,
+  color: string
+) {
+  const f = Math.max(0, Math.min(1, (v - min) / range))
+  const t = -Math.PI / 2 + Math.PI * f
+  const innerR = R - 5
+  const outerR = R + 5
+  const x1 = cx + innerR * Math.sin(t)
+  const y1 = cy - innerR * Math.cos(t)
+  const x2 = cx + outerR * Math.sin(t)
+  const y2 = cy - outerR * Math.cos(t)
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x2}
+      y2={y2}
+      stroke={color}
+      strokeWidth={1.5}
+      strokeLinecap='round'
+    />
+  )
+}
+
 // Speedometer-style gauge: semi-circle from min (left) to max (right),
 // needle at the current value. Pure SVG; no library. Read-only when
 // `onChange` is omitted; interactive (click + drag the arc to set the
@@ -12,6 +46,7 @@ export function Gauge({
   step,
   unit,
   defaultValue,
+  redLine,
   onChange,
 }: {
   label?: string
@@ -21,6 +56,7 @@ export function Gauge({
   step?: number
   unit?: string
   defaultValue?: number
+  redLine?: number
   onChange?: (next: number) => void
 }) {
   const range = max - min
@@ -109,31 +145,12 @@ export function Gauge({
           strokeLinecap='round'
         />
         <circle cx={cx} cy={cy} r={2.5} fill='currentColor' />
-        {defaultValue !== undefined && range > 0 ? (() => {
-          const df = Math.max(0, Math.min(1, (defaultValue - min) / range))
-          const dt = -Math.PI / 2 + Math.PI * df
-          const innerR = R - 5
-          const outerR = R + 5
-          const x1 = cx + innerR * Math.sin(dt)
-          const y1 = cy - innerR * Math.cos(dt)
-          const x2 = cx + outerR * Math.sin(dt)
-          const y2 = cy - outerR * Math.cos(dt)
-          // Default tick — always green so the operator can see at a
-          // glance how far the needle has been dialed off the catalog
-          // default. Independent of the surrounding `currentColor`
-          // (which the deviation tone hijacks).
-          return (
-            <line
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke='#10b981'
-              strokeWidth={1.5}
-              strokeLinecap='round'
-            />
-          )
-        })() : null}
+        {defaultValue !== undefined && range > 0
+          ? renderTick(cx, cy, R, min, range, defaultValue, '#10b981')
+          : null}
+        {redLine !== undefined && range > 0
+          ? renderTick(cx, cy, R, min, range, redLine, '#ef4444')
+          : null}
         <text
           x={cx - R}
           y={58}
