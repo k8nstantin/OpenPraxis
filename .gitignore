@@ -5,8 +5,10 @@ openloom
 *.test
 *.out
 
-# Data directory
-data/
+# Runtime data directory at repo root (anchored — DO NOT match nested
+# `data/` dirs inside the frontend tree, e.g. `dashboard-v2/src/components/
+# layout/data/sidebar-data.ts` which is template source code).
+/data/
 
 # GoReleaser output (top-level dist/ from `make build-all`)
 dist/
