@@ -34,8 +34,32 @@ var uiFS embed.FS
 //go:embed all:ui/dashboard/dist
 var dashboardFS embed.FS
 
-// Handler creates the main HTTP handler with all routes.
-func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.Registry, chatRouter *chat.Router, chatCtx *chat.ContextBuilder, chatTools *chat.ChatTools) http.Handler {
+// ServerDeps bundles the long list of cross-cutting services every HTTP
+// handler in this package needs (DB-backed stores via Node, the MCP
+// server, the WebSocket hub, the peer registry, and chat plumbing). All
+// fields are non-nil at runtime; tests construct a minimal ServerDeps
+// directly. Both Handler() (Portal A) and HandlerV2() (Portal V2) take
+// the same struct so the dependency surface stays in lockstep as we
+// add new services.
+type ServerDeps struct {
+	Node         *node.Node
+	MCP          *mcp.Server
+	Hub          *Hub
+	PeerRegistry *peer.Registry
+	ChatRouter   *chat.Router
+	ChatCtx      *chat.ContextBuilder
+	ChatTools    *chat.ChatTools
+}
+
+// Handler creates the main HTTP handler for Portal A on :8765 — legacy
+// vanilla-JS dashboard at `/`, React v1 experiment at `/dashboard/*`,
+// plus the full backend (`/api/*`, `/mcp`, `/ws`).
+//
+// Portal V2 on :9766 (HandlerV2) shares the API + WebSocket via the
+// same mountAPI / mountWS helpers so both ports talk to the same Node,
+// same DB, same hub. /mcp is Portal-A only because agent configs point
+// at :8765 and there's no value in duplicating the agent endpoint.
+func Handler(deps ServerDeps) http.Handler {
 	r := mux.NewRouter()
 
 	// Dashboard UI (embedded static files)
@@ -95,182 +119,19 @@ func Handler(n *node.Node, mcpServer *mcp.Server, hub *Hub, peerRegistry *peer.R
 	}
 	r.PathPrefix("/dashboard").HandlerFunc(serveDashboard(dashboardContent))
 
-	// WebSocket
-	r.HandleFunc("/ws", hub.HandleWS)
+	// WebSocket — broadcast hub. Mounted on Portal A and Portal V2 (via
+	// HandlerV2 → mountWS) so React on either port can subscribe to the
+	// same event stream.
+	mountWS(r, deps)
 
-	// MCP endpoint with request logging
-	mcpHandler := http.StripPrefix("/mcp", mcpServer.Handler())
-	r.PathPrefix("/mcp").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slog.Debug("MCP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "session", r.Header.Get("Mcp-Session-Id"))
-		mcpHandler.ServeHTTP(w, r)
-	})
+	// MCP endpoint — agent-facing. Mounted on Portal A only because
+	// `~/.claude/settings.json` and similar agent configs point at
+	// :8765/mcp; duplicating it on :9766 adds surface no caller needs.
+	mountMCP(r, deps)
 
 	// Dashboard REST API
 	api := r.PathPrefix("/api").Subrouter()
-	api.HandleFunc("/status", apiStatus(n, mcpServer, peerRegistry)).Methods("GET")
-	// Per-tab scoped search (M2). Registered before /{id} routes because
-	// gorilla/mux matches in registration order — otherwise "search" would
-	// be swallowed by /products/{id}, /ideas/{id}, /actions/{id}.
-	api.HandleFunc("/tasks/search", apiTasksSearch(n)).Methods("GET")
-	api.HandleFunc("/products/search", apiProductsSearch(n)).Methods("GET")
-	api.HandleFunc("/ideas/search", apiIdeasSearch(n)).Methods("GET")
-	api.HandleFunc("/actions/search", apiActionsSearch(n)).Methods("GET")
-	api.HandleFunc("/manifests/search", apiManifestsSearchGET(n)).Methods("GET")
-	api.HandleFunc("/memories", apiMemories(n)).Methods("GET")
-	api.HandleFunc("/memories/search", apiSearch(n)).Methods("POST")
-	api.HandleFunc("/memories/search", apiMemoriesSearchGET(n)).Methods("GET")
-	api.HandleFunc("/memories/tree", apiTree(n)).Methods("GET")
-	api.HandleFunc("/memories/by-session", apiMemoriesBySession(n)).Methods("GET")
-	api.HandleFunc("/memories/by-peer", apiMemoriesByPeer(n)).Methods("GET")
-	api.HandleFunc("/memories/{id}", apiMemory(n)).Methods("GET")
-	api.HandleFunc("/memories/{id}", apiMemoryDelete(n)).Methods("DELETE")
-	api.HandleFunc("/peers", apiPeers(n, mcpServer, peerRegistry)).Methods("GET")
-	api.HandleFunc("/agents", apiAgents(mcpServer)).Methods("GET")
-	api.HandleFunc("/activity", apiActivity(n)).Methods("GET")
-	api.HandleFunc("/activity/by-peer", apiActivityByPeer(n)).Methods("GET")
-	api.HandleFunc("/conversations", apiConversations(n)).Methods("GET")
-	api.HandleFunc("/conversations/by-peer", apiConversationsByPeer(n)).Methods("GET")
-	api.HandleFunc("/conversations/search", apiConversationSearch(n)).Methods("POST")
-	api.HandleFunc("/conversations/search", apiConversationsSearchGET(n)).Methods("GET")
-	api.HandleFunc("/conversations/{id}/actions", apiConversationActions(n)).Methods("GET")
-	api.HandleFunc("/conversations/{id}", apiConversation(n)).Methods("GET")
-	api.HandleFunc("/markers", apiMarkers(n)).Methods("GET")
-	api.HandleFunc("/markers/{id}/seen", apiMarkerSeen(n)).Methods("POST")
-	api.HandleFunc("/markers/{id}/done", apiMarkerDone(n)).Methods("POST")
-	// Hook endpoint for Claude Code conversation capture
-	api.HandleFunc("/hook", apiHook(n)).Methods("POST")
-
-	api.HandleFunc("/actions", apiActions(n)).Methods("GET")
-	api.HandleFunc("/actions/by-peer", apiActionsByPeer(n)).Methods("GET")
-	api.HandleFunc("/actions/{id}", apiAction(n)).Methods("GET")
-	api.HandleFunc("/amnesia/by-peer", apiAmnesiaByPeer(n)).Methods("GET")
-	api.HandleFunc("/amnesia", apiAmnesia(n)).Methods("GET")
-	api.HandleFunc("/amnesia/{id}/confirm", apiAmnesiaUpdate(n, "confirmed")).Methods("POST")
-	api.HandleFunc("/amnesia/{id}/dismiss", apiAmnesiaUpdate(n, "dismissed")).Methods("POST")
-	api.HandleFunc("/ideas/by-peer", apiIdeasByPeer(n)).Methods("GET")
-	api.HandleFunc("/ideas", apiIdeaList(n)).Methods("GET")
-	api.HandleFunc("/ideas", apiIdeaCreate(n)).Methods("POST")
-	api.HandleFunc("/ideas/{id}", apiIdeaGet(n)).Methods("GET")
-	api.HandleFunc("/ideas/{id}", apiIdeaUpdate(n)).Methods("PUT")
-	api.HandleFunc("/ideas/{id}", apiIdeaDelete(n)).Methods("DELETE")
-	api.HandleFunc("/products/by-peer", apiProductsByPeer(n)).Methods("GET")
-	api.HandleFunc("/products", apiProductList(n)).Methods("GET")
-	api.HandleFunc("/products", apiProductCreate(n)).Methods("POST")
-	api.HandleFunc("/products/{id}/hierarchy", apiProductHierarchy(n)).Methods("GET")
-	api.HandleFunc("/products/{id}/manifests", apiProductManifests(n)).Methods("GET")
-	api.HandleFunc("/products/{id}/ideas", apiProductIdeas(n)).Methods("GET")
-	api.HandleFunc("/products/{id}/dependencies", apiProductDepList(n)).Methods("GET")
-	api.HandleFunc("/products/{id}/dependencies", apiProductDepAdd(n)).Methods("POST")
-	api.HandleFunc("/products/{id}/dependencies/{depId}", apiProductDepRemove(n)).Methods("DELETE")
-	api.HandleFunc("/products/{id}", apiProductGet(n)).Methods("GET")
-	api.HandleFunc("/products/{id}", apiProductUpdate(n)).Methods("PUT")
-	api.HandleFunc("/products/{id}", apiProductDelete(n)).Methods("DELETE")
-	api.HandleFunc("/manifests/by-peer", apiManifestsByPeer(n)).Methods("GET")
-	api.HandleFunc("/manifests", apiManifestList(n)).Methods("GET")
-	api.HandleFunc("/manifests", apiManifestCreate(n)).Methods("POST")
-	api.HandleFunc("/manifests/search", apiManifestSearch(n)).Methods("POST")
-	api.HandleFunc("/ideas/{id}/manifests", apiIdeasManifests(n)).Methods("GET")
-	api.HandleFunc("/manifests/{id}/ideas", apiManifestIdeas(n)).Methods("GET")
-	api.HandleFunc("/link", apiLink(n)).Methods("POST")
-	api.HandleFunc("/unlink", apiUnlink(n)).Methods("POST")
-	api.HandleFunc("/delusions/by-peer", apiDelusionsByPeer(n)).Methods("GET")
-	api.HandleFunc("/delusions", apiDelusions(n)).Methods("GET")
-	api.HandleFunc("/delusions/{id}/confirm", apiDelusionUpdate(n, "confirmed")).Methods("POST")
-	api.HandleFunc("/delusions/{id}/dismiss", apiDelusionUpdate(n, "dismissed")).Methods("POST")
-	api.HandleFunc("/manifests/{id}/tasks", apiManifestTasks(n)).Methods("GET")
-	api.HandleFunc("/manifests/{id}/dependencies", apiManifestDepList(n)).Methods("GET")
-	api.HandleFunc("/manifests/{id}/dependencies", apiManifestDepAdd(n)).Methods("POST")
-	api.HandleFunc("/manifests/{id}/dependencies/{depId}", apiManifestDepRemove(n)).Methods("DELETE")
-	api.HandleFunc("/manifests/{id}", apiManifestGet(n)).Methods("GET")
-	api.HandleFunc("/manifests/{id}", apiManifestUpdate(n)).Methods("PUT")
-	api.HandleFunc("/manifests/{id}", apiManifestDelete(n)).Methods("DELETE")
-	api.HandleFunc("/tasks/by-peer", apiTasksByPeer(n)).Methods("GET")
-	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
-	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
-	// Heavy panels split off the polled stats endpoint — loaded on view-show
-	// only, not on every 10s tick. See handlers_task.go for context.
-	api.HandleFunc("/tasks/today-top", apiTodayTopTasks(n)).Methods("GET")
-	api.HandleFunc("/tasks/pending", apiPendingTasks(n)).Methods("GET")
-	api.HandleFunc("/tasks/cost-history", apiCostHistory(n)).Methods("GET")
-	api.HandleFunc("/tasks/cost-agents", apiCostAgents(n)).Methods("GET")
-	api.HandleFunc("/tasks/cost-trend", apiCostTrend(n)).Methods("GET")
-	api.HandleFunc("/tasks/productivity", apiProductivity(n)).Methods("GET")
-	api.HandleFunc("/tasks", apiTaskList(n)).Methods("GET")
-	api.HandleFunc("/tasks", apiTaskCreate(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}", apiTaskGet(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}", apiTaskUpdate(n)).Methods("PATCH")
-	api.HandleFunc("/tasks/{id}", apiTaskDelete(n)).Methods("DELETE")
-	api.HandleFunc("/tasks/{id}/actions", apiTaskActions(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/amnesia", apiTaskAmnesia(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/delusions", apiTaskDelusions(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/runs", apiTaskRuns(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/runs/{runId}", apiTaskRunGet(n)).Methods("GET")
-	api.HandleFunc("/task_runs/{runId}/host_samples", apiTaskRunHostSamples(n)).Methods("GET")
-	// Live host CPU/RSS — feeds the node stats chip on the overview.
-	api.HandleFunc("/host/stats", apiHostStats()).Methods("GET")
-	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
-	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/approve", apiTaskApprove(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/review", apiTaskReviewStatus(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/kill", apiTaskKill(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/pause", apiTaskPause(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/resume", apiTaskResume(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/reschedule", apiTaskReschedule(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/output", apiTaskOutput(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/link-manifest", apiTaskLinkManifest(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/unlink-manifest", apiTaskUnlinkManifest(n)).Methods("POST")
-	api.HandleFunc("/tasks/{id}/set-manifest", apiTaskSetManifest(n)).Methods("PUT")
-	api.HandleFunc("/tasks/{id}/manifests", apiTaskManifests(n)).Methods("GET")
-	api.HandleFunc("/tasks/{id}/dependency", apiTaskSetDependency(n)).Methods("PUT")
-	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
-	api.HandleFunc("/visceral", apiVisceralList(n)).Methods("GET")
-	api.HandleFunc("/visceral/confirmations", apiVisceralConfirmations(n)).Methods("GET")
-	api.HandleFunc("/visceral", apiVisceralAdd(n)).Methods("POST")
-	api.HandleFunc("/visceral/{id}", apiVisceralDelete(n)).Methods("DELETE")
-	api.HandleFunc("/visceral/patterns", apiRulePatterns(n)).Methods("GET")
-	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternGet(n)).Methods("GET")
-	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternUpdate(n)).Methods("PUT")
-	// Watcher — independent task execution audits
-	api.HandleFunc("/watcher/audits", apiWatcherList(n)).Methods("GET")
-	api.HandleFunc("/watcher/stats", apiWatcherStats(n)).Methods("GET")
-	api.HandleFunc("/watcher/audits/{id}", apiWatcherGet(n)).Methods("GET")
-	api.HandleFunc("/watcher/tasks/{id}", apiWatcherForTask(n)).Methods("GET")
-	api.HandleFunc("/watcher/audit/{id}", apiWatcherTrigger(n)).Methods("POST")
-	// Recall — soft-deleted items
-	api.HandleFunc("/recall", apiRecall(n)).Methods("GET")
-	api.HandleFunc("/recall/{type}/{id}/restore", apiRestore(n)).Methods("POST")
-
-	// Hierarchical execution-controls settings (M2-T6) — registered before
-	// the profile/agents/chat /settings/* routes because gorilla/mux matches
-	// paths in registration order. catalog + scope-keyed endpoints share the
-	// /settings prefix without colliding (different verbs / suffixes).
-	registerSettingsExecRoutes(api, n)
-	registerCommentsRoutesFromNode(api, n)
-	registerDescriptionRoutes(api, n)
-	registerTemplateRoutes(api, n)
-
-	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
-	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")
-	api.HandleFunc("/settings/agents", apiSettingsAgents()).Methods("GET")
-	api.HandleFunc("/settings/agents/{id}/connect", apiAgentConnect()).Methods("POST")
-	api.HandleFunc("/settings/agents/{id}/disconnect", apiAgentDisconnect()).Methods("POST")
-	api.HandleFunc("/settings/chat", apiChatSettingsGet(n)).Methods("GET")
-	api.HandleFunc("/settings/chat", apiChatSettingsUpdate(n, chatRouter)).Methods("PUT")
-	api.HandleFunc("/settings/chat/test", apiChatSettingsTest()).Methods("POST")
-
-	// Chat API
-	api.HandleFunc("/chat", apiChatSend(n, chatRouter, chatCtx, chatTools)).Methods("POST")
-	api.HandleFunc("/chat/models", apiChatModels(chatRouter)).Methods("GET")
-	api.HandleFunc("/chat/sessions", apiChatSessionList(n)).Methods("GET")
-	api.HandleFunc("/chat/sessions", apiChatSessionCreate(n, chatRouter)).Methods("POST")
-	api.HandleFunc("/chat/sessions/{id}", apiChatSessionGet(n)).Methods("GET")
-	api.HandleFunc("/chat/sessions/{id}", apiChatSessionDelete(n)).Methods("DELETE")
-	api.HandleFunc("/chat/sessions/{id}/reset", apiChatSessionReset(n)).Methods("POST")
-	api.HandleFunc("/chat/sessions/{id}/title", apiChatSessionUpdateTitle(n)).Methods("PUT")
-	api.HandleFunc("/chat/sessions/{id}/model", apiChatSessionUpdateModel(n)).Methods("PUT")
-	api.HandleFunc("/chat/sessions/{id}/thinking", apiChatSessionUpdateThinking(n)).Methods("PUT")
-	api.HandleFunc("/chat/sessions/{id}/restore", apiChatSessionRestore(n)).Methods("POST")
+	mountAPI(api, deps)
 
 	// Dashboard index (catch-all)
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -689,3 +550,206 @@ func apiActivityByPeer(n *node.Node) http.HandlerFunc {
 }
 
 // writeJSON, writeError, decodeBody are in helpers.go
+
+
+// mountWS registers the WebSocket broadcast endpoint on the given
+// router. Both Portal A and Portal V2 mount it so React on either port
+// can subscribe to the same hub broadcasts.
+func mountWS(r *mux.Router, deps ServerDeps) {
+	r.HandleFunc("/ws", deps.Hub.HandleWS)
+}
+
+// mountMCP registers the agent-facing MCP HTTP endpoint with request
+// logging. Mounted on Portal A only — agent configs (Claude Code,
+// Cursor, etc.) point at :8765/mcp and duplicating the endpoint on
+// :9766 adds surface no caller actually uses.
+func mountMCP(r *mux.Router, deps ServerDeps) {
+	mcpHandler := http.StripPrefix("/mcp", deps.MCP.Handler())
+	r.PathPrefix("/mcp").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slog.Debug("MCP request", "method", r.Method, "path", r.URL.Path, "from", r.RemoteAddr, "session", r.Header.Get("Mcp-Session-Id"))
+		mcpHandler.ServeHTTP(w, r)
+	})
+}
+
+// mountAPI registers every /api/* route on the given subrouter. Both
+// Portal A and Portal V2 call this so the dynamic backend (status,
+// tasks, products, manifests, comments, descriptions, templates,
+// settings, chat, etc.) is identical on both ports.
+//
+// Route order matters: gorilla/mux matches in registration order, so
+// scoped-search routes are registered BEFORE the /{id} catch-all
+// patterns that would otherwise swallow them. Don't reorder without
+// re-verifying with curl probes against the affected paths.
+func mountAPI(api *mux.Router, deps ServerDeps) {
+	n := deps.Node
+	mcpServer := deps.MCP
+	peerRegistry := deps.PeerRegistry
+	chatRouter := deps.ChatRouter
+	chatCtx := deps.ChatCtx
+	chatTools := deps.ChatTools
+
+	api.HandleFunc("/status", apiStatus(n, mcpServer, peerRegistry)).Methods("GET")
+	// Per-tab scoped search (M2). Registered before /{id} routes because
+	// gorilla/mux matches in registration order — otherwise "search" would
+	// be swallowed by /products/{id}, /ideas/{id}, /actions/{id}.
+	api.HandleFunc("/tasks/search", apiTasksSearch(n)).Methods("GET")
+	api.HandleFunc("/products/search", apiProductsSearch(n)).Methods("GET")
+	api.HandleFunc("/ideas/search", apiIdeasSearch(n)).Methods("GET")
+	api.HandleFunc("/actions/search", apiActionsSearch(n)).Methods("GET")
+	api.HandleFunc("/manifests/search", apiManifestsSearchGET(n)).Methods("GET")
+	api.HandleFunc("/memories", apiMemories(n)).Methods("GET")
+	api.HandleFunc("/memories/search", apiSearch(n)).Methods("POST")
+	api.HandleFunc("/memories/search", apiMemoriesSearchGET(n)).Methods("GET")
+	api.HandleFunc("/memories/tree", apiTree(n)).Methods("GET")
+	api.HandleFunc("/memories/by-session", apiMemoriesBySession(n)).Methods("GET")
+	api.HandleFunc("/memories/by-peer", apiMemoriesByPeer(n)).Methods("GET")
+	api.HandleFunc("/memories/{id}", apiMemory(n)).Methods("GET")
+	api.HandleFunc("/memories/{id}", apiMemoryDelete(n)).Methods("DELETE")
+	api.HandleFunc("/peers", apiPeers(n, mcpServer, peerRegistry)).Methods("GET")
+	api.HandleFunc("/agents", apiAgents(mcpServer)).Methods("GET")
+	api.HandleFunc("/activity", apiActivity(n)).Methods("GET")
+	api.HandleFunc("/activity/by-peer", apiActivityByPeer(n)).Methods("GET")
+	api.HandleFunc("/conversations", apiConversations(n)).Methods("GET")
+	api.HandleFunc("/conversations/by-peer", apiConversationsByPeer(n)).Methods("GET")
+	api.HandleFunc("/conversations/search", apiConversationSearch(n)).Methods("POST")
+	api.HandleFunc("/conversations/search", apiConversationsSearchGET(n)).Methods("GET")
+	api.HandleFunc("/conversations/{id}/actions", apiConversationActions(n)).Methods("GET")
+	api.HandleFunc("/conversations/{id}", apiConversation(n)).Methods("GET")
+	api.HandleFunc("/markers", apiMarkers(n)).Methods("GET")
+	api.HandleFunc("/markers/{id}/seen", apiMarkerSeen(n)).Methods("POST")
+	api.HandleFunc("/markers/{id}/done", apiMarkerDone(n)).Methods("POST")
+	// Hook endpoint for Claude Code conversation capture
+	api.HandleFunc("/hook", apiHook(n)).Methods("POST")
+
+	api.HandleFunc("/actions", apiActions(n)).Methods("GET")
+	api.HandleFunc("/actions/by-peer", apiActionsByPeer(n)).Methods("GET")
+	api.HandleFunc("/actions/{id}", apiAction(n)).Methods("GET")
+	api.HandleFunc("/amnesia/by-peer", apiAmnesiaByPeer(n)).Methods("GET")
+	api.HandleFunc("/amnesia", apiAmnesia(n)).Methods("GET")
+	api.HandleFunc("/amnesia/{id}/confirm", apiAmnesiaUpdate(n, "confirmed")).Methods("POST")
+	api.HandleFunc("/amnesia/{id}/dismiss", apiAmnesiaUpdate(n, "dismissed")).Methods("POST")
+	api.HandleFunc("/ideas/by-peer", apiIdeasByPeer(n)).Methods("GET")
+	api.HandleFunc("/ideas", apiIdeaList(n)).Methods("GET")
+	api.HandleFunc("/ideas", apiIdeaCreate(n)).Methods("POST")
+	api.HandleFunc("/ideas/{id}", apiIdeaGet(n)).Methods("GET")
+	api.HandleFunc("/ideas/{id}", apiIdeaUpdate(n)).Methods("PUT")
+	api.HandleFunc("/ideas/{id}", apiIdeaDelete(n)).Methods("DELETE")
+	api.HandleFunc("/products/by-peer", apiProductsByPeer(n)).Methods("GET")
+	api.HandleFunc("/products", apiProductList(n)).Methods("GET")
+	api.HandleFunc("/products", apiProductCreate(n)).Methods("POST")
+	api.HandleFunc("/products/{id}/hierarchy", apiProductHierarchy(n)).Methods("GET")
+	api.HandleFunc("/products/{id}/manifests", apiProductManifests(n)).Methods("GET")
+	api.HandleFunc("/products/{id}/ideas", apiProductIdeas(n)).Methods("GET")
+	api.HandleFunc("/products/{id}/dependencies", apiProductDepList(n)).Methods("GET")
+	api.HandleFunc("/products/{id}/dependencies", apiProductDepAdd(n)).Methods("POST")
+	api.HandleFunc("/products/{id}/dependencies/{depId}", apiProductDepRemove(n)).Methods("DELETE")
+	api.HandleFunc("/products/{id}", apiProductGet(n)).Methods("GET")
+	api.HandleFunc("/products/{id}", apiProductUpdate(n)).Methods("PUT")
+	api.HandleFunc("/products/{id}", apiProductDelete(n)).Methods("DELETE")
+	api.HandleFunc("/manifests/by-peer", apiManifestsByPeer(n)).Methods("GET")
+	api.HandleFunc("/manifests", apiManifestList(n)).Methods("GET")
+	api.HandleFunc("/manifests", apiManifestCreate(n)).Methods("POST")
+	api.HandleFunc("/manifests/search", apiManifestSearch(n)).Methods("POST")
+	api.HandleFunc("/ideas/{id}/manifests", apiIdeasManifests(n)).Methods("GET")
+	api.HandleFunc("/manifests/{id}/ideas", apiManifestIdeas(n)).Methods("GET")
+	api.HandleFunc("/link", apiLink(n)).Methods("POST")
+	api.HandleFunc("/unlink", apiUnlink(n)).Methods("POST")
+	api.HandleFunc("/delusions/by-peer", apiDelusionsByPeer(n)).Methods("GET")
+	api.HandleFunc("/delusions", apiDelusions(n)).Methods("GET")
+	api.HandleFunc("/delusions/{id}/confirm", apiDelusionUpdate(n, "confirmed")).Methods("POST")
+	api.HandleFunc("/delusions/{id}/dismiss", apiDelusionUpdate(n, "dismissed")).Methods("POST")
+	api.HandleFunc("/manifests/{id}/tasks", apiManifestTasks(n)).Methods("GET")
+	api.HandleFunc("/manifests/{id}/dependencies", apiManifestDepList(n)).Methods("GET")
+	api.HandleFunc("/manifests/{id}/dependencies", apiManifestDepAdd(n)).Methods("POST")
+	api.HandleFunc("/manifests/{id}/dependencies/{depId}", apiManifestDepRemove(n)).Methods("DELETE")
+	api.HandleFunc("/manifests/{id}", apiManifestGet(n)).Methods("GET")
+	api.HandleFunc("/manifests/{id}", apiManifestUpdate(n)).Methods("PUT")
+	api.HandleFunc("/manifests/{id}", apiManifestDelete(n)).Methods("DELETE")
+	api.HandleFunc("/tasks/by-peer", apiTasksByPeer(n)).Methods("GET")
+	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
+	// Heavy panels split off the polled stats endpoint — loaded on view-show
+	// only, not on every 10s tick. See handlers_task.go for context.
+	api.HandleFunc("/tasks/today-top", apiTodayTopTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/pending", apiPendingTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/cost-history", apiCostHistory(n)).Methods("GET")
+	api.HandleFunc("/tasks/cost-agents", apiCostAgents(n)).Methods("GET")
+	api.HandleFunc("/tasks/cost-trend", apiCostTrend(n)).Methods("GET")
+	api.HandleFunc("/tasks/productivity", apiProductivity(n)).Methods("GET")
+	api.HandleFunc("/tasks", apiTaskList(n)).Methods("GET")
+	api.HandleFunc("/tasks", apiTaskCreate(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}", apiTaskGet(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}", apiTaskUpdate(n)).Methods("PATCH")
+	api.HandleFunc("/tasks/{id}", apiTaskDelete(n)).Methods("DELETE")
+	api.HandleFunc("/tasks/{id}/actions", apiTaskActions(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/amnesia", apiTaskAmnesia(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/delusions", apiTaskDelusions(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/runs", apiTaskRuns(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/runs/{runId}", apiTaskRunGet(n)).Methods("GET")
+	api.HandleFunc("/task_runs/{runId}/host_samples", apiTaskRunHostSamples(n)).Methods("GET")
+	// Live host CPU/RSS — feeds the node stats chip on the overview.
+	api.HandleFunc("/host/stats", apiHostStats()).Methods("GET")
+	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
+	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/approve", apiTaskApprove(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/review", apiTaskReviewStatus(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/kill", apiTaskKill(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/pause", apiTaskPause(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/resume", apiTaskResume(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/reschedule", apiTaskReschedule(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/output", apiTaskOutput(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/link-manifest", apiTaskLinkManifest(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/unlink-manifest", apiTaskUnlinkManifest(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/set-manifest", apiTaskSetManifest(n)).Methods("PUT")
+	api.HandleFunc("/tasks/{id}/manifests", apiTaskManifests(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/dependency", apiTaskSetDependency(n)).Methods("PUT")
+	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
+	api.HandleFunc("/visceral", apiVisceralList(n)).Methods("GET")
+	api.HandleFunc("/visceral/confirmations", apiVisceralConfirmations(n)).Methods("GET")
+	api.HandleFunc("/visceral", apiVisceralAdd(n)).Methods("POST")
+	api.HandleFunc("/visceral/{id}", apiVisceralDelete(n)).Methods("DELETE")
+	api.HandleFunc("/visceral/patterns", apiRulePatterns(n)).Methods("GET")
+	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternGet(n)).Methods("GET")
+	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternUpdate(n)).Methods("PUT")
+	// Watcher — independent task execution audits
+	api.HandleFunc("/watcher/audits", apiWatcherList(n)).Methods("GET")
+	api.HandleFunc("/watcher/stats", apiWatcherStats(n)).Methods("GET")
+	api.HandleFunc("/watcher/audits/{id}", apiWatcherGet(n)).Methods("GET")
+	api.HandleFunc("/watcher/tasks/{id}", apiWatcherForTask(n)).Methods("GET")
+	api.HandleFunc("/watcher/audit/{id}", apiWatcherTrigger(n)).Methods("POST")
+	// Recall — soft-deleted items
+	api.HandleFunc("/recall", apiRecall(n)).Methods("GET")
+	api.HandleFunc("/recall/{type}/{id}/restore", apiRestore(n)).Methods("POST")
+
+	// Hierarchical execution-controls settings (M2-T6) — registered before
+	// the profile/agents/chat /settings/* routes because gorilla/mux matches
+	// paths in registration order. catalog + scope-keyed endpoints share the
+	// /settings prefix without colliding (different verbs / suffixes).
+	registerSettingsExecRoutes(api, n)
+	registerCommentsRoutesFromNode(api, n)
+	registerDescriptionRoutes(api, n)
+	registerTemplateRoutes(api, n)
+
+	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
+	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")
+	api.HandleFunc("/settings/agents", apiSettingsAgents()).Methods("GET")
+	api.HandleFunc("/settings/agents/{id}/connect", apiAgentConnect()).Methods("POST")
+	api.HandleFunc("/settings/agents/{id}/disconnect", apiAgentDisconnect()).Methods("POST")
+	api.HandleFunc("/settings/chat", apiChatSettingsGet(n)).Methods("GET")
+	api.HandleFunc("/settings/chat", apiChatSettingsUpdate(n, chatRouter)).Methods("PUT")
+	api.HandleFunc("/settings/chat/test", apiChatSettingsTest()).Methods("POST")
+
+	// Chat API
+	api.HandleFunc("/chat", apiChatSend(n, chatRouter, chatCtx, chatTools)).Methods("POST")
+	api.HandleFunc("/chat/models", apiChatModels(chatRouter)).Methods("GET")
+	api.HandleFunc("/chat/sessions", apiChatSessionList(n)).Methods("GET")
+	api.HandleFunc("/chat/sessions", apiChatSessionCreate(n, chatRouter)).Methods("POST")
+	api.HandleFunc("/chat/sessions/{id}", apiChatSessionGet(n)).Methods("GET")
+	api.HandleFunc("/chat/sessions/{id}", apiChatSessionDelete(n)).Methods("DELETE")
+	api.HandleFunc("/chat/sessions/{id}/reset", apiChatSessionReset(n)).Methods("POST")
+	api.HandleFunc("/chat/sessions/{id}/title", apiChatSessionUpdateTitle(n)).Methods("PUT")
+	api.HandleFunc("/chat/sessions/{id}/model", apiChatSessionUpdateModel(n)).Methods("PUT")
+	api.HandleFunc("/chat/sessions/{id}/thinking", apiChatSessionUpdateThinking(n)).Methods("PUT")
+	api.HandleFunc("/chat/sessions/{id}/restore", apiChatSessionRestore(n)).Methods("POST")
+}

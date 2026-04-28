@@ -152,7 +152,20 @@ var serveCmd = &cobra.Command{
 		chatTools := chat.NewChatTools(bridge)
 
 		// --- Main HTTP server (dashboard + MCP + API) ---
-		handler := web.Handler(n, mcp, hub, peerRegistry, chatRouter, chatContext, chatTools)
+		// ServerDeps bundles the cross-cutting services every HTTP route in
+		// the web package needs. Both Portal A (Handler) and Portal V2
+		// (HandlerV2 in a later commit) take the same struct so the
+		// dependency surface stays in lockstep as we add new services.
+		deps := web.ServerDeps{
+			Node:         n,
+			MCP:          mcp,
+			Hub:          hub,
+			PeerRegistry: peerRegistry,
+			ChatRouter:   chatRouter,
+			ChatCtx:      chatContext,
+			ChatTools:    chatTools,
+		}
+		handler := web.Handler(deps)
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 		httpServer := &http.Server{
 			Addr:         addr,
