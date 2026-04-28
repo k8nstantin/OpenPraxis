@@ -288,6 +288,12 @@ function RangeNumber({
   const max = knob.slider_max ?? 100
   const step = knob.slider_step ?? (isInt ? 1 : 0.01)
   const num = numericOr(value, knob.default)
+  const def = numericOr(knob.default, min)
+  // Tick marks at min / default / max via <datalist> — browser draws
+  // small notches under the track so the operator sees the scale at a
+  // glance. Dedup so default==min or default==max doesn't double-mark.
+  const ticks = Array.from(new Set([min, def, max])).sort((a, b) => a - b)
+  const listId = `knob-ticks-${knob.key}`
   return (
     <div className='flex flex-1 items-center gap-2'>
       <input
@@ -297,8 +303,14 @@ function RangeNumber({
         max={max}
         step={step}
         value={num}
+        list={listId}
         onChange={(e) => onChange(coerce(e.target.value, isInt))}
       />
+      <datalist id={listId}>
+        {ticks.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
       <Input
         type='number'
         className='h-8 w-24 text-sm'
