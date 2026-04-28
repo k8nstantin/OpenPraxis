@@ -420,9 +420,11 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open the dashboard in the browser")
 	// Portal V2 is the redesigned operator dashboard built fresh on shadcn-admin
-	// in `internal/web/ui/dashboard-v2/`. Defaults to :8766 alongside the legacy
-	// portal on :8765. Set 0 to disable while the v2 work is in flight.
-	serveCmd.Flags().IntVar(&portalV2Port, "portal-v2-port", 8766, "Portal V2 listener port (0 to disable)")
+	// in `internal/web/ui/dashboard-v2/`. Defaults to :9876 — well away from the
+	// :8765 (dashboard) / :8766 (sync) cluster so future config tweaks in the
+	// 87xx range can't create silent collisions. Set 0 to disable while the v2
+	// work is in flight.
+	serveCmd.Flags().IntVar(&portalV2Port, "portal-v2-port", 9876, "Portal V2 listener port (0 to disable)")
 }
 
 func openBrowser(url string) {
