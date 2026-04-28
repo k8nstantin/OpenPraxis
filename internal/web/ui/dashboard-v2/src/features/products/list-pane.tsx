@@ -45,10 +45,12 @@ export function ProductsListPane({
     )
   }, [top.data, query])
 
-  // Pagination — show 10 rows initially; an IntersectionObserver
-  // sentinel near the bottom adds 10 more whenever it scrolls into
-  // view. Reset to 10 whenever the filter changes so a new search
-  // doesn't keep the prior page count.
+  // Pagination — show 10 rows initially; a scroll-event handler on
+  // the Radix viewport adds 10 more when the operator scrolls within
+  // 60px of the bottom. Scroll-driven (not IntersectionObserver) so
+  // it only fires when the operator actually scrolls — IO fires on
+  // mount when the sentinel is already in view, which cascaded to
+  // load every page in a row and defeated the whole point.
   const PAGE_SIZE = 10
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   useEffect(() => {
@@ -62,26 +64,19 @@ export function ProductsListPane({
     if (!hasMore) return
     const el = sentinelRef.current
     if (!el) return
-    // The list scrolls inside Radix's ScrollArea viewport, NOT the
-    // document viewport. IntersectionObserver's default root would
-    // never see the sentinel intersect because Radix translates the
-    // inner content with CSS transforms — the sentinel's screen
-    // position relative to the page doesn't change when the list
-    // scrolls. Walk up to find the [data-radix-scroll-area-viewport]
-    // ancestor and use IT as the observer's root.
-    const root = el.closest<HTMLElement>(
+    const viewport = el.closest<HTMLElement>(
       '[data-radix-scroll-area-viewport]'
     )
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisibleCount((n) => Math.min(n + PAGE_SIZE, filtered.length))
-        }
-      },
-      { root, rootMargin: '120px 0px' }
-    )
-    io.observe(el)
-    return () => io.disconnect()
+    if (!viewport) return
+    const onScroll = () => {
+      const remaining =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      if (remaining < 60) {
+        setVisibleCount((n) => Math.min(n + PAGE_SIZE, filtered.length))
+      }
+    }
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+    return () => viewport.removeEventListener('scroll', onScroll)
   }, [hasMore, filtered.length])
 
   const toggle = (id: string) => {
