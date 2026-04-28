@@ -84,7 +84,7 @@ export function ProductDetailPane({
                     {product.data.title}
                   </h1>
                   <code className='text-muted-foreground font-mono text-xs'>
-                    {product.data.marker}
+                    {product.data.id}
                   </code>
                 </div>
                 <ProductStatusControl

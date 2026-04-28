@@ -128,7 +128,7 @@ export function ProductsListPane({
               <TreeRow
                 key={p.id}
                 id={p.id}
-                marker={p.marker}
+                marker={p.id}
                 title={p.title}
                 status={p.status}
                 depth={0}
@@ -231,8 +231,8 @@ function TreeRow({
         >
           <div className='min-w-0'>
             <div className='truncate font-medium'>{title}</div>
-            <code className='text-muted-foreground font-mono text-[11px]'>
-              {marker}
+            <code className='text-muted-foreground font-mono text-[11px] block truncate'>
+              {id}
             </code>
           </div>
           <Badge

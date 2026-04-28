@@ -440,15 +440,15 @@ function DepSection({
                     className='min-w-0 flex-1'
                   >
                     <div className='truncate font-medium'>{r.title}</div>
-                    <code className='text-muted-foreground font-mono text-[11px]'>
-                      {r.marker}
+                    <code className='text-muted-foreground font-mono text-[11px] block truncate'>
+                      {r.id}
                     </code>
                   </Link>
                 ) : (
                   <div className='min-w-0 flex-1'>
                     <div className='truncate font-medium'>{r.title}</div>
-                    <code className='text-muted-foreground font-mono text-[11px]'>
-                      {r.marker}
+                    <code className='text-muted-foreground font-mono text-[11px] block truncate'>
+                      {r.id}
                     </code>
                   </div>
                 )}
