@@ -418,3 +418,125 @@ export function useAllManifests() {
     staleTime: 30 * 1000,
   })
 }
+
+// Restore — apply a prior snapshot as the current dependency state.
+//
+// Diff vs current:
+//   to-add    = snapshot.X − current.X     (re-add what was removed since)
+//   to-remove = current.X − snapshot.X     (remove what was added since)
+//
+// Fire add/remove ops in sequence. Skip 404/409 (idempotent — target
+// already gone or already linked). After the diff is applied, log a
+// new dependency_revision capturing the restore op + the resulting
+// state so the history reads "Restored to <timestamp>" forward in time.
+export function useRestoreDependencySnapshot(
+  productId: string | undefined
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      snapshot: { downstream: string[]; manifests: string[] }
+      revisionLabel: string
+      currentDownstream: { id: string; marker: string; title: string }[]
+      currentManifests: { id: string; marker: string; title: string }[]
+    }) => {
+      if (!productId) return
+      const targetSubs = new Set(input.snapshot.downstream)
+      const targetManifests = new Set(input.snapshot.manifests)
+      const currentSubs = new Set(
+        input.currentDownstream.map((r) => r.id)
+      )
+      const currentManifestSet = new Set(
+        input.currentManifests.map((r) => r.id)
+      )
+
+      const subsToAdd = [...targetSubs].filter((id) => !currentSubs.has(id))
+      const subsToRemove = [...currentSubs].filter(
+        (id) => !targetSubs.has(id)
+      )
+      const manifestsToAdd = [...targetManifests].filter(
+        (id) => !currentManifestSet.has(id)
+      )
+      const manifestsToRemove = [...currentManifestSet].filter(
+        (id) => !targetManifests.has(id)
+      )
+
+      // Sub-product re-parents (downstream — X depends on this).
+      for (const subId of subsToAdd) {
+        const r = await fetch(
+          `/api/products/${subId}/dependencies/${productId}`,
+          { method: 'POST' }
+        )
+        if (!r.ok && r.status !== 409) {
+          throw new Error(`restore: add sub ${subId} → ${r.status}`)
+        }
+      }
+      for (const subId of subsToRemove) {
+        const r = await fetch(
+          `/api/products/${subId}/dependencies/${productId}`,
+          { method: 'DELETE' }
+        )
+        if (!r.ok && r.status !== 404) {
+          throw new Error(`restore: remove sub ${subId} → ${r.status}`)
+        }
+      }
+
+      // Manifest re-parents.
+      for (const mId of manifestsToAdd) {
+        const r = await fetch(`/api/manifests/${mId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: productId }),
+        })
+        if (!r.ok)
+          throw new Error(`restore: link manifest ${mId} → ${r.status}`)
+      }
+      for (const mId of manifestsToRemove) {
+        const r = await fetch(`/api/manifests/${mId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: '' }),
+        })
+        if (!r.ok)
+          throw new Error(`restore: unlink manifest ${mId} → ${r.status}`)
+      }
+
+      // Log the restore as a new dependency_revision so the history
+      // continues forward and a future restore can target this point.
+      const restoreBody =
+        '<dependency_revision>\n' +
+        JSON.stringify(
+          {
+            op: 'restore',
+            kind: 'snapshot',
+            target: { id: '', marker: '', title: input.revisionLabel },
+            snapshot: {
+              upstream: [],
+              downstream: [...targetSubs],
+              manifests: [...targetManifests],
+            },
+          },
+          null,
+          2
+        ) +
+        '\n</dependency_revision>'
+      await fetch(`/api/products/${productId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          author: 'operator',
+          type: 'agent_note',
+          body: restoreBody,
+        }),
+      })
+
+      return {
+        addedSubs: subsToAdd.length,
+        removedSubs: subsToRemove.length,
+        addedManifests: manifestsToAdd.length,
+        removedManifests: manifestsToRemove.length,
+      }
+    },
+    onSuccess: () => productId && invalidateDepCaches(qc, productId),
+  })
+}
