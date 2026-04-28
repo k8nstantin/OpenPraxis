@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import { productKeys, useProducts } from '@/lib/queries/products'
@@ -45,6 +45,40 @@ export function ProductsListPane({
     )
   }, [top.data, query])
 
+  // Pagination — show 10 rows initially; an IntersectionObserver
+  // sentinel near the bottom adds 10 more whenever it scrolls into
+  // view. Reset to 10 whenever the filter changes so a new search
+  // doesn't keep the prior page count.
+  const PAGE_SIZE = 10
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [query])
+  const visible = filtered.slice(0, visibleCount)
+  const hasMore = visibleCount < filtered.length
+
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!hasMore) return
+    const el = sentinelRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisibleCount((n) => Math.min(n + PAGE_SIZE, filtered.length))
+        }
+      },
+      // root: null defaults to viewport, but inside ScrollArea the
+      // useful root is the Radix viewport — leaving null still works
+      // because the sentinel becomes visible when content scrolls
+      // into the page viewport. rootMargin pre-loads slightly before
+      // the sentinel is fully on screen.
+      { rootMargin: '120px 0px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, filtered.length])
+
   const toggle = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -90,7 +124,7 @@ export function ProductsListPane({
           </div>
         ) : (
           <div className='py-1'>
-            {filtered.map((p) => (
+            {visible.map((p) => (
               <TreeRow
                 key={p.id}
                 id={p.id}
@@ -104,6 +138,18 @@ export function ProductsListPane({
                 onSelect={onSelect}
               />
             ))}
+            {hasMore ? (
+              <div
+                ref={sentinelRef}
+                className='text-muted-foreground py-2 text-center text-xs'
+              >
+                Loading more… ({visible.length} of {filtered.length})
+              </div>
+            ) : filtered.length > PAGE_SIZE ? (
+              <div className='text-muted-foreground py-2 text-center text-xs'>
+                {filtered.length} shown · scroll exhausted
+              </div>
+            ) : null}
           </div>
         )}
       </ScrollArea>
