@@ -1,6 +1,13 @@
 import { useEffect } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+// react-resizable-panels v3 renamed exports: Group / Panel / Separator
+// (was PanelGroup / Panel / PanelResizeHandle in v2 docs). Alias on
+// import so JSX call sites read the same as v2 docs.
+import {
+  Group as PanelGroup,
+  Panel,
+  Separator as PanelResizeHandle,
+} from 'react-resizable-panels'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProductsListPane } from './list-pane'
