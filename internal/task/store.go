@@ -33,9 +33,14 @@ type Task struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// Computed from task_runs — populated by enrichWithCosts()
-	TotalTurns int     `json:"total_turns"`
-	TotalCost  float64 `json:"total_cost"`
+	// Computed from task_runs — populated by enrichWithCosts() (cheap
+	// turns + cost) or EnrichRunStats() (single-get path: also actions
+	// + tokens). Tasks are leaves in the product → manifest → task tree
+	// so the sum is over this task's runs only — no recursive walk.
+	TotalTurns   int     `json:"total_turns"`
+	TotalCost    float64 `json:"total_cost"`
+	TotalActions int     `json:"total_actions"`
+	TotalTokens  int     `json:"total_tokens"`
 }
 
 // TaskRun represents a single execution of a task, preserving history.

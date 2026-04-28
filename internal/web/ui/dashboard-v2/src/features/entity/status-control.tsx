@@ -81,7 +81,8 @@ export function EntityStatusControl({
   }
 
   const targetMeta = target ? STATUSES.find((s) => s.id === target) : null
-  const noun = kind === 'product' ? 'product' : 'manifest'
+  const noun =
+    kind === 'product' ? 'product' : kind === 'task' ? 'task' : 'manifest'
 
   return (
     <div className='shrink-0'>

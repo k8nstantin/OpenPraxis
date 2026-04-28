@@ -1,5 +1,5 @@
 import { useEntity, type EntityKind } from '@/lib/queries/entity'
-import { Boxes, FileText } from 'lucide-react'
+import { Boxes, CheckSquare, FileText } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -38,16 +38,16 @@ export function EntityDetailPane({
   onTabChange: (tab: EntityTabId) => void
 }) {
   const entity = useEntity(kind, entityId)
-  const Icon = kind === 'product' ? Boxes : FileText
+  const Icon =
+    kind === 'product' ? Boxes : kind === 'task' ? CheckSquare : FileText
+  const noun =
+    kind === 'product' ? 'product' : kind === 'task' ? 'task' : 'manifest'
 
   if (!entityId) {
     return (
       <div className='text-muted-foreground flex h-full flex-col items-center justify-center gap-3 p-6 text-center'>
         <Icon className='h-12 w-12 opacity-30' />
-        <div className='text-sm'>
-          Pick a {kind === 'product' ? 'product' : 'manifest'} from the
-          list to see its tabs.
-        </div>
+        <div className='text-sm'>Pick a {noun} from the list to see its tabs.</div>
       </div>
     )
   }

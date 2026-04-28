@@ -619,6 +619,42 @@ func (s *Store) ActivateDependents(completedTaskID string) (int, error) {
 	return int(n), nil
 }
 
+// TaskDep is the denormalised row the dashboard renders for both
+// directions of /api/tasks/{id}/dependencies. Same {id, marker, title,
+// status} contract products + manifests use.
+type TaskDep struct {
+	ID     string `json:"id"`
+	Marker string `json:"marker"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// ListDependents returns every task whose `depends_on` is taskID.
+// Mirrors manifest.Store.ListDependents — used by the portal-v2
+// Dependencies tab when the operator clicks "in" direction. Marker is
+// the 12-char ID prefix per project convention.
+func (s *Store) ListDependents(ctx context.Context, taskID string) ([]TaskDep, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, title, status FROM tasks WHERE depends_on = ? AND deleted_at = ''
+		 ORDER BY created_at ASC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TaskDep{}
+	for rows.Next() {
+		var d TaskDep
+		if err := rows.Scan(&d.ID, &d.Title, &d.Status); err != nil {
+			return nil, err
+		}
+		if len(d.ID) >= 12 {
+			d.Marker = d.ID[:12]
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // RequestAction writes a cross-process action signal on the task row.
 // The runner that owns the task's process (serve) polls this column and acts.
 // action must be one of: "pause", "resume", "cancel".

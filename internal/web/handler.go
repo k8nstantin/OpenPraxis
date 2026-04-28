@@ -704,6 +704,11 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/tasks/{id}/set-manifest", apiTaskSetManifest(n)).Methods("PUT")
 	api.HandleFunc("/tasks/{id}/manifests", apiTaskManifests(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/dependency", apiTaskSetDependency(n)).Methods("PUT")
+	// Manifest-style REST surface — same body-style POST + path-style
+	// DELETE the dashboard's generic queries layer dispatches to.
+	api.HandleFunc("/tasks/{id}/dependencies", apiTaskDepList(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/dependencies", apiTaskDepAdd(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/dependencies/{depId}", apiTaskDepRemove(n)).Methods("DELETE")
 	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
 	api.HandleFunc("/visceral", apiVisceralList(n)).Methods("GET")
 	api.HandleFunc("/visceral/confirmations", apiVisceralConfirmations(n)).Methods("GET")

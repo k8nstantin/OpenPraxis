@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import cytoscape from 'cytoscape'
 // @ts-expect-error — cytoscape-dagre ships without bundled types
@@ -23,7 +24,7 @@ import {
   useUnlinkManifest,
   type EntityKind,
 } from '@/lib/queries/entity'
-import type { HierarchyNode, Manifest } from '@/lib/types'
+import type { HierarchyNode, Manifest, Task } from '@/lib/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +46,28 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { LinkOrCreateModal } from '../link-or-create-modal'
 import type { PickerRow } from '../dep-picker'
+
+// useQueryDirection — small kind-agnostic hook for the inverse-edge
+// fetch on tasks (and any future kind that needs both directions
+// distinct). The generic `useEntityDependencies` is hard-coded to the
+// "out" direction so the products + manifests reading paths stay
+// stable; this hook is the escape hatch for the DAG tab when it
+// needs the "in" direction.
+function useQueryDirection(taskId: string | undefined, direction: 'in' | 'out') {
+  return useQuery({
+    queryKey: ['task', 'deps', taskId ?? '', direction],
+    queryFn: async () => {
+      const r = await fetch(`/api/tasks/${taskId}/dependencies?direction=${direction}`)
+      if (!r.ok) throw new Error(`task deps ${direction} → ${r.status}`)
+      const data = (await r.json()) as
+        | { deps?: PickerRow[]; dependents?: PickerRow[] }
+      const rows = direction === 'in' ? data.dependents : data.deps
+      return Array.isArray(rows) ? rows : []
+    },
+    enabled: !!taskId,
+    staleTime: 30 * 1000,
+  })
+}
 
 let DAGRE_REGISTERED = false
 function ensureDagre() {
@@ -96,6 +119,40 @@ function productElements(root: HierarchyNode | undefined): CyEl[] {
     for (const c of children) visit(c, n.id)
   }
   visit(root)
+  return els
+}
+
+// Tasks are leaves in the product-manifest-task tree: one task + its
+// upstream + downstream dep edges. No children. Tasks have at most one
+// upstream dep on the wire (tasks.depends_on is a single value), but
+// the function handles N for symmetry.
+function taskElements(
+  taskId: string,
+  task: Task | undefined,
+  upstreamDeps: PickerRow[],
+  downstreamDeps: PickerRow[]
+): CyEl[] {
+  if (!task) return []
+  const els: CyEl[] = []
+  for (const dep of upstreamDeps) {
+    els.push({
+      data: { id: dep.id, label: dep.title, status: dep.status, type: 'task' },
+    })
+    els.push({
+      data: { id: `${dep.id}->${taskId}`, source: dep.id, target: taskId },
+    })
+  }
+  els.push({
+    data: { id: taskId, label: task.title, status: task.status, type: 'task' },
+  })
+  for (const d of downstreamDeps) {
+    els.push({
+      data: { id: d.id, label: d.title, status: d.status, type: 'task' },
+    })
+    els.push({
+      data: { id: `${taskId}->${d.id}`, source: taskId, target: d.id },
+    })
+  }
   return els
 }
 
@@ -187,6 +244,7 @@ export function DAGTab({
   entityId: string
 }) {
   const isProduct = kind === 'product'
+  const isTask = kind === 'task'
   const hierarchy = useEntityHierarchy(kind, entityId)
   const deps = useEntityDependencies(kind, entityId)
   const children = useEntityChildren(kind, entityId)
@@ -197,9 +255,21 @@ export function DAGTab({
   // Manifest-mode extras: read this manifest + its parent product so
   // we can draw the parent-product crumb-node above the manifest in
   // the cytoscape graph.
-  const manifestSelf = useEntity(kind, isProduct ? undefined : entityId)
+  const manifestSelf = useEntity(kind, isProduct || isTask ? undefined : entityId)
   const m = manifestSelf.data as Manifest | undefined
   const parent = useEntity('product', m?.project_id || undefined)
+
+  // Task-mode extras: read this task + the inverse-direction deps
+  // (tasks that depend on this) so the DAG can show both edges.
+  const taskSelf = useEntity(kind, isTask ? entityId : undefined)
+  const taskData = taskSelf.data as Task | undefined
+  // Downstream tasks — fetched separately because useEntityDependencies
+  // is hard-coded to direction=out for the generic surface. Same wire
+  // shape ({deps: [...]}) the manifest 'in' direction uses.
+  const taskDownstream = useQueryDirection(
+    isTask ? entityId : undefined,
+    'in'
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
@@ -257,8 +327,19 @@ export function DAGTab({
     })
   )
 
+  const downstreamTaskRows: PickerRow[] = (taskDownstream.data ?? []).map(
+    (d) => ({
+      id: d.id,
+      marker: d.marker,
+      title: d.title,
+      status: d.status,
+    })
+  )
+
   const elements = useMemo(() => {
     if (isProduct) return productElements(hierarchy.data)
+    if (isTask)
+      return taskElements(entityId, taskData, upstreamRows, downstreamTaskRows)
     return manifestElements(
       entityId,
       m,
@@ -269,12 +350,15 @@ export function DAGTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isProduct,
+    isTask,
     hierarchy.data,
     entityId,
     m,
+    taskData,
     parent.data?.title,
     deps.data,
     children.data,
+    taskDownstream.data,
   ])
 
   const snapshot = useMemo(
@@ -441,6 +525,8 @@ export function DAGTab({
         navigate({ to: '/products', search: { id, tab: 'dag' } })
       } else if (type === 'manifest') {
         navigate({ to: '/manifests', search: { id, tab: 'dag' } })
+      } else if (type === 'task') {
+        navigate({ to: '/tasks', search: { id, tab: 'dag' } })
       }
     })
 
@@ -528,10 +614,16 @@ export function DAGTab({
     setUnlinkConfirm(null)
   }
 
-  const isLoading = isProduct ? hierarchy.isLoading : manifestSelf.isLoading
+  const isLoading = isProduct
+    ? hierarchy.isLoading
+    : isTask
+      ? taskSelf.isLoading
+      : manifestSelf.isLoading
   const isError = isProduct
     ? hierarchy.isError || !hierarchy.data
-    : manifestSelf.isError || !manifestSelf.data
+    : isTask
+      ? taskSelf.isError || !taskSelf.data
+      : manifestSelf.isError || !manifestSelf.data
 
   if (isLoading) {
     return (
@@ -590,17 +682,38 @@ export function DAGTab({
                       <DropdownMenuItem onClick={() => setModal('manifest')}>
                         Manifest
                       </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Task (use Tasks menu)
+                      </DropdownMenuItem>
+                    </>
+                  ) : isTask ? (
+                    // Tasks own no entities — only the relationship
+                    // editor is enabled. Sub-product / Manifest / Task
+                    // creation off a task is meaningless in the data
+                    // model so the items stay disabled.
+                    <>
+                      <DropdownMenuItem disabled>
+                        Sub-product (n/a — tasks are leaves)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Manifest (n/a)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Task (use Tasks menu)
+                      </DropdownMenuItem>
                     </>
                   ) : (
-                    <DropdownMenuItem
-                      onClick={() => setModal('manifest-upstream')}
-                    >
-                      Manifest (dependency)
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem
+                        onClick={() => setModal('manifest-upstream')}
+                      >
+                        Manifest (dependency)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem disabled>
+                        Task (use Tasks menu)
+                      </DropdownMenuItem>
+                    </>
                   )}
-                  <DropdownMenuItem disabled>
-                    Task (pending Tasks menu)
-                  </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => {
                       setConnectMode(true)
@@ -736,7 +849,7 @@ export function DAGTab({
               }}
             />
           </>
-        ) : (
+        ) : isTask ? null : (
           <LinkOrCreateModal
             open={modal === 'manifest-upstream'}
             onOpenChange={(open) =>

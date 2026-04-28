@@ -210,6 +210,11 @@ func apiTaskGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
+		// Single-task GET is the read path for the portal-v2 task detail
+		// page — mirror manifest's EnrichRecursiveCosts so the Main-tab
+		// gauges have actions + tokens on top of the cheaper turns + cost
+		// already populated by Get.
+		n.Tasks.EnrichRunStats(t)
 		writeJSON(w, EnrichWithHTML(t, map[string]string{"description": t.Description}))
 	}
 }
@@ -1097,6 +1102,156 @@ func apiTaskApprove(n *node.Node) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, map[string]string{"status": "approved", "task_id": t.ID, "reviewer": reviewer})
+	}
+}
+
+// resolveTaskID accepts a 12-char marker or full UUID and returns the
+// full UUID via Tasks.Get. Returns "" + a non-empty error message when
+// missing — same shape as resolveManifestID for consistency.
+func resolveTaskID(n *node.Node, idOrMarker string) (string, string) {
+	t, _ := n.Tasks.Get(idOrMarker)
+	if t == nil {
+		return "", "task not found: " + idOrMarker
+	}
+	return t.ID, ""
+}
+
+// taskDepRow is the wire shape for /api/tasks/{id}/dependencies — same
+// {id, marker, title, status} contract products + manifests use.
+type taskDepRow struct {
+	ID     string `json:"id"`
+	Marker string `json:"marker"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// apiTaskDepList — GET /api/tasks/{id}/dependencies?direction=out|in|both.
+//
+// Mirrors apiManifestDepList. The task model carries a single
+// `depends_on` cached on tasks (one parent dep at most), so the "out"
+// direction returns 0 or 1 row. "in" walks the inverse — every task
+// whose `depends_on` is this task. Default direction is "out".
+func apiTaskDepList(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		direction := r.URL.Query().Get("direction")
+		if direction == "" {
+			direction = "out"
+		}
+		out := map[string]any{}
+		switch direction {
+		case "out", "both":
+			deps := []taskDepRow{}
+			t, _ := n.Tasks.Get(id)
+			if t != nil && t.DependsOn != "" {
+				dep, _ := n.Tasks.Get(t.DependsOn)
+				if dep != nil {
+					deps = append(deps, taskDepRow{
+						ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status,
+					})
+				}
+			}
+			out["deps"] = deps
+			if direction != "both" {
+				break
+			}
+			fallthrough
+		case "in":
+			dependents, err := n.Tasks.ListDependents(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["dependents"] = dependents
+		default:
+			writeError(w, "direction must be out, in, or both", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, out)
+	}
+}
+
+// apiTaskDepAdd — POST /api/tasks/{id}/dependencies with body
+// {depends_on_id}. Mirrors apiManifestDepAdd. Tasks have at most one
+// parent dep cached on tasks.depends_on; this endpoint is effectively
+// a SetDependency that goes through the same store path apiTaskSetDep
+// already exposes. 409 on cycle, 400 on self-loop, 404 if either task
+// is missing.
+func apiTaskDepAdd(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		var body struct {
+			DependsOnID string `json:"depends_on_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if body.DependsOnID == "" {
+			writeError(w, "depends_on_id is required", http.StatusBadRequest)
+			return
+		}
+		dstID, msg := resolveTaskID(n, body.DependsOnID)
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		if err := n.Tasks.SetDependency(srcID, dstID); err != nil {
+			switch {
+			case errors.Is(err, task.ErrTaskDepCycle):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, task.ErrTaskDepSelfLoop):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		dep, _ := n.Tasks.Get(dstID)
+		if dep == nil {
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, map[string]string{"task_id": srcID, "depends_on_id": dstID})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, taskDepRow{ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status})
+	}
+}
+
+// apiTaskDepRemove — DELETE /api/tasks/{id}/dependencies/{depId}.
+// Idempotent: 204 whether or not the edge existed. Tasks carry at
+// most one dep, so this is "if my current dep is depId, clear it".
+func apiTaskDepRemove(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		dstID, msg := resolveTaskID(n, mux.Vars(r)["depId"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		t, _ := n.Tasks.Get(srcID)
+		if t == nil || t.DependsOn != dstID {
+			// No-op: matches manifest dep-remove idempotency contract.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := n.Tasks.SetDependency(srcID, ""); err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

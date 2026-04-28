@@ -5,7 +5,7 @@ import {
   useEntityHierarchy,
   type EntityKind,
 } from '@/lib/queries/entity'
-import type { HierarchyNode, Manifest } from '@/lib/types'
+import type { HierarchyNode, Manifest, Task } from '@/lib/types'
 
 // Walk the hierarchy tree to find the path from the root to the
 // target entity id. Returns null if the target isn't reachable.
@@ -47,6 +47,9 @@ export function EntityBreadcrumb({
         productTitle={entityTitle}
       />
     )
+  }
+  if (kind === 'task') {
+    return <TaskBreadcrumb taskId={entityId} taskTitle={entityTitle} />
   }
   return (
     <ManifestBreadcrumb
@@ -101,6 +104,54 @@ function ProductBreadcrumb({
           <span className='text-foreground font-medium'>{productTitle}</span>
         </span>
       ) : null}
+    </nav>
+  )
+}
+
+// Tasks: flat 2-crumb breadcrumb (Tasks › <TaskTitle>). The task's
+// manifest_id is available but we keep v1 deliberately compact —
+// landing on a task leaf rarely benefits from drilling up via the
+// breadcrumb when the parent manifest is one click away in the
+// Manifests menu.
+function TaskBreadcrumb({
+  taskId,
+  taskTitle,
+}: {
+  taskId: string
+  taskTitle?: string
+}) {
+  const task = useEntity('task', taskId)
+  const t = task.data as Task | undefined
+  return (
+    <nav
+      aria-label='Breadcrumb'
+      className='text-muted-foreground flex items-center gap-1.5 text-sm'
+    >
+      <Link
+        to='/tasks'
+        className='hover:text-foreground inline-flex items-center gap-1'
+      >
+        <Home className='h-3.5 w-3.5' />
+        Tasks
+      </Link>
+      {t?.manifest_id ? (
+        <span className='inline-flex items-center gap-1.5'>
+          <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+          <Link
+            to='/manifests'
+            search={{ id: t.manifest_id, tab: 'main' }}
+            className='hover:text-foreground'
+          >
+            {t.manifest_id.slice(0, 12)}
+          </Link>
+        </span>
+      ) : null}
+      <span className='inline-flex items-center gap-1.5'>
+        <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+        <span className='text-foreground font-medium'>
+          {taskTitle ?? taskId.slice(0, 12)}
+        </span>
+      </span>
     </nav>
   )
 }

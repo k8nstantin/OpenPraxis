@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
 import { Route as AuthenticatedRecallRouteImport } from './routes/_authenticated/recall'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductivityRouteImport } from './routes/_authenticated/productivity'
@@ -38,6 +39,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedRecallRoute = AuthenticatedRecallRouteImport.update({
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/tasks': typeof AuthenticatedTasksRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -203,6 +211,7 @@ export interface FileRoutesById {
   '/_authenticated/productivity': typeof AuthenticatedProductivityRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/recall': typeof AuthenticatedRecallRoute
+  '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -228,6 +237,7 @@ export interface FileRouteTypes {
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/tasks'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/tasks'
     | '/'
     | '/settings/account'
     | '/settings/appearance'
@@ -271,6 +282,7 @@ export interface FileRouteTypes {
     | '/_authenticated/productivity'
     | '/_authenticated/products'
     | '/_authenticated/recall'
+    | '/_authenticated/tasks'
     | '/_authenticated/'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
@@ -302,6 +314,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/tasks': {
+      id: '/_authenticated/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/recall': {
@@ -473,6 +492,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProductivityRoute: typeof AuthenticatedProductivityRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedRecallRoute: typeof AuthenticatedRecallRoute
+  AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
@@ -486,6 +506,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProductivityRoute: AuthenticatedProductivityRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedRecallRoute: AuthenticatedRecallRoute,
+  AuthenticatedTasksRoute: AuthenticatedTasksRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }
 

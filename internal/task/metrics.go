@@ -300,6 +300,34 @@ func (s *Store) TodayCost() (cost float64, turns int, taskCount int, err error) 
 	return
 }
 
+// EnrichRunStats populates the four cumulative gauges (turns / cost /
+// actions / tokens) on a single task by summing task_runs WHERE
+// task_id = t.id. Tokens is the all-buckets sum
+// (input + output + cache_read + cache_create). Used by the single-task
+// GET so the Main-tab gauges show the same actions/tokens that already
+// surface on products + manifests. List endpoints stay on the cheaper
+// enrichWithCosts batch path.
+func (s *Store) EnrichRunStats(t *Task) {
+	if t == nil {
+		return
+	}
+	row := s.db.QueryRow(`
+		SELECT
+			COALESCE(SUM(turns), 0),
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(actions), 0),
+			COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_create_tokens), 0)
+		FROM task_runs WHERE task_id = ?`, t.ID)
+	var turns, actions, tokens int
+	var cost float64
+	if err := row.Scan(&turns, &cost, &actions, &tokens); err == nil {
+		t.TotalTurns = turns
+		t.TotalCost = cost
+		t.TotalActions = actions
+		t.TotalTokens = tokens
+	}
+}
+
 // enrichWithCosts populates TotalTurns and TotalCost from task_runs for a batch of tasks.
 func (s *Store) enrichWithCosts(tasks []*Task) {
 	if len(tasks) == 0 {

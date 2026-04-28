@@ -28,8 +28,14 @@ import { readLastViewedId, writeLastViewedId } from './use-last-viewed'
 const DEFAULT_TAB: EntityTabId = 'main'
 
 export function EntityPage({ kind }: { kind: EntityKind }) {
-  const route = kind === 'product' ? '/_authenticated/products' : '/_authenticated/manifests'
-  const targetPath = kind === 'product' ? '/products' : '/manifests'
+  const route =
+    kind === 'product'
+      ? '/_authenticated/products'
+      : kind === 'task'
+        ? '/_authenticated/tasks'
+        : '/_authenticated/manifests'
+  const targetPath =
+    kind === 'product' ? '/products' : kind === 'task' ? '/tasks' : '/manifests'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const search = useSearch({ from: route as any }) as {
     id?: string
@@ -40,7 +46,8 @@ export function EntityPage({ kind }: { kind: EntityKind }) {
 
   const selectedId = search.id
   const tab = (search.tab ?? DEFAULT_TAB) as EntityTabId
-  const heading = kind === 'product' ? 'Products' : 'Manifests'
+  const heading =
+    kind === 'product' ? 'Products' : kind === 'task' ? 'Tasks' : 'Manifests'
   const panelGroupId = `portal-v2.${kind}.panels`
 
   useEffect(() => {

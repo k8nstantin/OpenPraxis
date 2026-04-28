@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Boxes,
   Brain,
+  CheckSquare,
   Command,
   FileText,
   Inbox,
@@ -53,6 +54,11 @@ export const sidebarData: SidebarData = {
           title: 'Manifests',
           url: '/manifests',
           icon: FileText,
+        },
+        {
+          title: 'Tasks',
+          url: '/tasks',
+          icon: CheckSquare,
         },
         {
           title: 'Inbox',

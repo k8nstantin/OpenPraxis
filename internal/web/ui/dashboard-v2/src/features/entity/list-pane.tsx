@@ -6,7 +6,7 @@ import {
   useEntityList,
   type EntityKind,
 } from '@/lib/queries/entity'
-import type { HierarchyNode, Product, Manifest } from '@/lib/types'
+import type { HierarchyNode, Product, Manifest, Task } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -52,7 +52,7 @@ export function EntityListPane({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const rows: ListRow[] = useMemo(() => {
-    const data = (list.data ?? []) as (Product | Manifest)[]
+    const data = (list.data ?? []) as (Product | Manifest | Task)[]
     return data.map((d) => ({
       id: d.id,
       marker: d.marker,
@@ -112,7 +112,14 @@ export function EntityListPane({
     })
   }
 
-  const heading = kind === 'product' ? 'Products' : 'Manifests'
+  const heading =
+    kind === 'product' ? 'Products' : kind === 'task' ? 'Tasks' : 'Manifests'
+  const emptyNoun =
+    kind === 'product'
+      ? 'products'
+      : kind === 'task'
+        ? 'tasks'
+        : 'manifests'
 
   return (
     <div className='flex h-full min-h-0 flex-col'>
@@ -146,9 +153,7 @@ export function EntityListPane({
           </div>
         ) : filtered.length === 0 ? (
           <div className='text-muted-foreground p-3 text-xs'>
-            {query
-              ? 'No matches.'
-              : `No ${kind === 'product' ? 'products' : 'manifests'} yet.`}
+            {query ? 'No matches.' : `No ${emptyNoun} yet.`}
           </div>
         ) : (
           <div className='py-1'>

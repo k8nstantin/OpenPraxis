@@ -5,13 +5,14 @@ import type {
   Manifest,
   Product,
   ProductDependency,
+  Task,
 } from '@/lib/types'
 
-// Generic entity queries layer for Products + Manifests.
+// Generic entity queries layer for Products + Manifests + Tasks.
 //
-// Products and Manifests share the same 5-tab surface; the only thing
-// that changes is the URL prefix and the children/hierarchy semantics.
-// Each hook takes a `kind` and dispatches to the correct API path. See
+// All three kinds share the same 5-tab surface; the only thing that
+// changes is the URL prefix and the children/hierarchy semantics. Each
+// hook takes a `kind` and dispatches to the correct API path. See
 // features/entity/* for the React surface that consumes these.
 //
 // Path conventions (verified against handlers_*.go in this PR):
@@ -30,12 +31,22 @@ import type {
 //   /api/manifests/{id}/comments            GET, POST
 //   /api/manifests/{id}/description/history GET
 //   /api/manifests/{id}/settings            GET, PUT, DELETE/{key}
+//   /api/tasks/{id}                         GET, PATCH
+//   /api/tasks/{id}/dependencies            GET (?direction=out), POST (body-style)
+//   /api/tasks/{id}/dependencies/{X}        DELETE
+//   /api/tasks/{id}/comments                GET, POST
+//   /api/tasks/{id}/description/history     GET
+//   /api/tasks/{id}/settings                GET, PUT, DELETE/{key}
+//
+// Tasks are leaves in the product → manifest → task tree:
+//   - useEntityChildren: returns []  (tasks have no children)
+//   - useEntityHierarchy: disabled    (no recursive descent)
 
-export type EntityKind = 'product' | 'manifest'
+export type EntityKind = 'product' | 'manifest' | 'task'
 
 // EntityRecord is the union of fields that the generic surface reads.
-// Cast to Product or Manifest as needed for kind-specific extras.
-export type EntityRecord = Product | Manifest
+// Cast to Product / Manifest / Task as needed for kind-specific extras.
+export type EntityRecord = Product | Manifest | Task
 
 export const entityKeys = {
   all: (kind: EntityKind) => [kind] as const,
@@ -55,7 +66,9 @@ export const entityKeys = {
 }
 
 function basePath(kind: EntityKind): string {
-  return kind === 'product' ? '/api/products' : '/api/manifests'
+  if (kind === 'product') return '/api/products'
+  if (kind === 'task') return '/api/tasks'
+  return '/api/manifests'
 }
 
 async function fetchJSON<T>(path: string): Promise<T> {
@@ -100,9 +113,11 @@ export function useEntityHierarchy(
   })
 }
 
-// Children — products → manifests; manifests → tasks. Same shape on
-// the wire ({id, marker, title, status} subset), so the consumers
-// (Dependencies tab + DAG tab) can treat the rows uniformly.
+// Children — products → manifests; manifests → tasks; tasks → none.
+// Same shape on the wire ({id, marker, title, status} subset), so the
+// consumers (Dependencies tab + DAG tab) can treat the rows uniformly.
+// Tasks are leaves: the query is disabled and resolves to an empty
+// array so callers don't have to special-case undefined.
 export function useEntityChildren(
   kind: EntityKind,
   id: string | undefined
@@ -110,18 +125,25 @@ export function useEntityChildren(
   const path =
     kind === 'product'
       ? `/api/products/${id}/manifests`
-      : `/api/manifests/${id}/tasks`
+      : kind === 'manifest'
+        ? `/api/manifests/${id}/tasks`
+        : ''
   return useQuery({
     queryKey: entityKeys.children(kind, id ?? ''),
-    queryFn: () => fetchJSON<Manifest[] | unknown[]>(path),
-    enabled: !!id,
+    queryFn: () =>
+      kind === 'task'
+        ? Promise.resolve([] as unknown[])
+        : fetchJSON<Manifest[] | unknown[]>(path),
+    enabled: !!id && kind !== 'task',
     staleTime: 15 * 1000,
   })
 }
 
 // Dependency rows — same {id, marker, title, status} shape. Manifest's
 // endpoint wraps in `{deps: [...]}` AND requires direction=out; the
-// product's wraps in `{deps: [...]}` too. Normalize both to a bare
+// product's wraps in `{deps: [...]}` too; the task's mirrors manifest
+// and returns 0-or-1 rows because tasks carry at most one dep on the
+// underlying tasks.depends_on column. Normalize all three to a bare
 // array.
 export function useEntityDependencies(
   kind: EntityKind,
@@ -130,7 +152,9 @@ export function useEntityDependencies(
   const path =
     kind === 'product'
       ? `/api/products/${id}/dependencies`
-      : `/api/manifests/${id}/dependencies?direction=out`
+      : kind === 'task'
+        ? `/api/tasks/${id}/dependencies?direction=out`
+        : `/api/manifests/${id}/dependencies?direction=out`
   return useQuery({
     queryKey: entityKeys.deps(kind, id ?? ''),
     queryFn: async () => {
@@ -198,10 +222,14 @@ export function useUpdateEntity(
   id: string | undefined
 ) {
   const qc = useQueryClient()
+  // Tasks update via PATCH; products + manifests via PUT. Backend
+  // surface predates the generic queries layer, so we keep the verbs
+  // as-is rather than churn handler signatures.
+  const method = kind === 'task' ? 'PATCH' : 'PUT'
   return useMutation({
     mutationFn: async (patch: Partial<EntityRecord>) => {
       const res = await fetch(`${basePath(kind)}/${id}`, {
-        method: 'PUT',
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
