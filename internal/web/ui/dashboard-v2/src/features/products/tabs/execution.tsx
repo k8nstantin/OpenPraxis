@@ -201,9 +201,6 @@ function KnobRow({
         </code>
         <div className='flex flex-1 items-center gap-2'>
           <Control knob={knob} value={value} onChange={scheduleSave} />
-          {knob.unit ? (
-            <span className='text-muted-foreground text-xs'>{knob.unit}</span>
-          ) : null}
         </div>
         <SaveStatus status={status} title={errMsg ?? ''} />
         {isExplicit ? (
@@ -290,19 +287,17 @@ function RangeNumber({
   const step = knob.slider_step ?? (isInt ? 1 : 0.01)
   const num = numericOr(value, knob.default)
   return (
-    <div className='flex flex-1 items-center gap-3'>
-      <div className='w-24 shrink-0'>
-        <Gauge value={num} min={min} max={max} size='sm' />
+    <div className='flex flex-1 justify-end'>
+      <div className='w-44'>
+        <Gauge
+          value={num}
+          min={min}
+          max={max}
+          step={step}
+          unit={knob.unit}
+          onChange={(v) => onChange(isInt ? Math.round(v) : v)}
+        />
       </div>
-      <Input
-        type='number'
-        className='h-8 w-28 text-sm'
-        min={min}
-        max={max}
-        step={step}
-        value={num}
-        onChange={(e) => onChange(coerce(e.target.value, isInt))}
-      />
     </div>
   )
 }
