@@ -122,11 +122,11 @@ export function Gauge({
   }
 
   return (
-    <div className='bg-card flex flex-col items-center gap-0.5 rounded-md border px-1 py-2'>
+    <div className='bg-card rounded-md border'>
       <svg
         ref={svgRef}
-        viewBox='0 0 100 60'
-        className={`w-full ${interactive ? 'cursor-pointer touch-none select-none' : ''}`}
+        viewBox='0 0 100 90'
+        className={`block w-full ${interactive ? 'cursor-pointer touch-none select-none' : ''}`}
         aria-label={label ?? ''}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -242,18 +242,37 @@ export function Gauge({
         >
           {max}
         </text>
-      </svg>
-      <span className='font-mono text-xs font-semibold'>
-        {value}
-        {unit ? (
-          <span className='text-muted-foreground ml-0.5'>{unit}</span>
+        {/* Value + label live inside the SVG so they scale with the
+            gauge as the container resizes (text-xs CSS sizing didn't
+            track the SVG). Two lines: bold value (with unit) at y=72,
+            uppercase label at y=84. */}
+        <text
+          x={50}
+          y={72}
+          textAnchor='middle'
+          fontSize='10'
+          fontWeight='bold'
+          fill='currentColor'
+          fontFamily='ui-monospace, SFMono-Regular, Menlo, monospace'
+        >
+          {String(value)}
+          {unit ? ` ${unit}` : ''}
+        </text>
+        {label ? (
+          <text
+            x={50}
+            y={84}
+            textAnchor='middle'
+            fontSize='6'
+            fill='currentColor'
+            opacity={0.6}
+            letterSpacing='0.5'
+            style={{ textTransform: 'uppercase' }}
+          >
+            {label}
+          </text>
         ) : null}
-      </span>
-      {label ? (
-        <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
-          {label}
-        </span>
-      ) : null}
+      </svg>
     </div>
   )
 }

@@ -31,6 +31,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LinkOrCreateModal } from '../link-or-create-modal'
 import type { PickerRow } from '../dep-picker'
@@ -101,6 +107,20 @@ export function DAGTab({ productId }: { productId: string }) {
 
   const [editing, setEditing] = useState(false)
   const [modal, setModal] = useState<null | 'subproduct' | 'manifest'>(null)
+  const [connectMode, setConnectMode] = useState(false)
+  const [connectFrom, setConnectFrom] = useState<null | {
+    id: string
+    title: string
+    type: string
+  }>(null)
+  const [connectReverse, setConnectReverse] = useState(false)
+  const [edgeConfirm, setEdgeConfirm] = useState<null | {
+    fromId: string
+    fromTitle: string
+    toId: string
+    toTitle: string
+    reversed: boolean
+  }>(null)
   const [unlinkConfirm, setUnlinkConfirm] = useState<null | {
     nodeId: string
     nodeTitle: string
@@ -150,13 +170,25 @@ export function DAGTab({ productId }: { productId: string }) {
       }))
   }, [allManifests.data, manifests.data])
 
-  // Stash editing in a ref so cytoscape event handlers (closed over
-  // initial editing value at registration) read live state without
-  // forcing a canvas re-init on every toggle.
+  // Stash editing + connect-mode state in refs so cytoscape event
+  // handlers (closed over initial values at registration) read live
+  // state without forcing a canvas re-init on every toggle.
   const editingRef = useRef(editing)
+  const connectModeRef = useRef(connectMode)
+  const connectFromRef = useRef(connectFrom)
+  const connectReverseRef = useRef(connectReverse)
   useEffect(() => {
     editingRef.current = editing
   }, [editing])
+  useEffect(() => {
+    connectModeRef.current = connectMode
+  }, [connectMode])
+  useEffect(() => {
+    connectFromRef.current = connectFrom
+  }, [connectFrom])
+  useEffect(() => {
+    connectReverseRef.current = connectReverse
+  }, [connectReverse])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -226,7 +258,30 @@ export function DAGTab({ productId }: { productId: string }) {
     })
 
     cy.on('tap', 'node', (e) => {
-      const id = e.target.id() as string
+      const node = e.target as cytoscape.NodeSingular
+      const id = node.id() as string
+      // Connect mode short-circuits everything else: stage source on
+      // first tap, stage target + open confirm on second.
+      if (editingRef.current && connectModeRef.current) {
+        const title = node.data('label') as string
+        const type = node.data('type') as string
+        const cur = connectFromRef.current
+        if (!cur) {
+          setConnectFrom({ id, title, type })
+          return
+        }
+        if (cur.id === id) return
+        const reversed = connectReverseRef.current
+        setEdgeConfirm({
+          fromId: cur.id,
+          fromTitle: cur.title,
+          toId: id,
+          toTitle: title,
+          reversed,
+        })
+        setConnectFrom(null)
+        return
+      }
       if (id === productId) return
       if (editingRef.current) return
       navigate({ to: '/products', search: { id, tab: 'dag' } })
@@ -258,6 +313,37 @@ export function DAGTab({ productId }: { productId: string }) {
       cyRef.current = null
     }
   }, [elements, productId, navigate])
+
+  // Connect-mode commit: POST a product dependency directly. The
+  // arrow points "depends-on": source depends on target. When the
+  // operator flipped the direction toggle, swap before sending.
+  const onEdgeConfirmed = async () => {
+    if (!edgeConfirm) return
+    const { fromId, fromTitle, toId, toTitle, reversed } = edgeConfirm
+    const srcId = reversed ? toId : fromId
+    const dstId = reversed ? fromId : toId
+    const srcTitle = reversed ? toTitle : fromTitle
+    const dstTitle = reversed ? fromTitle : toTitle
+    try {
+      const r = await fetch(`/api/products/${srcId}/dependencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depends_on_id: dstId }),
+      })
+      if (!r.ok && r.status !== 409) {
+        throw new Error(`HTTP ${r.status}`)
+      }
+      toast.success(
+        `Edge added — "${srcTitle}" depends on "${dstTitle}"`
+      )
+      // Hierarchy refetch picks up the new edge.
+      await hierarchy.refetch()
+      await subs.refetch()
+    } catch (e) {
+      toast.error(`Failed: ${String(e)}`)
+    }
+    setEdgeConfirm(null)
+  }
 
   const onUnlinkConfirmed = async () => {
     if (!unlinkConfirm) return
@@ -298,7 +384,7 @@ export function DAGTab({ productId }: { productId: string }) {
   }
 
   return (
-    <Card>
+    <Card className='gap-0 py-0'>
       <CardContent className='relative p-0'>
         {elements.length === 0 ? (
           <div className='text-muted-foreground p-6 text-sm'>
@@ -308,36 +394,55 @@ export function DAGTab({ productId }: { productId: string }) {
         ) : (
           <div
             ref={containerRef}
-            className='bg-background h-[calc(100vh-22rem)] min-h-96 w-full rounded-md'
+            className='bg-background h-[calc(100vh-15rem)] min-h-[600px] w-full rounded-md'
           />
         )}
 
         <div className='absolute top-2 right-2 flex items-center gap-1.5'>
           {editing ? (
             <>
-              <Button
-                variant='outline'
-                size='sm'
-                className='h-7 px-2 text-xs'
-                onClick={() => setModal('subproduct')}
-              >
-                <Plus className='mr-1 h-3 w-3' />
-                Sub-product
-              </Button>
-              <Button
-                variant='outline'
-                size='sm'
-                className='h-7 px-2 text-xs'
-                onClick={() => setModal('manifest')}
-              >
-                <Plus className='mr-1 h-3 w-3' />
-                Manifest
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 px-2 text-xs'
+                    disabled={connectMode}
+                  >
+                    <Plus className='mr-1 h-3 w-3' />
+                    Add
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end'>
+                  <DropdownMenuItem onClick={() => setModal('subproduct')}>
+                    Product (sub-product)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setModal('manifest')}>
+                    Manifest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled>
+                    Task (pending Tasks menu)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setConnectMode(true)
+                      setConnectFrom(null)
+                      setConnectReverse(false)
+                    }}
+                  >
+                    Relationship (drag-to-edge)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant='secondary'
                 size='sm'
                 className='h-7 px-2 text-xs'
-                onClick={() => setEditing(false)}
+                onClick={() => {
+                  setEditing(false)
+                  setConnectMode(false)
+                  setConnectFrom(null)
+                }}
               >
                 <X className='mr-1 h-3 w-3' />
                 Done
@@ -365,10 +470,38 @@ export function DAGTab({ productId }: { productId: string }) {
           </Button>
         </div>
 
-        {editing ? (
+        {connectMode ? (
+          <div className='bg-card/95 absolute bottom-2 left-2 flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs backdrop-blur'>
+            <span>
+              {connectFrom
+                ? `From "${connectFrom.title}" — click target node`
+                : 'Click source node, then target.'}
+            </span>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-6 px-2 text-[11px]'
+              onClick={() => setConnectReverse((v) => !v)}
+            >
+              Direction: {connectReverse ? 'target → source' : 'source → target'}{' '}
+              ↔
+            </Button>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-6 px-2 text-[11px]'
+              onClick={() => {
+                setConnectMode(false)
+                setConnectFrom(null)
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : editing ? (
           <div className='bg-card/90 absolute bottom-2 left-2 rounded-md border px-3 py-1.5 text-xs backdrop-blur'>
-            Right-click a child node to unlink. Tasks deferred — coming
-            with the Tasks top-level menu.
+            Right-click a child node to unlink. Pick "Add" → Relationship
+            to draw an edge.
           </div>
         ) : null}
 
@@ -448,6 +581,43 @@ export function DAGTab({ productId }: { productId: string }) {
               <AlertDialogAction onClick={onUnlinkConfirmed}>
                 <Unlink className='mr-1 h-3 w-3' />
                 Unlink
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={edgeConfirm !== null}
+          onOpenChange={(open) => !open && setEdgeConfirm(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Add relationship?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {edgeConfirm ? (
+                  <>
+                    <span className='font-medium'>
+                      {edgeConfirm.reversed
+                        ? edgeConfirm.toTitle
+                        : edgeConfirm.fromTitle}
+                    </span>
+                    {' depends on '}
+                    <span className='font-medium'>
+                      {edgeConfirm.reversed
+                        ? edgeConfirm.fromTitle
+                        : edgeConfirm.toTitle}
+                    </span>
+                    . Currently only product → product edges are
+                    supported here; other combinations land with the
+                    Manifest / Task menus.
+                  </>
+                ) : null}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onEdgeConfirmed}>
+                Add edge
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
