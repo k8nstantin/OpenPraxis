@@ -44,8 +44,8 @@ export const sidebarData: SidebarData = {
           icon: PlayCircle,
         },
         {
-          title: 'Catalog',
-          url: '/catalog',
+          title: 'Products',
+          url: '/products',
           icon: Boxes,
         },
         {

@@ -12,9 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedRecallRouteImport } from './routes/_authenticated/recall'
+import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductivityRouteImport } from './routes/_authenticated/productivity'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
-import { Route as AuthenticatedCatalogRouteImport } from './routes/_authenticated/catalog'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
 import { Route as AuthenticatedActiveRouteImport } from './routes/_authenticated/active'
@@ -29,6 +29,7 @@ import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
+import { Route as AuthenticatedProductsProductIdRouteImport } from './routes/_authenticated/products/$productId'
 
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
@@ -44,6 +45,11 @@ const AuthenticatedRecallRoute = AuthenticatedRecallRouteImport.update({
   path: '/recall',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedProductsRoute = AuthenticatedProductsRouteImport.update({
+  id: '/products',
+  path: '/products',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedProductivityRoute =
   AuthenticatedProductivityRouteImport.update({
     id: '/productivity',
@@ -53,11 +59,6 @@ const AuthenticatedProductivityRoute =
 const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedCatalogRoute = AuthenticatedCatalogRouteImport.update({
-  id: '/catalog',
-  path: '/catalog',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
@@ -136,6 +137,12 @@ const AuthenticatedSettingsAccountRoute =
     path: '/account',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedProductsProductIdRoute =
+  AuthenticatedProductsProductIdRouteImport.update({
+    id: '/$productId',
+    path: '/$productId',
+    getParentRoute: () => AuthenticatedProductsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -148,10 +155,11 @@ export interface FileRoutesByFullPath {
   '/active': typeof AuthenticatedActiveRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
-  '/catalog': typeof AuthenticatedCatalogRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/productivity': typeof AuthenticatedProductivityRoute
+  '/products': typeof AuthenticatedProductsRouteWithChildren
   '/recall': typeof AuthenticatedRecallRoute
+  '/products/$productId': typeof AuthenticatedProductsProductIdRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -167,11 +175,12 @@ export interface FileRoutesByTo {
   '/active': typeof AuthenticatedActiveRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
-  '/catalog': typeof AuthenticatedCatalogRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/productivity': typeof AuthenticatedProductivityRoute
+  '/products': typeof AuthenticatedProductsRouteWithChildren
   '/recall': typeof AuthenticatedRecallRoute
   '/': typeof AuthenticatedIndexRoute
+  '/products/$productId': typeof AuthenticatedProductsProductIdRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -190,11 +199,12 @@ export interface FileRoutesById {
   '/_authenticated/active': typeof AuthenticatedActiveRoute
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
-  '/_authenticated/catalog': typeof AuthenticatedCatalogRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
   '/_authenticated/productivity': typeof AuthenticatedProductivityRoute
+  '/_authenticated/products': typeof AuthenticatedProductsRouteWithChildren
   '/_authenticated/recall': typeof AuthenticatedRecallRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/products/$productId': typeof AuthenticatedProductsProductIdRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -214,10 +224,11 @@ export interface FileRouteTypes {
     | '/active'
     | '/activity'
     | '/audit'
-    | '/catalog'
     | '/inbox'
     | '/productivity'
+    | '/products'
     | '/recall'
+    | '/products/$productId'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -233,11 +244,12 @@ export interface FileRouteTypes {
     | '/active'
     | '/activity'
     | '/audit'
-    | '/catalog'
     | '/inbox'
     | '/productivity'
+    | '/products'
     | '/recall'
     | '/'
+    | '/products/$productId'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -255,11 +267,12 @@ export interface FileRouteTypes {
     | '/_authenticated/active'
     | '/_authenticated/activity'
     | '/_authenticated/audit'
-    | '/_authenticated/catalog'
     | '/_authenticated/inbox'
     | '/_authenticated/productivity'
+    | '/_authenticated/products'
     | '/_authenticated/recall'
     | '/_authenticated/'
+    | '/_authenticated/products/$productId'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/display'
@@ -299,6 +312,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRecallRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/products': {
+      id: '/_authenticated/products'
+      path: '/products'
+      fullPath: '/products'
+      preLoaderRoute: typeof AuthenticatedProductsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/productivity': {
       id: '/_authenticated/productivity'
       path: '/productivity'
@@ -311,13 +331,6 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof AuthenticatedInboxRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/catalog': {
-      id: '/_authenticated/catalog'
-      path: '/catalog'
-      fullPath: '/catalog'
-      preLoaderRoute: typeof AuthenticatedCatalogRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/audit': {
@@ -418,6 +431,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAccountRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/products/$productId': {
+      id: '/_authenticated/products/$productId'
+      path: '/$productId'
+      fullPath: '/products/$productId'
+      preLoaderRoute: typeof AuthenticatedProductsProductIdRouteImport
+      parentRoute: typeof AuthenticatedProductsRoute
+    }
   }
 }
 
@@ -444,14 +464,27 @@ const AuthenticatedSettingsRouteRouteWithChildren =
     AuthenticatedSettingsRouteRouteChildren,
   )
 
+interface AuthenticatedProductsRouteChildren {
+  AuthenticatedProductsProductIdRoute: typeof AuthenticatedProductsProductIdRoute
+}
+
+const AuthenticatedProductsRouteChildren: AuthenticatedProductsRouteChildren = {
+  AuthenticatedProductsProductIdRoute: AuthenticatedProductsProductIdRoute,
+}
+
+const AuthenticatedProductsRouteWithChildren =
+  AuthenticatedProductsRoute._addFileChildren(
+    AuthenticatedProductsRouteChildren,
+  )
+
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedActiveRoute: typeof AuthenticatedActiveRoute
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
-  AuthenticatedCatalogRoute: typeof AuthenticatedCatalogRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
   AuthenticatedProductivityRoute: typeof AuthenticatedProductivityRoute
+  AuthenticatedProductsRoute: typeof AuthenticatedProductsRouteWithChildren
   AuthenticatedRecallRoute: typeof AuthenticatedRecallRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
@@ -461,9 +494,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActiveRoute: AuthenticatedActiveRoute,
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
-  AuthenticatedCatalogRoute: AuthenticatedCatalogRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
   AuthenticatedProductivityRoute: AuthenticatedProductivityRoute,
+  AuthenticatedProductsRoute: AuthenticatedProductsRouteWithChildren,
   AuthenticatedRecallRoute: AuthenticatedRecallRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }
