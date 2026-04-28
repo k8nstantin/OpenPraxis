@@ -26,28 +26,36 @@ export function MainTab({ productId }: { productId: string }) {
   const product = useProduct(productId)
   const history = useProductDescriptionHistory(productId)
   const update = useUpdateProduct(productId)
-  const [repoInfo, setRepoInfo] = useState<{
-    branch_prefix?: string
-    worktree_base_dir?: string
-    default_model?: string
-    default_agent?: string
-  }>({})
+  const [repoInfo, setRepoInfo] = useState<Record<string, string | number>>(
+    {}
+  )
+  const [catalog, setCatalog] = useState<KnobDef[]>([])
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/products/${productId}/settings`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled || !d) return
-        const out: Record<string, string> = {}
-        for (const e of (d.entries ?? []) as { key: string; value: string }[]) {
-          try {
-            out[e.key] = JSON.parse(e.value)
-          } catch {
-            out[e.key] = e.value
+    Promise.all([
+      fetch(`/api/products/${productId}/settings`).then((r) =>
+        r.ok ? r.json() : null
+      ),
+      fetch('/api/settings/catalog').then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([s, c]) => {
+        if (cancelled) return
+        if (s) {
+          const out: Record<string, string | number> = {}
+          for (const e of (s.entries ?? []) as {
+            key: string
+            value: string
+          }[]) {
+            try {
+              out[e.key] = JSON.parse(e.value)
+            } catch {
+              out[e.key] = e.value
+            }
           }
+          setRepoInfo(out)
         }
-        setRepoInfo(out)
+        if (c?.knobs) setCatalog(c.knobs as KnobDef[])
       })
       .catch(() => {})
     return () => {
@@ -80,6 +88,23 @@ export function MainTab({ productId }: { productId: string }) {
   const created = p?.created_at ? new Date(p.created_at) : null
   const updated = p?.updated_at ? new Date(p.updated_at) : null
 
+  // Read-only speedometer gauges for the operationally-relevant int
+  // knobs. Editing stays in the Execution Control tab — these are a
+  // dashboard glance: needle position = current value, min on left,
+  // max on right. Skip meta knobs (prompt_*, scheduler_*) and pure
+  // bool/enum knobs.
+  const GAUGE_KEYS = [
+    'max_parallel',
+    'max_turns',
+    'max_cost_usd',
+    'daily_budget_usd',
+    'timeout_minutes',
+    'retry_on_failure',
+  ]
+  const gauges = GAUGE_KEYS.map((k) =>
+    catalog.find((c) => c.key === k)
+  ).filter((k): k is KnobDef => !!k)
+
   return (
     <div className='space-y-2'>
       <div className='grid grid-cols-3 gap-1 lg:grid-cols-6'>
@@ -101,6 +126,30 @@ export function MainTab({ productId }: { productId: string }) {
           </>
         )}
       </div>
+
+      {gauges.length > 0 ? (
+        <div className='grid grid-cols-3 gap-2 lg:grid-cols-6'>
+          {gauges.map((knob) => {
+            const v = repoInfo[knob.key]
+            const num =
+              typeof v === 'number'
+                ? v
+                : typeof knob.default === 'number'
+                  ? knob.default
+                  : 0
+            return (
+              <Gauge
+                key={knob.key}
+                label={knob.key}
+                value={num}
+                min={knob.slider_min ?? 0}
+                max={knob.slider_max ?? 100}
+                unit={knob.unit}
+              />
+            )
+          })}
+        </div>
+      ) : null}
 
       {p ? (
         <Card className='gap-0 py-0'>
@@ -299,4 +348,102 @@ function fmtTime(ts: number | string): string {
   const t = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)
   if (!Number.isFinite(t)) return '—'
   return new Date(t).toLocaleString()
+}
+
+interface KnobDef {
+  key: string
+  type: string
+  default: string | number | boolean | string[]
+  unit?: string
+  slider_min?: number
+  slider_max?: number
+}
+
+// Speedometer-style gauge: semi-circle from min (left) to max (right),
+// needle at the current value. Read-only — editing happens in the
+// Execution Control tab. Pure SVG; no library.
+function Gauge({
+  label,
+  value,
+  min,
+  max,
+  unit,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  unit?: string
+}) {
+  const range = max - min
+  const f = range > 0 ? Math.max(0, Math.min(1, (value - min) / range)) : 0
+  const cx = 50
+  const cy = 48
+  const R = 36
+  // Map fraction f∈[0,1] → angle θ∈[-π/2, π/2] (left → up → right).
+  const theta = -Math.PI / 2 + Math.PI * f
+  const nx = cx + R * Math.sin(theta)
+  const ny = cy - R * Math.cos(theta)
+  const arcLen = Math.PI * R
+  return (
+    <div className='bg-card flex flex-col items-center gap-0.5 rounded-md border px-1 py-2'>
+      <svg viewBox='0 0 100 60' className='w-full' aria-label={label}>
+        <path
+          d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          stroke='currentColor'
+          strokeOpacity={0.15}
+          strokeWidth={6}
+          strokeLinecap='round'
+          fill='none'
+        />
+        <path
+          d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          stroke='currentColor'
+          strokeOpacity={0.7}
+          strokeWidth={6}
+          strokeLinecap='round'
+          fill='none'
+          strokeDasharray={arcLen}
+          strokeDashoffset={arcLen * (1 - f)}
+        />
+        <line
+          x1={cx}
+          y1={cy}
+          x2={nx}
+          y2={ny}
+          stroke='currentColor'
+          strokeWidth={1.5}
+          strokeLinecap='round'
+        />
+        <circle cx={cx} cy={cy} r={2.5} fill='currentColor' />
+        <text
+          x={cx - R}
+          y={58}
+          textAnchor='start'
+          fontSize='6'
+          fill='currentColor'
+          opacity={0.5}
+        >
+          {min}
+        </text>
+        <text
+          x={cx + R}
+          y={58}
+          textAnchor='end'
+          fontSize='6'
+          fill='currentColor'
+          opacity={0.5}
+        >
+          {max}
+        </text>
+      </svg>
+      <span className='font-mono text-xs font-semibold'>
+        {value}
+        {unit ? <span className='text-muted-foreground ml-0.5'>{unit}</span> : null}
+      </span>
+      <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
+        {label}
+      </span>
+    </div>
+  )
 }
