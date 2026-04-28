@@ -88,9 +88,8 @@ function SubProductsCard({
             {items.map((sp) => (
               <Link
                 key={sp.id}
-                to='/products/$productId'
-                params={{ productId: sp.id }}
-                search={{ tab: 'main' }}
+                to='/products'
+                search={{ id: sp.id, tab: 'main' }}
                 className='hover:border-primary/50 group flex items-center justify-between gap-2 rounded-md border p-3 text-sm transition-colors'
               >
                 <div className='min-w-0'>

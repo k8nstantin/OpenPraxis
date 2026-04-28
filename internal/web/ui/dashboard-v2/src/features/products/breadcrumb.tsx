@@ -58,9 +58,8 @@ export function ProductsBreadcrumb({
               <span className='text-foreground font-medium'>{node.title}</span>
             ) : (
               <Link
-                to='/products/$productId'
-                params={{ productId: node.id }}
-                search={{ tab: 'main' }}
+                to='/products'
+                search={{ id: node.id, tab: 'main' }}
                 className='hover:text-foreground'
               >
                 {node.title}

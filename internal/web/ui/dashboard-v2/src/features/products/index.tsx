@@ -51,7 +51,7 @@ export function ProductsPage() {
     if (!selectedId) {
       const last = readLastViewedProductId()
       if (last) {
-        navigate({ search: { id: last, tab: 'main' } })
+        navigate({ to: '/products', search: { id: last, tab: 'main' } })
       }
     }
     // we only want this on mount + when selectedId changes from undefined
@@ -67,10 +67,10 @@ export function ProductsPage() {
   }, [selectedId])
 
   const setSelected = (id: string) => {
-    navigate({ search: { id, tab: 'main' } })
+    navigate({ to: '/products', search: { id, tab: 'main' } })
   }
   const setTab = (next: ProductsTab) => {
-    navigate({ search: { id: selectedId, tab: next } })
+    navigate({ to: '/products', search: { id: selectedId, tab: next } })
   }
 
   return (
