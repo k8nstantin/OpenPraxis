@@ -62,18 +62,23 @@ export function ProductsListPane({
     if (!hasMore) return
     const el = sentinelRef.current
     if (!el) return
+    // The list scrolls inside Radix's ScrollArea viewport, NOT the
+    // document viewport. IntersectionObserver's default root would
+    // never see the sentinel intersect because Radix translates the
+    // inner content with CSS transforms — the sentinel's screen
+    // position relative to the page doesn't change when the list
+    // scrolls. Walk up to find the [data-radix-scroll-area-viewport]
+    // ancestor and use IT as the observer's root.
+    const root = el.closest<HTMLElement>(
+      '[data-radix-scroll-area-viewport]'
+    )
     const io = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
           setVisibleCount((n) => Math.min(n + PAGE_SIZE, filtered.length))
         }
       },
-      // root: null defaults to viewport, but inside ScrollArea the
-      // useful root is the Radix viewport — leaving null still works
-      // because the sentinel becomes visible when content scrolls
-      // into the page viewport. rootMargin pre-loads slightly before
-      // the sentinel is fully on screen.
-      { rootMargin: '120px 0px' }
+      { root, rootMargin: '120px 0px' }
     )
     io.observe(el)
     return () => io.disconnect()
