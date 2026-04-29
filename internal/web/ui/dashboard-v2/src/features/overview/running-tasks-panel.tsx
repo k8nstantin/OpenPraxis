@@ -222,38 +222,14 @@ function TasksPanel() {
       ]}
     >
       {running.length === 0 ? (
-        <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-          <ChartTile label='Running count' note='0…N tasks live'>
-            <RunningGauge running={0} max={8} />
-          </ChartTile>
-          <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
-            <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
-          </ChartTile>
-          <div className='text-muted-foreground col-span-full rounded-md border bg-background/40 p-6 text-center text-sm'>
-            no running tasks — fire one and live tiles appear here
-          </div>
+        <div className='text-muted-foreground rounded-md border bg-background/40 p-6 text-center text-sm'>
+          no running tasks — fire one and live tiles appear here
         </div>
       ) : (
-        <div className='space-y-3'>
-          {/* One per-task tile per running task. Each tile carries the
-              full live metric set: turns / actions / cost / lines /
-              CPU / RSS plus three live sparklines. */}
-          <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-            {running.map((t) => (
-              <RunningTaskTile key={t.task_id} t={t} />
-            ))}
-          </div>
-          {/* Side cards next to the per-task tiles: aggregate budget
-              ring + count gauge so the panel still reads as "tasks
-              overview" not just per-task drill-in. */}
-          <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-            <ChartTile label='Running count' note='0…N tasks live'>
-              <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
-            </ChartTile>
-            <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
-              <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
-            </ChartTile>
-          </div>
+        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+          {running.map((t) => (
+            <RunningTaskTile key={t.task_id} t={t} />
+          ))}
         </div>
       )}
     </PanelCard>
