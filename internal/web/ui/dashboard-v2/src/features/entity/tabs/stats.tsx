@@ -156,7 +156,7 @@ function CumulativePanel({
       <ChartCell label='Cost per run'>
         <EChart
           option={{
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value', name: 'USD' },
             series: [{ type: 'line', data: costs, smooth: true, color: '#10b981' }],
           }}
@@ -166,7 +166,7 @@ function CumulativePanel({
       <ChartCell label='Cumulative cost'>
         <EChart
           option={{
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value', name: 'USD' },
             series: [
               {
@@ -186,7 +186,7 @@ function CumulativePanel({
           option={{
             tooltip: { trigger: 'axis' },
             legend: { data: ['input', 'output', 'cache_read', 'cache_create'] },
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value' },
             series: [
               { name: 'input', type: 'line', stack: 'tokens', areaStyle: {}, data: inputs },
@@ -201,7 +201,7 @@ function CumulativePanel({
       <ChartCell label='Cache-hit %'>
         <EChart
           option={{
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value', max: 100, name: '%' },
             series: [{ type: 'line', smooth: true, data: cacheHitPct, color: '#8b5cf6' }],
           }}
@@ -211,7 +211,7 @@ function CumulativePanel({
       <ChartCell label='Duration per run'>
         <EChart
           option={{
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value', name: 'seconds' },
             series: [{ type: 'line', smooth: true, data: durations, color: '#f59e0b' }],
           }}
@@ -265,7 +265,7 @@ function CumulativePanel({
           option={{
             tooltip: { trigger: 'axis' },
             legend: { data: ['errors', 'compactions'] },
-            xAxis: { type: 'category', data: xs },
+            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
             yAxis: { type: 'value' },
             series: [
               { name: 'errors', type: 'line', data: errors, color: '#ef4444' },
