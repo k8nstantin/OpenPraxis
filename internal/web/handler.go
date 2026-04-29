@@ -669,6 +669,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
 	api.HandleFunc("/tasks/running/live", apiRunningTasksLive(n)).Methods("GET")
 	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
+	api.HandleFunc("/stats/cumulative-trend", apiCumulativeTrend(n)).Methods("GET")
 	// Heavy panels split off the polled stats endpoint — loaded on view-show
 	// only, not on every 10s tick. See handlers_task.go for context.
 	api.HandleFunc("/tasks/today-top", apiTodayTopTasks(n)).Methods("GET")

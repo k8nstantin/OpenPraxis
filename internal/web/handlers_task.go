@@ -332,6 +332,171 @@ func apiTaskRuns(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiCumulativeTrend returns time-bucketed cumulative totals for cost,
+// turns, and actions over a configurable window. Powers the AI Stats
+// panel trend charts so they show real history instead of an
+// in-memory accumulator that resets on every reload.
+//
+// Window control:
+//   - default: today (since 00:00 UTC). Matches "Cost·today / Turns·today"
+//     framing operators expect.
+//   - ?since=<rfc3339>: explicit start time (drill-down — e.g. 7d ago
+//     for weekly trends, or the product creation timestamp for "since
+//     ever").
+//   - ?period=<duration>: rolling window from now (e.g. 1h, 24h).
+//     Convenient when "today" doesn't quite fit.
+//
+// Strategy:
+//   - For cost / turns: pre-window total = SUM(...) WHERE completed_at < window_start.
+//     Then walk task_runs in [window_start, now] in completed_at order,
+//     emit a sample after each run with the running total.
+//   - For actions: pre-window count = COUNT(*) WHERE created_at < window_start.
+//     Then bucket actions in the window by minute and emit cumulative
+//     sample at each bucket boundary.
+//   - All three series share a uniform sampling grid so the chart is
+//     dense regardless of how clumpy the underlying events are.
+func apiCumulativeTrend(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=10")
+		now := time.Now().UTC()
+
+		var periodStart time.Time
+		if since := r.URL.Query().Get("since"); since != "" {
+			if t, err := time.Parse(time.RFC3339, since); err == nil {
+				periodStart = t.UTC()
+			}
+		}
+		if periodStart.IsZero() {
+			if periodStr := r.URL.Query().Get("period"); periodStr != "" {
+				if d, err := time.ParseDuration(periodStr); err == nil && d > 0 {
+					periodStart = now.Add(-d)
+				}
+			}
+		}
+		if periodStart.IsZero() {
+			// Default: today (00:00 UTC). Operator's mental model
+			// matches the existing "today" rollups on /api/tasks/stats.
+			periodStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		}
+		period := now.Sub(periodStart)
+		if period <= 0 {
+			period = time.Hour
+		}
+
+		db := n.Tasks.DB()
+
+		// Pre-period baselines.
+		var baseCost float64
+		var baseTurns int64
+		var baseActions int64
+		_ = db.QueryRow(`SELECT COALESCE(SUM(cost_usd),0), COALESCE(SUM(turns),0)
+			FROM task_runs WHERE status='completed' AND completed_at != '' AND completed_at < ?`,
+			periodStart.Format(time.RFC3339)).Scan(&baseCost, &baseTurns)
+		_ = db.QueryRow(`SELECT COUNT(*) FROM actions WHERE created_at < ?`,
+			periodStart.Format(time.RFC3339)).Scan(&baseActions)
+
+		// Walk the period at 1-minute resolution, accumulating runs and
+		// actions as their timestamps cross each tick.
+		type sample struct {
+			TS      string  `json:"ts"`
+			Cost    float64 `json:"cost"`
+			Turns   int64   `json:"turns"`
+			Actions int64   `json:"actions"`
+		}
+		bucketDur := time.Minute
+		// Cap buckets at 240 (4h at 1m, 24h at 6m) — auto-coarsen if
+		// the period would otherwise produce too many samples.
+		buckets := int(period / bucketDur)
+		if buckets > 240 {
+			bucketDur = period / 240
+			buckets = 240
+		}
+
+		// Pre-fetch task_runs in the period with their completed_at.
+		runRows, err := db.Query(`SELECT completed_at, cost_usd, turns FROM task_runs
+			WHERE status='completed' AND completed_at != '' AND completed_at >= ? AND completed_at <= ?
+			ORDER BY completed_at ASC`,
+			periodStart.Format(time.RFC3339), now.Format(time.RFC3339))
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		type runEvent struct {
+			at    time.Time
+			cost  float64
+			turns int64
+		}
+		var runs []runEvent
+		for runRows.Next() {
+			var atStr string
+			var cost float64
+			var turns int64
+			if scanErr := runRows.Scan(&atStr, &cost, &turns); scanErr == nil {
+				if at, perr := time.Parse(time.RFC3339, atStr); perr == nil {
+					runs = append(runs, runEvent{at: at, cost: cost, turns: turns})
+				}
+			}
+		}
+		runRows.Close()
+
+		// Pre-fetch action timestamps in the period (just timestamps,
+		// each one is a +1 increment).
+		actRows, err := db.Query(`SELECT created_at FROM actions
+			WHERE created_at >= ? AND created_at <= ?
+			ORDER BY created_at ASC`,
+			periodStart.Format(time.RFC3339), now.Format(time.RFC3339))
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		var acts []time.Time
+		for actRows.Next() {
+			var atStr string
+			if scanErr := actRows.Scan(&atStr); scanErr == nil {
+				if at, perr := time.Parse(time.RFC3339, atStr); perr == nil {
+					acts = append(acts, at)
+				}
+			}
+		}
+		actRows.Close()
+
+		samples := make([]sample, 0, buckets+1)
+		runIdx := 0
+		actIdx := 0
+		curCost := baseCost
+		curTurns := baseTurns
+		curActions := baseActions
+		for i := 0; i <= buckets; i++ {
+			t := periodStart.Add(time.Duration(i) * bucketDur)
+			// Roll forward any runs whose completed_at <= t.
+			for runIdx < len(runs) && !runs[runIdx].at.After(t) {
+				curCost += runs[runIdx].cost
+				curTurns += runs[runIdx].turns
+				runIdx++
+			}
+			for actIdx < len(acts) && !acts[actIdx].After(t) {
+				curActions++
+				actIdx++
+			}
+			samples = append(samples, sample{
+				TS:      t.Format(time.RFC3339),
+				Cost:    math.Round(curCost*100) / 100,
+				Turns:   curTurns,
+				Actions: curActions,
+			})
+		}
+
+		writeJSON(w, map[string]any{
+			"samples":     samples,
+			"period":      period.String(),
+			"bucket":      bucketDur.String(),
+			"base_cost":   math.Round(baseCost*100) / 100,
+			"base_turns":  baseTurns,
+			"base_actions": baseActions,
+		})
+	}
+}
+
 // apiRunningTasksLive returns every currently-running task enriched
 // with its in-flight run metrics (turns, actions, cost, lines, latest
 // CPU%, latest RSS, recent sample series for sparklines). Single

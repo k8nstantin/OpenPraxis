@@ -166,6 +166,41 @@ function useActionsRecent() {
   })
 }
 
+interface TrendSample {
+  ts: string
+  cost: number
+  turns: number
+  actions: number
+}
+interface TrendResponse {
+  samples: TrendSample[]
+  period: string
+  bucket: string
+  base_cost: number
+  base_turns: number
+  base_actions: number
+}
+
+// useCumulativeTrend — DB-backed historical trend. Replaces the
+// volatile in-memory accumulator that reset on every page reload.
+// Default window: today (since UTC midnight). Caller can pass an
+// explicit since=<rfc3339> for drill-down (e.g. since product
+// creation, since 7d ago, etc.).
+function useCumulativeTrend(since?: string) {
+  return useQuery({
+    queryKey: ['cumulative-trend', since ?? 'today'],
+    queryFn: async () => {
+      const url = new URL('/api/stats/cumulative-trend', window.location.origin)
+      if (since) url.searchParams.set('since', since)
+      const r = await fetch(url.toString().replace(window.location.origin, ''))
+      if (!r.ok) throw new Error(`cumulative-trend → ${r.status}`)
+      return (await r.json()) as TrendResponse
+    },
+    refetchInterval: 10_000,
+    staleTime: 0,
+  })
+}
+
 // Top-level panel container — three stacked full-width cards.
 // Order: Tasks → AI Stats → System Stats. Each panel gets the full
 // row so chart titles + content breathe; stacking also makes the
@@ -201,31 +236,37 @@ function TasksPanel() {
     return { cpu, rss, cost, turns, actions }
   }, [running])
 
+  // Empty-state header line — sits next to the title in place of the
+  // stats row when no tasks are running. "On top, no scanning down."
+  const emptyHint =
+    running.length === 0 ? 'no running tasks — fire one and live tiles appear here' : undefined
+
   return (
     <PanelCard
       title='Tasks'
       badge='live'
       badgeTone='emerald'
-      stats={[
-        { label: 'Running', value: String(running.length), accent: 'emerald' },
-        { label: 'Total', value: s ? String(s.tasks_total) : '—' },
-        { label: '∑ CPU', value: running.length > 0 ? `${agg.cpu.toFixed(0)}%` : '—' },
-        { label: '∑ RSS', value: running.length > 0 ? `${(agg.rss / 1024).toFixed(1)}G` : '—' },
-        { label: '∑ Cost·run', value: running.length > 0 ? `$${agg.cost.toFixed(4)}` : '—' },
-        { label: '∑ Turns', value: running.length > 0 ? String(agg.turns) : '—' },
-        { label: '∑ Actions', value: running.length > 0 ? String(agg.actions) : '—' },
-        {
-          label: 'Budget',
-          value: s ? `${(s.budget_pct ?? 0).toFixed(0)}%` : '—',
-          accent: s && s.budget_pct > 80 ? 'rose' : undefined,
-        },
-      ]}
+      hint={emptyHint}
+      stats={
+        running.length === 0
+          ? undefined
+          : [
+              { label: 'Running', value: String(running.length), accent: 'emerald' },
+              { label: 'Total', value: s ? String(s.tasks_total) : '—' },
+              { label: '∑ CPU', value: `${agg.cpu.toFixed(0)}%` },
+              { label: '∑ RSS', value: `${(agg.rss / 1024).toFixed(1)}G` },
+              { label: '∑ Cost·run', value: `$${agg.cost.toFixed(4)}` },
+              { label: '∑ Turns', value: String(agg.turns) },
+              { label: '∑ Actions', value: String(agg.actions) },
+              {
+                label: 'Budget',
+                value: s ? `${(s.budget_pct ?? 0).toFixed(0)}%` : '—',
+                accent: s && s.budget_pct > 80 ? 'rose' : undefined,
+              },
+            ]
+      }
     >
-      {running.length === 0 ? (
-        <div className='text-muted-foreground rounded-md border bg-background/40 p-6 text-center text-sm'>
-          no running tasks — fire one and live tiles appear here
-        </div>
-      ) : (
+      {running.length > 0 && (
         <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
           {running.map((t) => (
             <RunningTaskTile key={t.task_id} t={t} />
@@ -406,46 +447,10 @@ function formatElapsed(sec: number): string {
 function AIStatsPanel() {
   const stats = useTasksStats()
   const actions = useActionsRecent()
+  const trend = useCumulativeTrend() // DB-backed, default = today since UTC midnight
   const s = stats.data
   const env = actions.data
-
-  // In-memory history of the polled cumulative totals. Each poll adds
-  // a sample; the trend charts plot deltas/cumulative as time series.
-  // Lives in component state so it survives between polls but resets
-  // on full reload (acceptable — these are live-tail trends, not
-  // long-term audit data).
-  //
-  // Sampler: a setInterval fires every 3s regardless of whether the
-  // polled totals changed. Without this, TanStack Query's structural
-  // sharing returns the same `s` reference when nothing changed and
-  // a useEffect([s, env]) wouldn't re-fire — leaving the trend charts
-  // perpetually at one sample.
-  const [history, setHistory] = useState<{
-    ts: number
-    cost: number
-    turns: number
-    actions: number
-  }[]>([])
-  useEffect(() => {
-    const tick = () => {
-      if (!s || !env) return
-      setHistory((prev) => {
-        const sample = {
-          ts: Date.now(),
-          cost: s.cost_total,
-          turns: s.turns_total,
-          actions: env.total,
-        }
-        const next = [...prev, sample]
-        // Keep last 200 samples; drops oldest. With a 3s sampler
-        // that's ~10 minutes of trend.
-        return next.length > 200 ? next.slice(-200) : next
-      })
-    }
-    tick() // immediate sample so the chart isn't blank for 3s
-    const id = setInterval(tick, 3000)
-    return () => clearInterval(id)
-  }, [s, env])
+  const trendData = trend.data?.samples ?? []
 
   // Bucket recent actions per hour for the volume bar chart.
   const hourly = useMemo(() => {
@@ -484,27 +489,29 @@ function AIStatsPanel() {
       ]}
     >
       {/* Three trend charts: cumulative cost, cumulative turns,
-          cumulative actions — all over the live polling history. */}
+          cumulative actions — DB-backed, default window = today
+          (since UTC midnight). Drill-down to longer windows lands in
+          a follow-up via the `since` query param on /stats/cumulative-trend. */}
       <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3'>
-        <ChartTile label='Cumulative cost' note='live trend'>
+        <ChartTile label='Cumulative cost' note='today'>
           <CumulativeTrend
-            data={history.map((h) => [h.ts, h.cost])}
+            data={trendData.map((h) => [Date.parse(h.ts), h.cost])}
             color='#a78bfa'
             unit='$'
             currentLabel={s ? `$${s.cost_total.toFixed(2)}` : '—'}
           />
         </ChartTile>
-        <ChartTile label='Cumulative turns' note='live trend'>
+        <ChartTile label='Cumulative turns' note='today'>
           <CumulativeTrend
-            data={history.map((h) => [h.ts, h.turns])}
+            data={trendData.map((h) => [Date.parse(h.ts), h.turns])}
             color='#10b981'
             unit=''
             currentLabel={s ? s.turns_total.toLocaleString() : '—'}
           />
         </ChartTile>
-        <ChartTile label='Cumulative actions' note='live trend'>
+        <ChartTile label='Cumulative actions' note='today'>
           <CumulativeTrend
-            data={history.map((h) => [h.ts, h.actions])}
+            data={trendData.map((h) => [Date.parse(h.ts), h.actions])}
             color='#f59e0b'
             unit=''
             currentLabel={env ? env.total.toLocaleString() : '—'}
@@ -545,16 +552,12 @@ function AIStatsPanel() {
 }
 
 // CumulativeTrend — area-line chart over time-stamped cumulative
-// samples. Shows the current value as overlay text top-right.
+// samples. Now DB-backed via /stats/cumulative-trend so the data
+// covers a real time window (default today since UTC midnight) and
+// survives reloads.
 //
-// Bounds: the xAxis is hard-pinned to "now - 10min … now" so a sparse
-// (or single-point) history still renders correctly at the right edge.
-// Without these bounds ECharts auto-fits to a ±21h default range and
-// the line vanishes into a single invisible dot.
-//
-// Empty state: when fewer than 2 samples are in the history we show a
-// "warming up" overlay instead of an empty grid so the operator knows
-// the chart hasn't broken — it's just collecting.
+// Empty state: when fewer than 2 samples land we show a "loading"
+// overlay so the operator knows the chart isn't broken.
 function CumulativeTrend({
   data,
   color,
@@ -566,8 +569,6 @@ function CumulativeTrend({
   unit: string
   currentLabel: string
 }) {
-  const now = Date.now()
-  const xMin = now - 10 * 60 * 1000
   const warming = data.length < 2
   return (
     <EChart
@@ -576,8 +577,6 @@ function CumulativeTrend({
         grid: { left: 40, right: 8, top: 22, bottom: 18 },
         xAxis: {
           type: 'time',
-          min: xMin,
-          max: now,
           axisLabel: { fontSize: 9 },
         },
         yAxis: {
