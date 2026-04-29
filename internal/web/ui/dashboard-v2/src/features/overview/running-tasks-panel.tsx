@@ -185,6 +185,12 @@ function AIStatsPanel() {
   // Lives in component state so it survives between polls but resets
   // on full reload (acceptable — these are live-tail trends, not
   // long-term audit data).
+  //
+  // Sampler: a setInterval fires every 3s regardless of whether the
+  // polled totals changed. Without this, TanStack Query's structural
+  // sharing returns the same `s` reference when nothing changed and
+  // a useEffect([s, env]) wouldn't re-fire — leaving the trend charts
+  // perpetually at one sample.
   const [history, setHistory] = useState<{
     ts: number
     cost: number
@@ -192,19 +198,24 @@ function AIStatsPanel() {
     actions: number
   }[]>([])
   useEffect(() => {
-    if (!s || !env) return
-    setHistory((prev) => {
-      const sample = {
-        ts: Date.now(),
-        cost: s.cost_total,
-        turns: s.turns_total,
-        actions: env.total,
-      }
-      // Keep last 200 samples; drops oldest. With a 3s poll that's
-      // ~10 minutes of trend.
-      const next = [...prev, sample]
-      return next.length > 200 ? next.slice(-200) : next
-    })
+    const tick = () => {
+      if (!s || !env) return
+      setHistory((prev) => {
+        const sample = {
+          ts: Date.now(),
+          cost: s.cost_total,
+          turns: s.turns_total,
+          actions: env.total,
+        }
+        const next = [...prev, sample]
+        // Keep last 200 samples; drops oldest. With a 3s sampler
+        // that's ~10 minutes of trend.
+        return next.length > 200 ? next.slice(-200) : next
+      })
+    }
+    tick() // immediate sample so the chart isn't blank for 3s
+    const id = setInterval(tick, 3000)
+    return () => clearInterval(id)
   }, [s, env])
 
   // Bucket recent actions per hour for the volume bar chart.
@@ -306,6 +317,15 @@ function AIStatsPanel() {
 
 // CumulativeTrend — area-line chart over time-stamped cumulative
 // samples. Shows the current value as overlay text top-right.
+//
+// Bounds: the xAxis is hard-pinned to "now - 10min … now" so a sparse
+// (or single-point) history still renders correctly at the right edge.
+// Without these bounds ECharts auto-fits to a ±21h default range and
+// the line vanishes into a single invisible dot.
+//
+// Empty state: when fewer than 2 samples are in the history we show a
+// "warming up" overlay instead of an empty grid so the operator knows
+// the chart hasn't broken — it's just collecting.
 function CumulativeTrend({
   data,
   color,
@@ -317,13 +337,18 @@ function CumulativeTrend({
   unit: string
   currentLabel: string
 }) {
+  const now = Date.now()
+  const xMin = now - 10 * 60 * 1000
+  const warming = data.length < 2
   return (
     <EChart
       height='100%'
       option={{
-        grid: { left: 36, right: 8, top: 22, bottom: 18 },
+        grid: { left: 40, right: 8, top: 22, bottom: 18 },
         xAxis: {
           type: 'time',
+          min: xMin,
+          max: now,
           axisLabel: { fontSize: 9 },
         },
         yAxis: {
@@ -332,7 +357,7 @@ function CumulativeTrend({
             fontSize: 9,
             formatter: (v: number) => {
               if (v >= 1000) return (v / 1000).toFixed(1) + 'k'
-              return String(v)
+              return unit + String(v)
             },
           },
           scale: true,
@@ -349,14 +374,30 @@ function CumulativeTrend({
               fontWeight: 600,
             },
           },
+          ...(warming
+            ? [
+                {
+                  type: 'text',
+                  left: 'center',
+                  top: 'middle',
+                  style: {
+                    text: `warming up · ${data.length}/200 samples`,
+                    fill: '#71717a',
+                    fontSize: 11,
+                  },
+                },
+              ]
+            : []),
         ],
         series: [
           {
             type: 'line',
             data,
             smooth: true,
-            showSymbol: false,
+            showSymbol: data.length < 5,
+            symbolSize: 4,
             lineStyle: { color, width: 2 },
+            itemStyle: { color },
             areaStyle: {
               color: {
                 type: 'linear' as const,
