@@ -18,7 +18,6 @@ type Link struct {
 // IdeaRef is a lightweight idea reference shown on manifest detail.
 type IdeaRef struct {
 	ID     string `json:"id"`
-	Marker string `json:"marker"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
 }
@@ -26,7 +25,6 @@ type IdeaRef struct {
 // ManifestRef is a lightweight manifest reference shown on idea detail.
 type ManifestRef struct {
 	ID     string `json:"id"`
-	Marker string `json:"marker"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
 }
@@ -83,9 +81,6 @@ func (s *Store) ManifestsForIdea(ideaID string) ([]ManifestRef, error) {
 		if err := rows.Scan(&r.ID, &r.Title, &r.Status); err != nil {
 			return nil, err
 		}
-		if len(r.ID) >= 12 {
-			r.Marker = r.ID[:12]
-		}
 		results = append(results, r)
 	}
 	return results, rows.Err()
@@ -107,9 +102,6 @@ func (s *Store) IdeasForManifest(manifestID string) ([]IdeaRef, error) {
 		var r IdeaRef
 		if err := rows.Scan(&r.ID, &r.Title, &r.Status); err != nil {
 			return nil, err
-		}
-		if len(r.ID) >= 12 {
-			r.Marker = r.ID[:12]
 		}
 		results = append(results, r)
 	}

@@ -16,7 +16,6 @@ export type EntityStatus =
 
 export interface Product {
   id: string
-  marker: string
   title: string
   description?: string
   status: EntityStatus
@@ -34,7 +33,6 @@ export interface Product {
 
 export interface Manifest {
   id: string
-  marker: string
   title: string
   description?: string
   status: EntityStatus
@@ -74,7 +72,6 @@ export interface Task {
 
 export interface Idea {
   id: string
-  marker: string
   title: string
   description?: string
   status?: string
@@ -107,7 +104,6 @@ export interface Comment {
 
 export interface ProductDependency {
   id: string
-  marker: string
   title: string
   status: EntityStatus
 }
@@ -115,7 +111,6 @@ export interface ProductDependency {
 // Hierarchy endpoint response — recursive shape for breadcrumb building.
 export interface HierarchyNode {
   id: string
-  marker: string
   title: string
   type: 'product' | 'manifest' | 'task'
   status: EntityStatus

@@ -17,7 +17,6 @@ import (
 // Manifest is a detailed development spec document.
 type Manifest struct {
 	ID          string    `json:"id"`
-	Marker      string    `json:"marker"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"` // one-liner
 	Content     string    `json:"content"`     // full markdown spec
@@ -214,7 +213,7 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 	}
 
 	return &Manifest{
-		ID: id, Marker: id[:12], Title: title, Description: description,
+		ID: id, Title: title, Description: description,
 		Content: content, Status: status, JiraRefs: jiraRefs, Tags: tags,
 		Author: author, SourceNode: sourceNode, ProjectID: projectID, DependsOn: dependsOn, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}, nil
@@ -262,10 +261,10 @@ func (s *Store) Update(id, title, description, content, status, projectID, depen
 	return nil
 }
 
-// Get retrieves a manifest by ID or prefix.
+// Get retrieves a manifest by full UUID.
 func (s *Store) Get(id string) (*Manifest, error) {
 	row := s.db.QueryRow(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
-		FROM manifests WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
+		FROM manifests WHERE id = ? AND deleted_at = ''`, id)
 	m, err := scanManifest(row)
 	if err == nil && m != nil {
 		s.EnrichWithCosts([]*Manifest{m})
@@ -395,11 +394,8 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 	return results, rows.Err()
 }
 
-// Search finds manifests matching a query. Supports id-exact, id-prefix
-// (marker or UUID prefix), id-substring, and keyword substring in
-// title/description/content/jira_refs/tags. Previously this only
-// matched content fields, so typing a marker returned zero results —
-// see manifest 019daafb-b5e M6 for the root-cause write-up.
+// Search finds manifests matching a query. Supports id-substring and
+// keyword substring in title/description/content/jira_refs/tags.
 func (s *Store) Search(query string, limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 20
@@ -621,7 +617,7 @@ func (s *Store) EnrichRecursiveCosts(m *Manifest) {
 // Delete soft-deletes a manifest.
 func (s *Store) Delete(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE manifests SET deleted_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE manifests SET deleted_at = ? WHERE id = ? AND deleted_at = ''`, now, id)
 	return err
 }
 
@@ -649,7 +645,7 @@ func (s *Store) ListDeleted(limit int) ([]*Manifest, error) {
 
 // Restore un-deletes a soft-deleted manifest.
 func (s *Store) Restore(id string) error {
-	_, err := s.db.Exec(`UPDATE manifests SET deleted_at = '' WHERE (id = ? OR id LIKE ?) AND deleted_at != ''`, id, id+"%")
+	_, err := s.db.Exec(`UPDATE manifests SET deleted_at = '' WHERE id = ? AND deleted_at != ''`, id)
 	return err
 }
 
@@ -707,9 +703,6 @@ func scanManifest(row *sql.Row) (*Manifest, error) {
 	}
 	m.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	m.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(m.ID) >= 12 {
-		m.Marker = m.ID[:12]
-	}
 
 	return &m, nil
 }
@@ -732,9 +725,6 @@ func scanManifestRows(rows *sql.Rows) (*Manifest, error) {
 	}
 	m.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	m.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(m.ID) >= 12 {
-		m.Marker = m.ID[:12]
-	}
 
 	return &m, nil
 }

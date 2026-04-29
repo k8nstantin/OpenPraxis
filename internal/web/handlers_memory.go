@@ -98,7 +98,6 @@ func apiMemoriesBySession(n *node.Node) http.HandlerFunc {
 
 		type memItem struct {
 			ID        string `json:"id"`
-			Marker    string `json:"marker"`
 			L0        string `json:"l0"`
 			Path      string `json:"path"`
 			Type      string `json:"type"`
@@ -116,16 +115,11 @@ func apiMemoriesBySession(n *node.Node) http.HandlerFunc {
 			if src == "" {
 				src = "unknown"
 			}
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
-			}
 			if _, ok := groups[src]; !ok {
 				order = append(order, src)
 			}
 			groups[src] = append(groups[src], memItem{
 				ID:        m.ID,
-				Marker:    marker,
 				L0:        m.L0,
 				Path:      m.Path,
 				Type:      m.Type,
@@ -154,7 +148,6 @@ func apiMemoriesByPeer(n *node.Node) http.HandlerFunc {
 
 		type memItem struct {
 			ID        string `json:"id"`
-			Marker    string `json:"marker"`
 			L0        string `json:"l0"`
 			Path      string `json:"path"`
 			Type      string `json:"type"`
@@ -188,10 +181,6 @@ func apiMemoriesByPeer(n *node.Node) http.HandlerFunc {
 			if src == "" {
 				src = "unknown"
 			}
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
-			}
 
 			pd, ok := peers[peerID]
 			if !ok {
@@ -204,7 +193,6 @@ func apiMemoriesByPeer(n *node.Node) http.HandlerFunc {
 			}
 			pd.sessions[src] = append(pd.sessions[src], memItem{
 				ID:        m.ID,
-				Marker:    marker,
 				L0:        m.L0,
 				Path:      m.Path,
 				Type:      m.Type,

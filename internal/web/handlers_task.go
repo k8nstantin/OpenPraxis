@@ -29,7 +29,6 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 		}
 		type tItem struct {
 			ID         string  `json:"id"`
-			Marker     string  `json:"marker"`
 			Title      string  `json:"title"`
 			Schedule   string  `json:"schedule"`
 			Status     string  `json:"status"`
@@ -44,11 +43,10 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 			CreatedAt  string  `json:"created_at"`
 		}
 		type manifestGroup struct {
-			ManifestID     string  `json:"manifest_id"`
-			ManifestMarker string  `json:"manifest_marker"`
-			ManifestTitle  string  `json:"manifest_title"`
-			Count          int     `json:"count"`
-			Tasks          []tItem `json:"tasks"`
+			ManifestID    string  `json:"manifest_id"`
+			ManifestTitle string  `json:"manifest_title"`
+			Count         int     `json:"count"`
+			Tasks         []tItem `json:"tasks"`
 		}
 		type peerGroup struct {
 			PeerID    string          `json:"peer_id"`
@@ -58,9 +56,8 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 
 		// Build: peer -> manifest -> tasks
 		type mData struct {
-			title  string
-			marker string
-			tasks  []tItem
+			title string
+			tasks []tItem
 		}
 		type pData struct {
 			manifestOrder []string
@@ -76,14 +73,10 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 		// endpoint is hit on every 10s dashboard poll when the user is on
 		// the tasks tab. THE freeze cause as of 2026-04-23.
 		manifestCache := make(map[string]*mData)
-		manifestCache[""] = &mData{title: "Standalone", marker: ""}
+		manifestCache[""] = &mData{title: "Standalone"}
 		if all, err := n.Manifests.List("", 0); err == nil {
 			for _, m := range all {
-				marker := m.Marker
-				if marker == "" && len(m.ID) >= 12 {
-					marker = m.ID[:12]
-				}
-				manifestCache[m.ID] = &mData{title: m.Title, marker: marker}
+				manifestCache[m.ID] = &mData{title: m.Title}
 			}
 		}
 		getManifest := func(mid string) *mData {
@@ -93,11 +86,7 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 			// Manifest referenced by a task but not in the bulk fetch
 			// (deleted or out-of-window). Synthesise a placeholder rather
 			// than re-querying.
-			marker := mid
-			if len(mid) >= 12 {
-				marker = mid[:12]
-			}
-			md := &mData{title: "Unknown", marker: marker}
+			md := &mData{title: "Unknown"}
 			manifestCache[mid] = md
 			return md
 		}
@@ -115,11 +104,11 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 			}
 			if _, ok := pd.manifests[t.ManifestID]; !ok {
 				md := getManifest(t.ManifestID)
-				pd.manifests[t.ManifestID] = &mData{title: md.title, marker: md.marker}
+				pd.manifests[t.ManifestID] = &mData{title: md.title}
 				pd.manifestOrder = append(pd.manifestOrder, t.ManifestID)
 			}
 			pd.manifests[t.ManifestID].tasks = append(pd.manifests[t.ManifestID].tasks, tItem{
-				ID: t.ID, Marker: t.Marker, Title: t.Title, Schedule: t.Schedule, DependsOn: t.DependsOn,
+				ID: t.ID, Title: t.Title, Schedule: t.Schedule, DependsOn: t.DependsOn,
 				Status: t.Status, Agent: t.Agent, RunCount: t.RunCount, TotalTurns: t.TotalTurns, TotalCost: t.TotalCost,
 				NextRunAt: t.NextRunAt, LastRunAt: t.LastRunAt,
 				UpdatedAt: t.UpdatedAt.Format(time.RFC3339), CreatedAt: t.CreatedAt.Format(time.RFC3339),
@@ -134,7 +123,7 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 			for _, mid := range pd.manifestOrder {
 				md := pd.manifests[mid]
 				mgs = append(mgs, manifestGroup{
-					ManifestID: mid, ManifestMarker: md.marker, ManifestTitle: md.title,
+					ManifestID: mid, ManifestTitle: md.title,
 					Count: len(md.tasks), Tasks: md.tasks,
 				})
 				totalCount += len(md.tasks)
@@ -984,7 +973,6 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 func apiTodayTopTasks(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		type topTask struct {
-			Marker string  `json:"marker"`
 			Title  string  `json:"title"`
 			Turns  int     `json:"turns"`
 			Cost   float64 `json:"cost"`
@@ -994,15 +982,15 @@ func apiTodayTopTasks(n *node.Node) http.HandlerFunc {
 		drillDown, _ := n.Tasks.CostDrillDown(today, "")
 
 		type taskAgg struct {
-			marker, title, status string
-			turns                 int
-			cost                  float64
+			title, status string
+			turns         int
+			cost          float64
 		}
 		aggs := make(map[string]*taskAgg)
 		for _, d := range drillDown {
 			a, ok := aggs[d.TaskID]
 			if !ok {
-				a = &taskAgg{marker: d.TaskMarker, title: d.TaskTitle, status: d.Status}
+				a = &taskAgg{title: d.TaskTitle, status: d.Status}
 				aggs[d.TaskID] = a
 			}
 			a.cost += d.CostUSD
@@ -1014,7 +1002,6 @@ func apiTodayTopTasks(n *node.Node) http.HandlerFunc {
 				continue
 			}
 			out = append(out, topTask{
-				Marker: a.marker, Title: a.title, Turns: a.turns,
 				Cost: math.Round(a.cost*100) / 100, Status: a.status,
 			})
 		}
@@ -1038,7 +1025,6 @@ func apiPendingTasks(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=5")
 		type pendingTask struct {
-			Marker    string `json:"marker"`
 			Title     string `json:"title"`
 			Status    string `json:"status"`
 			Schedule  string `json:"schedule"`
@@ -1055,12 +1041,8 @@ func apiPendingTasks(n *node.Node) http.HandlerFunc {
 			if t.Status != "scheduled" && t.Status != "waiting" && t.Status != "pending" {
 				continue
 			}
-			dep := ""
-			if len(t.DependsOn) >= 12 {
-				dep = t.DependsOn[:12]
-			}
+			dep := t.DependsOn
 			out = append(out, pendingTask{
-				Marker: t.Marker, Title: t.Title, Status: t.Status,
 				Schedule: t.Schedule, NextRunAt: t.NextRunAt, DependsOn: dep,
 			})
 		}

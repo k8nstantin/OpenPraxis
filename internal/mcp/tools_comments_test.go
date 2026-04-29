@@ -161,14 +161,12 @@ func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	return &Server{node: n}, db
 }
 
-// TestCommentAdd_ResolvesShortMarker_Task — the core bug this PR fixes.
-// Agent interpolates the 12-char marker from the runner prompt; handler
-// MUST canonicalize to the full UUID before insert so the dashboard (which
-// queries by full UUID) finds the comment.
-func TestCommentAdd_ResolvesShortMarker_Task(t *testing.T) {
+// TestCommentAdd_RejectsShortPrefix_Task — markers are dead. A short
+// 12-char prefix must NOT resolve to a task; the handler returns an
+// error rather than silently writing an orphan row.
+func TestCommentAdd_RejectsShortPrefix_Task(t *testing.T) {
 	s, _ := newTestServerWithAllStores(t)
 
-	// Seed a task. Store.Create returns the full UUID.
 	tk, err := s.node.Tasks.Create("", "Example task", "desc", "once", "claude-code", "", "", "")
 	if err != nil {
 		t.Fatalf("Create task: %v", err)
@@ -177,43 +175,31 @@ func TestCommentAdd_ResolvesShortMarker_Task(t *testing.T) {
 		t.Fatalf("expected 36-char UUID, got %q (len=%d)", tk.ID, len(tk.ID))
 	}
 
-	// Agent passes the 12-char marker — classic runner-prompt interpolation.
-	shortMarker := tk.ID[:12]
+	shortPrefix := tk.ID[:12]
 	res, err := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
 		"target_type": "task",
-		"target_id":   shortMarker,
+		"target_id":   shortPrefix,
 		"author":      "agent",
 		"type":        "review_approval",
-		"body":        "**APPROVE** — posted with short marker target_id",
+		"body":        "**APPROVE** — short prefix should be rejected",
 	}))
 	if err != nil {
 		t.Fatalf("handleCommentAdd: %v", err)
 	}
-	if isErrResult(res) {
-		t.Fatalf("unexpected tool error: %q", toolResultText(res))
+	if !isErrResult(res) {
+		t.Fatalf("expected error for short-prefix target_id, got success: %q", toolResultText(res))
 	}
 
-	// The comment row MUST have target_id = the full UUID, not the short marker.
-	cs, err := s.node.Comments.List(context.Background(),
-		comments.TargetTask, tk.ID, 10, nil)
-	if err != nil {
-		t.Fatalf("ListByTarget full UUID: %v", err)
-	}
-	if len(cs) != 1 {
-		t.Fatalf("expected 1 comment on full UUID, got %d", len(cs))
-	}
-	if cs[0].TargetID != tk.ID {
-		t.Fatalf("target_id not canonicalized: got %q, want %q", cs[0].TargetID, tk.ID)
-	}
-
-	// And crucially the short-marker lookup must return zero — no orphan.
-	orphans, err := s.node.Comments.List(context.Background(),
-		comments.TargetTask, shortMarker, 10, nil)
-	if err != nil {
-		t.Fatalf("ListByTarget short: %v", err)
-	}
-	if len(orphans) != 0 {
-		t.Fatalf("expected 0 orphans on short marker, got %d", len(orphans))
+	// No comment row should exist for either the short prefix or the full UUID.
+	for _, id := range []string{shortPrefix, tk.ID} {
+		cs, err := s.node.Comments.List(context.Background(),
+			comments.TargetTask, id, 10, nil)
+		if err != nil {
+			t.Fatalf("List %q: %v", id, err)
+		}
+		if len(cs) != 0 {
+			t.Fatalf("expected 0 comments for %q, got %d", id, len(cs))
+		}
 	}
 }
 

@@ -128,7 +128,7 @@ func TestProductsSearch_KeywordAndPrefix(t *testing.T) {
 		t.Fatalf("keyword: want [%s], got %+v", a.ID, got)
 	}
 
-	rec = doGET(t, apiProductsSearch(n), "/api/products/search?q="+a.Marker)
+	rec = doGET(t, apiProductsSearch(n), "/api/products/search?q="+a.ID[:8])
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
 	found := false
 	for _, p := range got {

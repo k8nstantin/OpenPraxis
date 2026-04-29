@@ -260,7 +260,7 @@ var serveCmd = &cobra.Command{
 					}
 
 					audit := taskWatcher.AuditTask(
-						t.ID, t.Marker, t.Title,
+						t.ID, t.Title,
 						t.ManifestID, manifestTitle, manifestContent,
 						status, actionCount, costUSD,
 					)
@@ -272,9 +272,9 @@ var serveCmd = &cobra.Command{
 					if status == "completed" || status == "max_turns" {
 						activated, actErr := n.Tasks.ActivateDependents(t.ID)
 						if actErr != nil {
-							slog.Error("activate dependents failed", "marker", t.Marker, "error", actErr)
+							slog.Error("activate dependents failed", "task_id", t.ID, "error", actErr)
 						} else if activated > 0 {
-							slog.Info("activated dependent tasks", "marker", t.Marker, "count", activated)
+							slog.Info("activated dependent tasks", "task_id", t.ID, "count", activated)
 						}
 					}
 
@@ -300,7 +300,7 @@ var serveCmd = &cobra.Command{
 		// `scheduler_tick_seconds` knob (system scope) overrides this and
 		// is re-read on every tick so operator changes take effect live.
 		scheduler := task.NewScheduler(n.Tasks, 10*time.Second, func(t *task.Task) {
-			slog.Info("task fired", "marker", t.Marker, "title", t.Title, "manifest_id", t.ManifestID, "schedule", t.Schedule)
+			slog.Info("task fired", "task_id", t.ID, "title", t.Title, "manifest_id", t.ManifestID, "schedule", t.Schedule)
 
 			// Resolve manifest — standalone tasks have no manifest
 			var manifestTitle, manifestContent string
@@ -323,11 +323,7 @@ var serveCmd = &cobra.Command{
 			rules, _ := n.Index.ListByType("visceral", 100)
 			var visceralText string
 			for i, r := range rules {
-				marker := ""
-				if len(r.ID) >= 12 {
-					marker = r.ID[:12]
-				}
-				visceralText += fmt.Sprintf("%d. [%s] %s\n", i+1, marker, r.L2)
+				visceralText += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
 			}
 
 			// Spawn the agent
@@ -366,11 +362,9 @@ var serveCmd = &cobra.Command{
 		if rules, err := n.Index.ListByType("visceral", 100); err == nil {
 			fmt.Printf("  Visceral:  %d rules\n", len(rules))
 			for i, r := range rules {
-				marker := ""
-				if len(r.ID) >= 12 { marker = r.ID[:12] }
 				text := r.L2
 				if len(text) > 60 { text = text[:60] + "..." }
-				fmt.Printf("    %d. [%s] %s\n", i+1, marker, text)
+				fmt.Printf("    %d. [%s] %s\n", i+1, r.ID, text)
 			}
 		}
 
@@ -378,7 +372,7 @@ var serveCmd = &cobra.Command{
 		if manifests, err := n.Manifests.List("open", 50); err == nil {
 			fmt.Printf("  Manifests: %d active\n", len(manifests))
 			for _, m := range manifests {
-				fmt.Printf("    [%s] %s\n", m.Marker, m.Title)
+				fmt.Printf("    [%s] %s\n", m.ID, m.Title)
 			}
 		}
 
@@ -401,11 +395,9 @@ var serveCmd = &cobra.Command{
 		if mems, err := n.Index.ListByPrefix("/", 5); err == nil {
 			fmt.Printf("  Memories:  latest %d\n", len(mems))
 			for _, m := range mems {
-				marker := ""
-				if len(m.ID) >= 12 { marker = m.ID[:12] }
 				text := m.L0
 				if len(text) > 60 { text = text[:60] + "..." }
-				fmt.Printf("    [%s] %s\n", marker, text)
+				fmt.Printf("    [%s] %s\n", m.ID, text)
 			}
 		}
 		fmt.Println("  =====================")

@@ -65,7 +65,7 @@ func (b *nodeBridge) ListManifests(status string, limit int) ([]chat.ManifestSum
 	var out []chat.ManifestSummary
 	for _, m := range manifests {
 		out = append(out, chat.ManifestSummary{
-			Marker: m.Marker, Title: m.Title, Status: m.Status, JiraRef: joinRefs(m.JiraRefs),
+			ID: m.ID, Title: m.Title, Status: m.Status, JiraRef: joinRefs(m.JiraRefs),
 		})
 	}
 	return out, nil
@@ -77,7 +77,7 @@ func (b *nodeBridge) GetManifest(id string) (*chat.ManifestDetail, error) {
 		return nil, err
 	}
 	return &chat.ManifestDetail{
-		Marker: m.Marker, Title: m.Title, Status: m.Status,
+		ID: m.ID, Title: m.Title, Status: m.Status,
 		Version: m.Version, Author: m.Author, JiraRef: joinRefs(m.JiraRefs), Content: m.Content,
 	}, nil
 }
@@ -90,7 +90,7 @@ func (b *nodeBridge) ListTasks(status string, limit int) ([]chat.TaskSummary, er
 	var out []chat.TaskSummary
 	for _, t := range tasks {
 		out = append(out, chat.TaskSummary{
-			Marker: t.Marker, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
+			ID: t.ID, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
 		})
 	}
 	return out, nil
@@ -102,7 +102,7 @@ func (b *nodeBridge) GetTask(id string) (*chat.TaskDetail, error) {
 		return nil, err
 	}
 	return &chat.TaskDetail{
-		Marker: t.Marker, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
+		ID: t.ID, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
 		Agent: t.Agent, ManifestID: t.ManifestID, Description: t.Description,
 	}, nil
 }
@@ -129,11 +129,7 @@ func (b *nodeBridge) ListVisceralRules() ([]chat.VisceralRule, error) {
 	}
 	var out []chat.VisceralRule
 	for _, r := range rules {
-		marker := ""
-		if len(r.ID) >= 8 {
-			marker = r.ID[:12]
-		}
-		out = append(out, chat.VisceralRule{Marker: marker, Text: r.L2})
+		out = append(out, chat.VisceralRule{ID: r.ID, Text: r.L2})
 	}
 	return out, nil
 }

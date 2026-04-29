@@ -23,7 +23,6 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 		}
 		type mItem struct {
 			ID              string   `json:"id"`
-			Marker          string   `json:"marker"`
 			Title           string   `json:"title"`
 			Status          string   `json:"status"`
 			ProjectID       string   `json:"project_id"`
@@ -48,7 +47,7 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 			if _, ok := peers[pid]; !ok {
 				peerOrder = append(peerOrder, pid)
 			}
-			peers[pid] = append(peers[pid], mItem{ID: m.ID, Marker: m.Marker, Title: m.Title, Status: m.Status, ProjectID: m.ProjectID, DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn), TotalTasks: m.TotalTasks, TotalTurns: m.TotalTurns, TotalCost: m.TotalCost})
+			peers[pid] = append(peers[pid], mItem{ID: m.ID, Title: m.Title, Status: m.Status, ProjectID: m.ProjectID, DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn), TotalTasks: m.TotalTasks, TotalTurns: m.TotalTurns, TotalCost: m.TotalCost})
 		}
 		var result []peerGroup
 		for _, pid := range peerOrder {

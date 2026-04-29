@@ -212,11 +212,11 @@ func TestWatcher_Gate1_Fail_PostsComment(t *testing.T) {
 	w := New(newAuditStore(t), dir, "true", "node")
 	w.SetCommentPoster(store)
 
-	audit := w.AuditTask("task-gate1", "gate1fail", "T", "", "", "", "completed", 0, 0)
+	audit := w.AuditTask("gate1fail", "T", "", "", "", "completed", 0, 0)
 	if audit.GitPassed {
 		t.Fatalf("expected GitPassed=false, got true (reason=%s)", audit.GitDetails.Reason)
 	}
-	c := assertOneWatcherFinding(t, store, "task-gate1")
+	c := assertOneWatcherFinding(t, store, "gate1fail")
 	if !strings.Contains(c.Body, "Git gate observation") {
 		t.Fatalf("body missing 'Git gate observation':\n%s", c.Body)
 	}
@@ -235,11 +235,11 @@ func TestWatcher_Gate2_Fail_PostsComment(t *testing.T) {
 	w := New(newAuditStore(t), dir, "false", "node")
 	w.SetCommentPoster(store)
 
-	audit := w.AuditTask("task-gate2", "gate2fail", "T", "", "", "", "completed", 0, 0)
+	audit := w.AuditTask("gate2fail", "T", "", "", "", "completed", 0, 0)
 	if audit.BuildPassed {
 		t.Fatalf("expected BuildPassed=false, got true")
 	}
-	c := assertOneWatcherFinding(t, store, "task-gate2")
+	c := assertOneWatcherFinding(t, store, "gate2fail")
 	if !strings.Contains(c.Body, "Build gate observation") {
 		t.Fatalf("body missing 'Build gate observation':\n%s", c.Body)
 	}
@@ -262,12 +262,12 @@ func TestWatcher_Gate3_Fail_PostsComment(t *testing.T) {
 		"- `internal/missing/thing.go`\n" +
 		"- `internal/missing/other.go`\n"
 
-	audit := w.AuditTask("task-gate3", "gate3fail", "T", "m", "M", manifest, "completed", 0, 0)
+	audit := w.AuditTask("gate3fail", "T", "m", "M", manifest, "completed", 0, 0)
 	if audit.ManifestPassed {
 		t.Fatalf("expected ManifestPassed=false, got true (score=%v, reason=%s)",
 			audit.ManifestScore, audit.ManifestDetails.Reason)
 	}
-	c := assertOneWatcherFinding(t, store, "task-gate3")
+	c := assertOneWatcherFinding(t, store, "gate3fail")
 	if !strings.Contains(c.Body, "Manifest gate observation") {
 		t.Fatalf("body missing 'Manifest gate observation':\n%s", c.Body)
 	}
@@ -284,12 +284,12 @@ func TestWatcher_AllPass_NoComment(t *testing.T) {
 	w := New(newAuditStore(t), dir, "true", "node")
 	w.SetCommentPoster(store)
 
-	audit := w.AuditTask("task-allpass", "allpass", "T", "", "", "", "completed", 0, 0)
+	audit := w.AuditTask("allpass", "T", "", "", "", "completed", 0, 0)
 	if audit.Status != "passed" {
 		t.Fatalf("expected status=passed, got %q (git=%v build=%v manifest=%v)",
 			audit.Status, audit.GitPassed, audit.BuildPassed, audit.ManifestPassed)
 	}
-	if cs := listTaskComments(t, store, "task-allpass"); len(cs) != 0 {
+	if cs := listTaskComments(t, store, "allpass"); len(cs) != 0 {
 		t.Fatalf("expected 0 comments on all-pass, got %d", len(cs))
 	}
 }
@@ -303,7 +303,7 @@ func TestWatcher_CommentWriteFailure_DoesNotBlockAudit(t *testing.T) {
 	w := New(auditStore, dir, "true", "node")
 	w.SetCommentPoster(broken)
 
-	audit := w.AuditTask("task-broken", "brokencomments", "T", "", "", "", "completed", 0, 0)
+	audit := w.AuditTask("task-broken", "T", "", "", "", "completed", 0, 0)
 	if audit == nil {
 		t.Fatal("audit is nil — broken comment store must not stop the audit path")
 	}

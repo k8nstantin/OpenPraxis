@@ -13,9 +13,7 @@ import (
 // Audit represents a post-completion verification of a task against its manifest.
 type Audit struct {
 	ID              string    `json:"id"`
-	Marker          string    `json:"marker"`
 	TaskID          string    `json:"task_id"`
-	TaskMarker      string    `json:"task_marker"`
 	TaskTitle       string    `json:"task_title"`
 	ManifestID      string    `json:"manifest_id"`
 	ManifestTitle   string    `json:"manifest_title"`
@@ -45,7 +43,7 @@ type GitResult struct {
 	UncommittedFiles []string `json:"uncommitted_files"`
 	BranchExists     bool     `json:"branch_exists"`
 	// Branch is the branch the gate actually audited. Usually
-	// openpraxis/<taskMarker>, but tasks whose descriptions append a
+	// openpraxis/<taskID>, but tasks whose descriptions append a
 	// human-readable suffix (e.g. -m1-t1) land on the longer branch, so the
 	// gate resolves the real branch via prefix match.
 	Branch string `json:"branch"`
@@ -104,7 +102,6 @@ func (s *Store) init() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS watcher_audits (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
-		task_marker TEXT NOT NULL DEFAULT '',
 		task_title TEXT NOT NULL DEFAULT '',
 		manifest_id TEXT NOT NULL DEFAULT '',
 		manifest_title TEXT NOT NULL DEFAULT '',
@@ -132,6 +129,11 @@ func (s *Store) init() error {
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_watcher_status ON watcher_audits(status)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_watcher_created ON watcher_audits(created_at DESC)`)
 
+	// Drop legacy task_marker column on upgrades. SQLite 3.46+ supports
+	// DROP COLUMN natively; older installs will simply lack the column
+	// because the CREATE above never declares it.
+	s.db.Exec(`ALTER TABLE watcher_audits DROP COLUMN task_marker`)
+
 	return nil
 }
 
@@ -140,17 +142,14 @@ func (s *Store) Record(audit *Audit) error {
 	if audit.ID == "" {
 		audit.ID = uuid.Must(uuid.NewV7()).String()
 	}
-	if len(audit.ID) >= 12 {
-		audit.Marker = audit.ID[:12]
-	}
 
 	gitJSON, _ := json.Marshal(audit.GitDetails)
 	buildJSON, _ := json.Marshal(audit.BuildDetails)
 	manifestJSON, _ := json.Marshal(audit.ManifestDetails)
 
-	_, err := s.db.Exec(`INSERT INTO watcher_audits (id, task_id, task_marker, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		audit.ID, audit.TaskID, audit.TaskMarker, audit.TaskTitle,
+	_, err := s.db.Exec(`INSERT INTO watcher_audits (id, task_id, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		audit.ID, audit.TaskID, audit.TaskTitle,
 		audit.ManifestID, audit.ManifestTitle,
 		audit.Status, boolToInt(audit.GitPassed), string(gitJSON),
 		boolToInt(audit.BuildPassed), string(buildJSON),
@@ -161,17 +160,17 @@ func (s *Store) Record(audit *Audit) error {
 	return err
 }
 
-// Get retrieves an audit by ID or prefix.
+// Get retrieves an audit by full UUID.
 func (s *Store) Get(id string) (*Audit, error) {
-	row := s.db.QueryRow(`SELECT id, task_id, task_marker, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at
-		FROM watcher_audits WHERE id = ? OR id LIKE ?`, id, id+"%")
+	row := s.db.QueryRow(`SELECT id, task_id, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at
+		FROM watcher_audits WHERE id = ?`, id)
 	return scanAudit(row)
 }
 
 // GetByTask retrieves the most recent audit for a task.
 func (s *Store) GetByTask(taskID string) (*Audit, error) {
-	row := s.db.QueryRow(`SELECT id, task_id, task_marker, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at
-		FROM watcher_audits WHERE task_id = ? OR task_id LIKE ? ORDER BY created_at DESC LIMIT 1`, taskID, taskID+"%")
+	row := s.db.QueryRow(`SELECT id, task_id, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at
+		FROM watcher_audits WHERE task_id = ? ORDER BY created_at DESC LIMIT 1`, taskID)
 	return scanAudit(row)
 }
 
@@ -180,7 +179,7 @@ func (s *Store) List(status string, limit int) ([]*Audit, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	query := `SELECT id, task_id, task_marker, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at FROM watcher_audits`
+	query := `SELECT id, task_id, task_title, manifest_id, manifest_title, status, git_passed, git_details, build_passed, build_details, manifest_passed, manifest_score, manifest_details, original_status, final_status, action_count, cost_usd, source_node, audited_at, created_at FROM watcher_audits`
 	var args []any
 	if status != "" {
 		query += ` WHERE status = ?`
@@ -223,7 +222,7 @@ func scanAudit(row *sql.Row) (*Audit, error) {
 	var gitJSON, buildJSON, manifestJSON, auditedStr, createdStr string
 	var gitPassed, buildPassed, manifestPassed int
 
-	err := row.Scan(&a.ID, &a.TaskID, &a.TaskMarker, &a.TaskTitle,
+	err := row.Scan(&a.ID, &a.TaskID, &a.TaskTitle,
 		&a.ManifestID, &a.ManifestTitle,
 		&a.Status, &gitPassed, &gitJSON,
 		&buildPassed, &buildJSON,
@@ -252,9 +251,6 @@ func scanAudit(row *sql.Row) (*Audit, error) {
 	}
 	a.AuditedAt, _ = time.Parse(time.RFC3339, auditedStr)
 	a.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-	if len(a.ID) >= 12 {
-		a.Marker = a.ID[:12]
-	}
 	return &a, nil
 }
 
@@ -265,7 +261,7 @@ func scanAudits(rows *sql.Rows) ([]*Audit, error) {
 		var gitJSON, buildJSON, manifestJSON, auditedStr, createdStr string
 		var gitPassed, buildPassed, manifestPassed int
 
-		err := rows.Scan(&a.ID, &a.TaskID, &a.TaskMarker, &a.TaskTitle,
+		err := rows.Scan(&a.ID, &a.TaskID, &a.TaskTitle,
 			&a.ManifestID, &a.ManifestTitle,
 			&a.Status, &gitPassed, &gitJSON,
 			&buildPassed, &buildJSON,
@@ -291,9 +287,6 @@ func scanAudits(rows *sql.Rows) ([]*Audit, error) {
 		}
 		a.AuditedAt, _ = time.Parse(time.RFC3339, auditedStr)
 		a.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-		if len(a.ID) >= 12 {
-			a.Marker = a.ID[:12]
-		}
 		results = append(results, &a)
 	}
 	return results, rows.Err()

@@ -84,7 +84,7 @@ func TestRunner_MissingExecutionReview_FlagsAmnesia(t *testing.T) {
 	checker := &fakeExecReview{has: map[string]bool{}} // nothing recorded
 	r.SetExecutionReviewChecker(checker)
 
-	r.enforceExecutionReview(context.Background(), "t-abc", "t-abc", "completed", "success")
+	r.enforceExecutionReview(context.Background(), "t-abc", "completed", "success")
 
 	if checker.calls != 1 {
 		t.Fatalf("checker calls = %d, want 1", checker.calls)
@@ -116,7 +116,7 @@ func TestRunner_WithExecutionReview_NoAmnesia(t *testing.T) {
 	checker := &fakeExecReview{has: map[string]bool{"t-ok": true}}
 	r.SetExecutionReviewChecker(checker)
 
-	r.enforceExecutionReview(context.Background(), "t-ok", "t-ok", "completed", "success")
+	r.enforceExecutionReview(context.Background(), "t-ok", "completed", "success")
 
 	list, err := actions.ListAmnesiaByTask("t-ok", 10)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestRunner_FailedTask_SkipsExecReviewGate(t *testing.T) {
 		{"completed", "max_turns"}, // completed-but-not-success also skips
 	}
 	for _, c := range cases {
-		r.enforceExecutionReview(context.Background(), "t-x", "t-x", c.status, c.reason)
+		r.enforceExecutionReview(context.Background(), "t-x", c.status, c.reason)
 	}
 	if checker.calls != 0 {
 		t.Fatalf("checker fired %d times for non-success terminals, want 0", checker.calls)
@@ -166,7 +166,7 @@ func TestRunner_NilChecker_IsNoOp(t *testing.T) {
 	r.actions = actions
 	// Deliberately do NOT call SetExecutionReviewChecker.
 
-	r.enforceExecutionReview(context.Background(), "t-nil", "t-nil", "completed", "success")
+	r.enforceExecutionReview(context.Background(), "t-nil", "completed", "success")
 
 	list, _ := actions.ListAmnesiaByTask("t-nil", 10)
 	if len(list) != 0 {
@@ -183,7 +183,7 @@ func TestRunner_CheckerError_IsLoggedNotRecorded(t *testing.T) {
 	checker := &fakeExecReview{err: errors.New("boom")}
 	r.SetExecutionReviewChecker(checker)
 
-	r.enforceExecutionReview(context.Background(), "t-err", "t-err", "completed", "success")
+	r.enforceExecutionReview(context.Background(), "t-err", "completed", "success")
 
 	list, _ := actions.ListAmnesiaByTask("t-err", 10)
 	if len(list) != 0 {

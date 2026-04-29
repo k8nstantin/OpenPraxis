@@ -9,7 +9,6 @@ import (
 // RuntimeState represents a persisted snapshot of a running task.
 type RuntimeState struct {
 	TaskID    string    `json:"task_id"`
-	Marker    string    `json:"marker"`
 	Title     string    `json:"title"`
 	Manifest  string    `json:"manifest"`
 	Agent     string    `json:"agent"`
@@ -23,15 +22,15 @@ type RuntimeState struct {
 }
 
 // SaveRuntimeState persists a running task's state to SQLite.
-func (s *Store) SaveRuntimeState(taskID, marker, title, manifest, agent string, pid int, paused bool, actions, lines int, lastLine string, startedAt time.Time) error {
+func (s *Store) SaveRuntimeState(taskID, title, manifest, agent string, pid int, paused bool, actions, lines int, lastLine string, startedAt time.Time) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	pausedInt := 0
 	if paused {
 		pausedInt = 1
 	}
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO task_runtime_state (task_id, marker, title, manifest, agent, pid, paused, actions, lines, last_line, started_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		taskID, marker, title, manifest, agent, pid, pausedInt, actions, lines, lastLine,
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO task_runtime_state (task_id, title, manifest, agent, pid, paused, actions, lines, last_line, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		taskID, title, manifest, agent, pid, pausedInt, actions, lines, lastLine,
 		startedAt.UTC().Format(time.RFC3339), now)
 	return err
 }
@@ -56,7 +55,7 @@ func (s *Store) DeleteRuntimeState(taskID string) error {
 
 // ListRuntimeState returns all persisted runtime states (for recovery on startup).
 func (s *Store) ListRuntimeState() ([]RuntimeState, error) {
-	rows, err := s.db.Query(`SELECT task_id, marker, title, manifest, agent, pid, paused, actions, lines, last_line, started_at, updated_at FROM task_runtime_state`)
+	rows, err := s.db.Query(`SELECT task_id, title, manifest, agent, pid, paused, actions, lines, last_line, started_at, updated_at FROM task_runtime_state`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +66,7 @@ func (s *Store) ListRuntimeState() ([]RuntimeState, error) {
 		var rs RuntimeState
 		var startedStr, updatedStr string
 		var paused int
-		if err := rows.Scan(&rs.TaskID, &rs.Marker, &rs.Title, &rs.Manifest, &rs.Agent, &rs.PID, &paused, &rs.Actions, &rs.Lines, &rs.LastLine, &startedStr, &updatedStr); err != nil {
+		if err := rows.Scan(&rs.TaskID, &rs.Title, &rs.Manifest, &rs.Agent, &rs.PID, &paused, &rs.Actions, &rs.Lines, &rs.LastLine, &startedStr, &updatedStr); err != nil {
 			return nil, err
 		}
 		rs.Paused = paused != 0
@@ -126,16 +125,16 @@ func (s *Store) CleanupOrphaned() {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Get runtime state of orphaned tasks for better error messages
-	rows, err := s.db.Query(`SELECT task_id, marker, pid, actions, lines, started_at FROM task_runtime_state`)
+	rows, err := s.db.Query(`SELECT task_id, pid, actions, lines, started_at FROM task_runtime_state`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var taskID, marker, startedAt string
+			var taskID, startedAt string
 			var pid, actions, lines int
-			if err := rows.Scan(&taskID, &marker, &pid, &actions, &lines, &startedAt); err == nil {
+			if err := rows.Scan(&taskID, &pid, &actions, &lines, &startedAt); err == nil {
 				msg := fmt.Sprintf("Process terminated — orphaned on restart (PID %d, %d actions, %d lines, started %s)", pid, actions, lines, startedAt)
 				s.db.Exec(`UPDATE tasks SET status = 'failed', last_output = ?, updated_at = ? WHERE id = ? AND status IN ('running', 'paused')`, msg, now, taskID)
-				slog.Info("cleanup orphaned task", "marker", marker, "pid", pid, "actions", actions)
+				slog.Info("cleanup orphaned task", "task_id", taskID, "pid", pid, "actions", actions)
 			}
 		}
 	}

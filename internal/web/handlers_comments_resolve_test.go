@@ -3,7 +3,6 @@ package web
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,10 +17,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// TestAddComment_ResolvesShortMarker — the bug this PR fixes. HTTP POST to
-// /api/tasks/<short-marker>/comments MUST write target_id = full UUID,
-// matching what MCP comment_add already does after PR #136.
-func TestAddComment_ResolvesShortMarker_Task(t *testing.T) {
+// TestAddComment_RejectsShortPrefix_Task — markers are dead. POST to
+// /api/tasks/<short-prefix>/comments must 404 rather than silently writing
+// a comment row keyed on a non-canonical id.
+func TestAddComment_RejectsShortPrefix_Task(t *testing.T) {
 	n, tasks, commentsStore := setupResolveTestNode(t)
 
 	tk, err := tasks.Create("", "Example task", "desc", "once", "claude-code", "", "", "")
@@ -31,43 +30,33 @@ func TestAddComment_ResolvesShortMarker_Task(t *testing.T) {
 	if len(tk.ID) != 36 {
 		t.Fatalf("expected 36-char UUID, got %q", tk.ID)
 	}
-	shortMarker := tk.ID[:12]
+	shortPrefix := tk.ID[:12]
 
 	api := mux.NewRouter().PathPrefix("/api").Subrouter()
 	registerCommentsRoutesFromNode(api, n)
 
-	body := `{"author":"operator","type":"user_note","body":"posted via short marker"}`
-	req := httptest.NewRequest("POST", "/api/tasks/"+shortMarker+"/comments", bytes.NewBufferString(body))
+	body := `{"author":"operator","type":"user_note","body":"posted via short prefix"}`
+	req := httptest.NewRequest("POST", "/api/tasks/"+shortPrefix+"/comments", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for short-prefix target, got status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var view commentView
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if view.TargetID != tk.ID {
-		t.Fatalf("target_id not canonicalized: got %q, want %q", view.TargetID, tk.ID)
-	}
-
-	cs, err := commentsStore.List(req.Context(), comments.TargetTask, tk.ID, 10, nil)
-	if err != nil {
-		t.Fatalf("List full UUID: %v", err)
-	}
-	if len(cs) != 1 {
-		t.Fatalf("expected 1 comment on full UUID, got %d", len(cs))
-	}
-	orphans, _ := commentsStore.List(req.Context(), comments.TargetTask, shortMarker, 10, nil)
-	if len(orphans) != 0 {
-		t.Fatalf("expected 0 orphans on short marker, got %d", len(orphans))
+	for _, id := range []string{shortPrefix, tk.ID} {
+		cs, err := commentsStore.List(req.Context(), comments.TargetTask, id, 10, nil)
+		if err != nil {
+			t.Fatalf("List %q: %v", id, err)
+		}
+		if len(cs) != 0 {
+			t.Fatalf("expected 0 comments for %q, got %d", id, len(cs))
+		}
 	}
 }
 
-func TestListComments_ResolvesShortMarker_Task(t *testing.T) {
+func TestListComments_RejectsShortPrefix_Task(t *testing.T) {
 	n, tasks, commentsStore := setupResolveTestNode(t)
 	tk, _ := tasks.Create("", "Example", "desc", "once", "claude-code", "", "", "")
 
@@ -83,15 +72,8 @@ func TestListComments_ResolvesShortMarker_Task(t *testing.T) {
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	var out listCommentsResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(out.Comments) != 1 {
-		t.Fatalf("expected 1 comment via short marker, got %d", len(out.Comments))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for short-prefix list target, got status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

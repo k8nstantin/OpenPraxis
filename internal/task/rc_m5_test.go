@@ -71,7 +71,7 @@ func TestRunner_RecoverInFlight_StopMarksFailed(t *testing.T) {
 	r, _, _, _ := newRunnerHarness(t)
 
 	insertRunningTask(t, r.store.db, "019dbaa4-orph-stop-aaaaaaaaaaaa")
-	if err := r.store.SaveRuntimeState("019dbaa4-orph-stop-aaaaaaaaaaaa", "orph-stop", "T", "", "claude-code", 12345, false, 3, 40, "last", time.Now()); err != nil {
+	if err := r.store.SaveRuntimeState("019dbaa4-orph-stop-aaaaaaaaaaaa", "T", "", "claude-code", 12345, false, 3, 40, "last", time.Now()); err != nil {
 		t.Fatalf("SaveRuntimeState: %v", err)
 	}
 

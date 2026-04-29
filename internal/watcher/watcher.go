@@ -54,12 +54,11 @@ func (w *Watcher) SetCommentPoster(p CommentPoster) { w.comments = p }
 // AuditTask runs all three gates on a completed task.
 // This is called by the task runner AFTER the agent claims completion.
 // The agent has no say in the result.
-func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestTitle, manifestContent, originalStatus string, actionCount int, costUSD float64) *Audit {
+func (w *Watcher) AuditTask(taskID, taskTitle, manifestID, manifestTitle, manifestContent, originalStatus string, actionCount int, costUSD float64) *Audit {
 	now := time.Now().UTC()
 	audit := &Audit{
 		ID:             uuid.Must(uuid.NewV7()).String(),
 		TaskID:         taskID,
-		TaskMarker:     taskMarker,
 		TaskTitle:      taskTitle,
 		ManifestID:     manifestID,
 		ManifestTitle:  manifestTitle,
@@ -70,14 +69,11 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 		AuditedAt:      now,
 		CreatedAt:      now,
 	}
-	if len(audit.ID) >= 12 {
-		audit.Marker = audit.ID[:12]
-	}
 
-	slog.Info("auditing task", "component", "watcher", "marker", taskMarker, "title", taskTitle, "original_status", originalStatus, "actions", actionCount)
+	slog.Info("auditing task", "component", "watcher", "task_id", taskID, "title", taskTitle, "original_status", originalStatus, "actions", actionCount)
 
 	// Gate 1: Git verification
-	audit.GitDetails = w.RunGitGate(taskMarker)
+	audit.GitDetails = w.RunGitGate(taskID)
 	audit.GitPassed = audit.GitDetails.CommitCount > 0
 
 	// Gate 2: Build verification
@@ -86,7 +82,7 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 
 	// Gate 3: Manifest compliance (deliverable extraction from content)
 	if manifestContent != "" {
-		audit.ManifestDetails = w.RunManifestGate(taskMarker, manifestContent)
+		audit.ManifestDetails = w.RunManifestGate(taskID, manifestContent)
 		if audit.ManifestDetails.TotalItems > 0 {
 			audit.ManifestScore = float64(audit.ManifestDetails.DoneItems) / float64(audit.ManifestDetails.TotalItems)
 			audit.ManifestPassed = audit.ManifestScore >= 0.5
@@ -120,7 +116,7 @@ func (w *Watcher) AuditTask(taskID, taskMarker, taskTitle, manifestID, manifestT
 		audit.FinalStatus = originalStatus // keep original but flag it
 	}
 
-	slog.Info("audit completed", "component", "watcher", "marker", audit.Marker, "status", audit.Status,
+	slog.Info("audit completed", "component", "watcher", "task_id", audit.TaskID, "status", audit.Status,
 		"git_passed", audit.GitPassed, "build_passed", audit.BuildPassed, "manifest_score", audit.ManifestScore*100,
 		"original_status", audit.OriginalStatus, "final_status", audit.FinalStatus)
 
@@ -234,12 +230,12 @@ func lastNLines(s string, n int) string {
 }
 
 // resolveTaskBranch finds the branch this task committed on. Accepts either
-// the plain openpraxis/<taskMarker> form or a suffixed openpraxis/<marker>-*
+// the plain openpraxis/<taskID> form or a suffixed openpraxis/<marker>-*
 // form. Returns the chosen branch and ok=true; ok=false if no branch
 // matches. Prefers the exact match; otherwise returns the most recently
 // updated suffixed branch (newest commit on the branch tip).
-func (w *Watcher) resolveTaskBranch(taskMarker string) (string, bool) {
-	exact := "openpraxis/" + taskMarker
+func (w *Watcher) resolveTaskBranch(taskID string) (string, bool) {
+	exact := "openpraxis/" + taskID
 	pattern := exact + "-*"
 	// --sort=-committerdate gives newest-first; --format=%(refname:short)
 	// strips the refs/heads/ prefix.
@@ -274,19 +270,19 @@ func (w *Watcher) resolveTaskBranch(taskMarker string) (string, bool) {
 // RunGitGate checks if the task branch has commits.
 //
 // Branch resolution accepts both the plain marker branch
-// (openpraxis/<taskMarker>) and any suffixed variant
-// (openpraxis/<taskMarker>-*). Task descriptions sometimes direct the agent
+// (openpraxis/<taskID>) and any suffixed variant
+// (openpraxis/<taskID>-*). Task descriptions sometimes direct the agent
 // to include a human-readable suffix like `-m1-t1` in the branch name, and
 // before this change the gate looked only at the exact plain form and
 // reported BranchExists=false — which flipped completed runs to failed even
 // when all the work was on disk and pushed.
-func (w *Watcher) RunGitGate(taskMarker string) GitResult {
+func (w *Watcher) RunGitGate(taskID string) GitResult {
 	result := GitResult{}
-	branch, ok := w.resolveTaskBranch(taskMarker)
+	branch, ok := w.resolveTaskBranch(taskID)
 	if !ok {
 		result.BranchExists = false
-		result.Branch = "openpraxis/" + taskMarker
-		result.Reason = fmt.Sprintf("no branch matching openpraxis/%s or openpraxis/%s-* found", taskMarker, taskMarker)
+		result.Branch = "openpraxis/" + taskID
+		result.Reason = fmt.Sprintf("no branch matching openpraxis/%s or openpraxis/%s-* found", taskID, taskID)
 		return result
 	}
 	result.BranchExists = true
@@ -404,7 +400,7 @@ func (w *Watcher) RunBuildGate() BuildResult {
 }
 
 // RunManifestGate extracts deliverables from the manifest and checks which exist in the git diff.
-func (w *Watcher) RunManifestGate(taskMarker, manifestContent string) ManifestResult {
+func (w *Watcher) RunManifestGate(taskID, manifestContent string) ManifestResult {
 	result := ManifestResult{}
 
 	// Extract deliverables from manifest content
@@ -417,7 +413,7 @@ func (w *Watcher) RunManifestGate(taskMarker, manifestContent string) ManifestRe
 	}
 
 	// Get the git diff for this task branch
-	branch := "openpraxis/" + taskMarker
+	branch := "openpraxis/" + taskID
 	cmd := exec.Command("git", "diff", "--name-only", branch+"^.."+branch)
 	cmd.Dir = w.repoDir
 	out, _ := cmd.Output()

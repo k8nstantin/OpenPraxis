@@ -11,7 +11,6 @@ import (
 // Task represents scheduled work against a manifest.
 type Task struct {
 	ID          string    `json:"id"`
-	Marker      string    `json:"marker"`
 	ManifestID  string    `json:"manifest_id"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
@@ -324,7 +323,6 @@ func (s *Store) init() error {
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (
 		task_id TEXT PRIMARY KEY,
-		marker TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL DEFAULT '',
 		manifest TEXT NOT NULL DEFAULT '',
 		agent TEXT NOT NULL DEFAULT '',
@@ -339,6 +337,10 @@ func (s *Store) init() error {
 	if err != nil {
 		return fmt.Errorf("create task_runtime_state table: %w", err)
 	}
+	// Drop legacy marker column on upgrades. SQLite 3.46+ supports
+	// DROP COLUMN natively; ignore the "no such column" error from
+	// installs that already lack the column.
+	s.db.Exec(`ALTER TABLE task_runtime_state DROP COLUMN marker`)
 
 	// Many-to-many: task ↔ manifest link table
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_manifests (
@@ -397,7 +399,7 @@ func (s *Store) init() error {
 	// makes repeat runs a no-op.
 	// Idempotent migration: rewrite legacy block_reason prefixes to
 	// the canonical form. Rows written before #97 normalized
-	// node.go:615 carry "blocked by manifest <marker> (<title>)".
+	// node.go:615 carry "blocked by manifest <id> (<title>)".
 	// The activation walker's filter accepts both, but normalizing
 	// in place lets us drop the compatibility clause in a later
 	// release and keeps operator-visible text consistent.
@@ -438,9 +440,6 @@ func scanTask(row *sql.Row) (*Task, error) {
 	}
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(t.ID) >= 12 {
-		t.Marker = t.ID[:12]
-	}
 	return &t, nil
 }
 
@@ -456,9 +455,6 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		}
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-		if len(t.ID) >= 12 {
-			t.Marker = t.ID[:12]
-		}
 		tasks = append(tasks, &t)
 	}
 	return tasks, rows.Err()

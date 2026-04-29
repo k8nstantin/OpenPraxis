@@ -42,8 +42,8 @@ func TestFormatCandidates_PrefixVsSearch(t *testing.T) {
 	if !strings.Contains(out, "Closest candidates") {
 		t.Errorf("prefix candidate header missing: %q", out)
 	}
-	if !strings.Contains(out, "[019daac8-cdb]") {
-		t.Errorf("12-char marker missing from output: %q", out)
+	if !strings.Contains(out, "[019daac8-cdb3-7e77-b995-8706b3414128]") {
+		t.Errorf("full UUID missing from output: %q", out)
 	}
 	if !strings.Contains(out, "/project/p/d/alpha") {
 		t.Errorf("path missing from output: %q", out)

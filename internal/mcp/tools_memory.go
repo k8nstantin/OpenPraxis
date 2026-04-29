@@ -31,8 +31,7 @@ func (s *Server) handleStore(ctx context.Context, req mcplib.CallToolRequest) (*
 		return errResult("store failed: %v", err), nil
 	}
 
-	marker := mem.ID[:12]
-	return textResult(fmt.Sprintf("Stored [%s]: %s\nPath: %s\nFull ID: %s", marker, mem.L0, mem.Path, mem.ID)), nil
+	return textResult(fmt.Sprintf("Stored [%s]: %s\nPath: %s", mem.ID, mem.L0, mem.Path)), nil
 }
 
 func (s *Server) handleSearch(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -66,9 +65,8 @@ func (s *Server) handleSearch(ctx context.Context, req mcplib.CallToolRequest) (
 
 	var output string
 	for i, r := range results {
-		marker := r.Memory.ID[:12]
 		content := tierContent(r.Memory, tier)
-		output += fmt.Sprintf("%d. [%s] (%.3f) %s\n   %s\n\n", i+1, marker, r.Score, r.Memory.Path, content)
+		output += fmt.Sprintf("%d. [%s] (%.3f) %s\n   %s\n\n", i+1, r.Memory.ID, r.Score, r.Memory.Path, content)
 	}
 
 	return textResult(output), nil
@@ -191,10 +189,9 @@ func formatRecallHit(s *Server, mem memory.Memory, tier string) *mcplib.CallTool
 	if err := s.node.Index.TouchAccess(mem.ID); err != nil {
 		slog.Warn("touch memory access failed", "error", err)
 	}
-	marker := mem.ID[:12]
 	content := tierContent(mem, tier)
-	return textResult(fmt.Sprintf("[%s] %s\nPath: %s\nType: %s\nSource: %s @ %s\nCreated: %s\nFull ID: %s\n\n%s",
-		marker, mem.L0, mem.Path, mem.Type, mem.SourceAgent, mem.SourceNode, mem.CreatedAt, mem.ID, content))
+	return textResult(fmt.Sprintf("[%s] %s\nPath: %s\nType: %s\nSource: %s @ %s\nCreated: %s\n\n%s",
+		mem.ID, mem.L0, mem.Path, mem.Type, mem.SourceAgent, mem.SourceNode, mem.CreatedAt, content))
 }
 
 func formatCandidates(query string, mems []*memory.Memory, viaSearch bool) string {
@@ -205,13 +202,9 @@ func formatCandidates(query string, mems []*memory.Memory, viaSearch bool) strin
 		fmt.Fprintf(&b, "No exact match for %q. Closest candidates:\n", query)
 	}
 	for i, m := range mems {
-		marker := m.ID
-		if len(marker) > 12 {
-			marker = marker[:12]
-		}
-		fmt.Fprintf(&b, "%d. [%s] %s — %s\n", i+1, marker, m.Path, m.L0)
+		fmt.Fprintf(&b, "%d. [%s] %s — %s\n", i+1, m.ID, m.Path, m.L0)
 	}
-	b.WriteString("Run again with a longer prefix or full id.")
+	b.WriteString("Run again with the full id.")
 	return b.String()
 }
 

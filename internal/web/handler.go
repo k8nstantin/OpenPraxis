@@ -382,15 +382,11 @@ func apiActivity(n *node.Node) http.HandlerFunc {
 		// Recent memories
 		mems, _ := n.Index.ListByPrefix("/", 50)
 		for _, m := range mems {
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
-			}
 			items = append(items, activityItem{
 				ID:      m.ID,
 				Time:    m.CreatedAt,
 				Type:    "memory",
-				Title:   fmt.Sprintf("[%s] %s", marker, m.L0),
+				Title:   fmt.Sprintf("[%s] %s", m.ID, m.L0),
 				Detail:  m.Path,
 				Session: m.SourceAgent,
 			})
@@ -443,10 +439,6 @@ func apiActivityByPeer(n *node.Node) http.HandlerFunc {
 		// Memories
 		mems, _ := n.Index.ListByPrefix("/", 100)
 		for _, m := range mems {
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
-			}
 			node := m.SourceNode
 			if node == "" {
 				node = n.PeerID()
@@ -455,7 +447,7 @@ func apiActivityByPeer(n *node.Node) http.HandlerFunc {
 				ID:         m.ID,
 				Time:       m.CreatedAt,
 				Type:       "memory",
-				Title:      fmt.Sprintf("[%s] %s", marker, m.L0),
+				Title:      fmt.Sprintf("[%s] %s", m.ID, m.L0),
 				Session:    m.SourceAgent,
 				SourceNode: node,
 			})

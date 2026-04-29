@@ -13,12 +13,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-// Search-picker over a list of {id, marker, title, status} rows. Used
-// by the Dependencies editor's Add buttons — same picker for products
-// and manifests, the candidate set is filtered upstream.
+// Reusable search-picker over a list of {id, title, status}
+// rows. Caller supplies the data + onPick handler. Filters by title,
+// id, or any other text in the searchable string.
+//
+// Used by the Dependencies editor's Add buttons (upstream / downstream
+// / manifest pickers).
 export interface PickerRow {
   id: string
-  marker: string
   title: string
   status: string
 }
@@ -57,7 +59,7 @@ export function DepPicker({
     return rows.filter(
       (r) =>
         r.title.toLowerCase().includes(q) ||
-        r.marker.toLowerCase().includes(q)
+        r.id.toLowerCase().includes(q)
     )
   }, [rows, query])
 

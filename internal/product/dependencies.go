@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // ErrCycle is returned by AddDep when the requested edge would close a
@@ -16,6 +14,8 @@ import (
 var ErrCycle = errors.New("product_dependencies: cycle detected")
 
 // ErrSelfLoop is returned when a product is asked to depend on itself.
+// Enforced at the DB layer via CHECK but guarded before INSERT so the
+// error message is clearer than the raw sqlite constraint text.
 var ErrSelfLoop = errors.New("product_dependencies: a product cannot depend on itself")
 
 // Dep is the denormalized row UI + MCP callers want when listing deps
@@ -24,7 +24,6 @@ var ErrSelfLoop = errors.New("product_dependencies: a product cannot depend on i
 // manifest.Dep so consumers can reuse render helpers across tiers.
 type Dep struct {
 	ID        string    `json:"id"`
-	Marker    string    `json:"marker"`
 	Title     string    `json:"title"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
@@ -56,21 +55,9 @@ func TerminalStatuses() []string {
 	return out
 }
 
-// SetRelationshipsBackend wires the unified relationships SCD-2 store
-// as the source of truth for product→product dependency edges. Once
-// set, AddDep / RemoveDep / ListDeps / ListDependents / IsSatisfied
-// route through relationships instead of the legacy
-// product_dependencies table. The legacy table is left in place as
-// historical safety but is never read or written after the cutover.
-func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
-	s.rels = r
-}
-
-// initDependenciesSchema creates the legacy product_dependencies join
-// table so existing rows survive the boot. Idempotent. After PR/M3 the
-// store no longer reads or writes this table — relationships is the
-// source of truth. Schema kept so historical queries against the
-// dormant table still work for forensic purposes.
+// initDependenciesSchema creates the product_dependencies join table.
+// Called from Store.init() after the main products table exists.
+// Idempotent.
 func (s *Store) initDependenciesSchema() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS product_dependencies (
 		product_id            TEXT NOT NULL,
@@ -92,22 +79,20 @@ func (s *Store) initDependenciesSchema() error {
 	return nil
 }
 
-// AddDep adds a product→depends_on_product edge in the relationships
-// store after cycle detection. Direction: src=depender, dst=dependee.
+// AddDep adds a product→depends_on_product edge after cycle detection.
 //
 //   - rejects self-loops (ErrSelfLoop)
-//   - rejects edges that would close a cycle (ErrCycle), via DFS over
-//     the relationships graph
-//   - idempotent on duplicate edges (Get probe before Create)
+//   - rejects edges that would close a cycle (ErrCycle), via DFS from
+//     depends_on_product_id back to product_id over the current edge set
+//   - idempotent on duplicate edges (INSERT OR IGNORE)
+//
+// On success the row carries created_at + created_by for audit.
 func (s *Store) AddDep(ctx context.Context, productID, dependsOnID, createdBy string) error {
 	if productID == "" || dependsOnID == "" {
 		return fmt.Errorf("product_dependencies: empty product id")
 	}
 	if productID == dependsOnID {
 		return ErrSelfLoop
-	}
-	if s.rels == nil {
-		return fmt.Errorf("product_dependencies: relationships backend not wired")
 	}
 
 	reaches, err := s.pathExists(ctx, dependsOnID, productID)
@@ -119,38 +104,30 @@ func (s *Store) AddDep(ctx context.Context, productID, dependsOnID, createdBy st
 			ErrCycle, productID, dependsOnID)
 	}
 
-	// Idempotency: if the current edge already exists, skip the Create
-	// (which would otherwise close + re-open it and grow history for no
-	// state change).
-	if _, found, err := s.rels.Get(ctx, productID, dependsOnID, relationships.EdgeDependsOn); err != nil {
-		return err
-	} else if found {
-		return nil
+	now := time.Now().UTC().Unix()
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO product_dependencies (product_id, depends_on_product_id, created_at, created_by)
+		 VALUES (?, ?, ?, ?)`,
+		productID, dependsOnID, now, createdBy); err != nil {
+		return fmt.Errorf("insert product dep: %w", err)
 	}
-
-	return s.rels.Create(ctx, relationships.Edge{
-		SrcKind:   relationships.KindProduct,
-		SrcID:     productID,
-		DstKind:   relationships.KindProduct,
-		DstID:     dependsOnID,
-		Kind:      relationships.EdgeDependsOn,
-		CreatedBy: createdBy,
-		Reason:    "product dep added",
-	})
+	return nil
 }
 
 // RemoveDep is idempotent — removing an edge that doesn't exist
-// returns nil. Closes the relationships row by stamping valid_to.
+// returns nil. Matches the #79 pattern at the manifest tier so the
+// operator-surface semantics are consistent across tiers.
 //
-// Fires the onDepRemoved handler (if wired) after a successful close.
-// The handler rehabs now-unblocked waiting tasks per Option B.
+// Fires the onDepRemoved handler (if wired) after a successful
+// delete. The handler rehabs now-unblocked waiting tasks per Option B.
+// Firing unconditionally (not just when the edge actually existed)
+// keeps the contract simple: "after this call, the edge is gone and
+// any rehab that should have happened has happened."
 func (s *Store) RemoveDep(ctx context.Context, productID, dependsOnID string) error {
-	if s.rels == nil {
-		return fmt.Errorf("product_dependencies: relationships backend not wired")
-	}
-	if err := s.rels.Remove(ctx, productID, dependsOnID,
-		relationships.EdgeDependsOn, "http-api", "removed via product_dependencies API"); err != nil {
-		return fmt.Errorf("remove product dep: %w", err)
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM product_dependencies WHERE product_id = ? AND depends_on_product_id = ?`,
+		productID, dependsOnID); err != nil {
+		return fmt.Errorf("delete product dep: %w", err)
 	}
 	if s.onDepRemoved != nil {
 		s.onDepRemoved(ctx, productID)
@@ -160,67 +137,61 @@ func (s *Store) RemoveDep(ctx context.Context, productID, dependsOnID string) er
 
 // ListDeps returns out-edges: products this one depends on. Joined
 // against products so each row carries denormalized status + title
-// for direct rendering.
+// for direct rendering. Sorted by created_at so the order of addition
+// is preserved in the UI.
 func (s *Store) ListDeps(ctx context.Context, productID string) ([]Dep, error) {
-	if s.rels == nil {
-		return nil, fmt.Errorf("product_dependencies: relationships backend not wired")
-	}
-	edges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeDependsOn)
-	if err != nil {
-		return nil, err
-	}
-	return s.enrichEdgesAsDeps(ctx, edges, true)
+	return s.queryDeps(ctx,
+		`SELECT p.id, p.title, p.status, d.created_at, d.created_by
+		 FROM product_dependencies d
+		 JOIN products p ON p.id = d.depends_on_product_id
+		 WHERE d.product_id = ? AND p.deleted_at = ''
+		 ORDER BY d.created_at ASC`,
+		productID)
 }
 
 // ListDependents returns in-edges: products that depend on this one.
 // Used by activation walkers when a product becomes terminal.
 func (s *Store) ListDependents(ctx context.Context, productID string) ([]Dep, error) {
-	if s.rels == nil {
-		return nil, fmt.Errorf("product_dependencies: relationships backend not wired")
-	}
-	edges, err := s.rels.ListIncoming(ctx, productID, relationships.EdgeDependsOn)
-	if err != nil {
-		return nil, err
-	}
-	return s.enrichEdgesAsDeps(ctx, edges, false)
+	return s.queryDeps(ctx,
+		`SELECT p.id, p.title, p.status, d.created_at, d.created_by
+		 FROM product_dependencies d
+		 JOIN products p ON p.id = d.product_id
+		 WHERE d.depends_on_product_id = ? AND p.deleted_at = ''
+		 ORDER BY d.created_at ASC`,
+		productID)
 }
 
 // IsSatisfied reports whether every product this one depends on is in
 // a terminal status. Second return is the list of unsatisfied dep ids
 // so callers can build human-readable block reasons.
 func (s *Store) IsSatisfied(ctx context.Context, productID string) (bool, []string, error) {
-	if s.rels == nil {
-		return false, nil, fmt.Errorf("product_dependencies: relationships backend not wired")
-	}
-	edges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeDependsOn)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT p.id, p.status
+		 FROM product_dependencies d
+		 JOIN products p ON p.id = d.depends_on_product_id
+		 WHERE d.product_id = ? AND p.deleted_at = ''`, productID)
 	if err != nil {
 		return false, nil, err
 	}
+	defer rows.Close()
 	var unsatisfied []string
-	for _, e := range edges {
-		if e.DstKind != relationships.KindProduct {
-			continue
-		}
-		var status, deletedAt string
-		err := s.db.QueryRowContext(ctx,
-			`SELECT status, deleted_at FROM products WHERE id = ?`, e.DstID).Scan(&status, &deletedAt)
-		if err != nil || deletedAt != "" {
-			continue // missing / deleted dep — don't block on a phantom
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return false, nil, err
 		}
 		if !IsTerminalStatus(status) {
-			unsatisfied = append(unsatisfied, e.DstID)
+			unsatisfied = append(unsatisfied, id)
 		}
 	}
-	return len(unsatisfied) == 0, unsatisfied, nil
+	return len(unsatisfied) == 0, unsatisfied, rows.Err()
 }
 
-// pathExists does a DFS from src over the relationships dep graph,
+// pathExists does a DFS from src over product_dependencies edges,
 // returning true if dst is reachable. Cycle detection on AddDep uses
 // this in reverse: "does B already reach A? if so A→B would cycle."
+// Visited-set guards against pre-existing cycles in legacy data.
 func (s *Store) pathExists(ctx context.Context, src, dst string) (bool, error) {
-	if s.rels == nil {
-		return false, fmt.Errorf("product_dependencies: relationships backend not wired")
-	}
 	visited := map[string]bool{}
 	stack := []string{src}
 	for len(stack) > 0 {
@@ -234,116 +205,53 @@ func (s *Store) pathExists(ctx context.Context, src, dst string) (bool, error) {
 		}
 		visited[node] = true
 
-		edges, err := s.rels.ListOutgoing(ctx, node, relationships.EdgeDependsOn)
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT depends_on_product_id FROM product_dependencies WHERE product_id = ?`, node)
 		if err != nil {
 			return false, err
 		}
-		for _, e := range edges {
-			if e.DstKind != relationships.KindProduct {
-				continue
+		for rows.Next() {
+			var next string
+			if err := rows.Scan(&next); err != nil {
+				rows.Close()
+				return false, err
 			}
-			if !visited[e.DstID] {
-				stack = append(stack, e.DstID)
+			if !visited[next] {
+				stack = append(stack, next)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return false, err
+		}
+		rows.Close()
 	}
 	return false, nil
 }
 
-// enrichEdgesAsDeps joins relationships rows against the products
-// table so each Dep carries the denormalised title/status the UI
-// renders. outgoing controls which side of the edge is the "other"
-// product to fetch — true for ListDeps (dst is the dep), false for
-// ListDependents (src is the dependent).
-func (s *Store) enrichEdgesAsDeps(ctx context.Context, edges []relationships.Edge, outgoing bool) ([]Dep, error) {
-	if len(edges) == 0 {
-		return nil, nil
-	}
-	// Collect the IDs we need to fetch + remember the source edge so
-	// the per-row created_at / created_by can be attached.
-	type lookup struct {
-		other string
-		edge  relationships.Edge
-	}
-	lookups := make([]lookup, 0, len(edges))
-	ids := make([]string, 0, len(edges))
-	for _, e := range edges {
-		var other, otherKind string
-		if outgoing {
-			other, otherKind = e.DstID, e.DstKind
-		} else {
-			other, otherKind = e.SrcID, e.SrcKind
-		}
-		if otherKind != relationships.KindProduct {
-			continue
-		}
-		lookups = append(lookups, lookup{other: other, edge: e})
-		ids = append(ids, other)
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	// One IN(...) lookup against products. Empty-id phantoms / soft-
-	// deleted rows are filtered.
-	placeholders := make([]byte, 0, 2*len(ids))
-	args := make([]any, 0, len(ids))
-	for i, id := range ids {
-		if i > 0 {
-			placeholders = append(placeholders, ',')
-		}
-		placeholders = append(placeholders, '?')
-		args = append(args, id)
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, status FROM products
-		 WHERE id IN (`+string(placeholders)+`) AND deleted_at = ''`,
-		args...)
+// queryDeps is the shared scan for ListDeps + ListDependents. Marker
+// is derived here (12-char prefix) so callers don't redo the rule.
+func (s *Store) queryDeps(ctx context.Context, query, id string) ([]Dep, error) {
+	rows, err := s.db.QueryContext(ctx, query, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	type info struct{ title, status string }
-	titles := make(map[string]info, len(ids))
+	var out []Dep
 	for rows.Next() {
-		var id, title, status string
-		if err := rows.Scan(&id, &title, &status); err != nil {
+		var d Dep
+		var createdAtUnix int64
+		if err := rows.Scan(&d.ID, &d.Title, &d.Status, &createdAtUnix, &d.CreatedBy); err != nil {
 			return nil, err
 		}
-		titles[id] = info{title: title, status: status}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// Build the result preserving the input edge order.
-	out := make([]Dep, 0, len(lookups))
-	for _, l := range lookups {
-		t, ok := titles[l.other]
-		if !ok {
-			continue // soft-deleted or missing
-		}
-		d := Dep{
-			ID:        l.other,
-			Title:     t.title,
-			Status:    t.status,
-			CreatedBy: l.edge.CreatedBy,
-		}
-		if len(d.ID) >= 12 {
-			d.Marker = d.ID[:12]
-		}
-		// valid_from is the canonical creation timestamp in the new
-		// store; parse to time.Time matching the legacy Dep shape.
-		if l.edge.ValidFrom != "" {
-			if t, err := time.Parse(time.RFC3339Nano, l.edge.ValidFrom); err == nil {
-				d.CreatedAt = t.UTC()
-			}
-		}
+		d.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
 		out = append(out, d)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // logSchemaReady emits a one-line info log on startup so operators see
 // which tier's dep schema is active. Not called from hot paths.
 func (s *Store) logSchemaReady() {
-	slog.Debug("product_dependencies schema ready (relationships backend)", "component", "product")
+	slog.Debug("product_dependencies schema ready", "component", "product")
 }

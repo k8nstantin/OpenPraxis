@@ -29,7 +29,7 @@ type MemoryResult struct {
 
 // ManifestSummary is a brief manifest listing.
 type ManifestSummary struct {
-	Marker  string `json:"marker"`
+	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Status  string `json:"status"`
 	JiraRef string `json:"jira_ref"`
@@ -37,7 +37,7 @@ type ManifestSummary struct {
 
 // ManifestDetail is a full manifest.
 type ManifestDetail struct {
-	Marker  string `json:"marker"`
+	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Status  string `json:"status"`
 	Version int    `json:"version"`
@@ -48,7 +48,7 @@ type ManifestDetail struct {
 
 // TaskSummary is a brief task listing.
 type TaskSummary struct {
-	Marker   string `json:"marker"`
+	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Status   string `json:"status"`
 	Schedule string `json:"schedule"`
@@ -56,7 +56,7 @@ type TaskSummary struct {
 
 // TaskDetail is a full task.
 type TaskDetail struct {
-	Marker      string `json:"marker"`
+	ID          string `json:"id"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
 	Schedule    string `json:"schedule"`
@@ -75,6 +75,6 @@ type ConversationResult struct {
 
 // VisceralRule is a single visceral rule.
 type VisceralRule struct {
-	Marker string `json:"marker"`
-	Text   string `json:"text"`
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
