@@ -332,6 +332,147 @@ func apiTaskRuns(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// apiRunningTasksLive returns every currently-running task enriched
+// with its in-flight run metrics (turns, actions, cost, lines, latest
+// CPU%, latest RSS, recent sample series for sparklines). Single
+// round-trip — the front-page Tasks panel can render per-task tiles
+// without N+1 fetches.
+func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+
+		type liveSample struct {
+			TS      string  `json:"ts"`
+			CPU     float64 `json:"cpu_pct"`
+			RSS     float64 `json:"rss_mb"`
+			Cost    float64 `json:"cost_usd"`
+			Turns   int     `json:"turns"`
+			Actions int     `json:"actions"`
+		}
+		type liveTask struct {
+			TaskID         string       `json:"task_id"`
+			Title          string       `json:"title"`
+			ManifestID     string       `json:"manifest_id"`
+			RunID          int64        `json:"run_id"`
+			RunNumber      int          `json:"run_number"`
+			StartedAt      string       `json:"started_at"`
+			ElapsedSec     int          `json:"elapsed_sec"`
+			Turns          int          `json:"turns"`
+			Lines          int          `json:"lines"`
+			LinesAdded     int          `json:"lines_added"`
+			LinesRemoved   int          `json:"lines_removed"`
+			CostUSD        float64      `json:"cost_usd"`
+			InputTokens    int          `json:"input_tokens"`
+			OutputTokens   int          `json:"output_tokens"`
+			CacheRead      int          `json:"cache_read_tokens"`
+			CacheCreate    int          `json:"cache_create_tokens"`
+			CPUPct         float64      `json:"cpu_pct"`
+			RSSMB          float64      `json:"rss_mb"`
+			ActionsCount   int          `json:"actions_count"`
+			RecentSamples  []liveSample `json:"recent_samples"`
+		}
+
+		// Pull the running task list. With at most a handful of
+		// concurrent runs in the typical OpenPraxis deployment, the
+		// per-task lookups below are cheap.
+		runningRows, err := n.Tasks.List("running", 50)
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+
+		out := make([]liveTask, 0, len(runningRows))
+		now := time.Now().UTC()
+		db := n.Tasks.DB()
+
+		for _, t := range runningRows {
+			lt := liveTask{
+				TaskID:     t.ID,
+				Title:      t.Title,
+				ManifestID: t.ManifestID,
+			}
+
+			// Latest run row for this task (status='running' or the
+			// most recent open run with completed_at='').
+			var runID int64
+			var runNum, turns, lines, linesAdded, linesRemoved int
+			var inputTok, outputTok, cacheR, cacheC int
+			var cost float64
+			var startedAt string
+			err := db.QueryRow(`SELECT id, run_number, turns, lines, lines_added, lines_removed,
+				cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+				started_at
+			FROM task_runs
+			WHERE task_id = ? AND (completed_at = '' OR status = 'running')
+			ORDER BY id DESC LIMIT 1`, t.ID).Scan(
+				&runID, &runNum, &turns, &lines, &linesAdded, &linesRemoved,
+				&cost, &inputTok, &outputTok, &cacheR, &cacheC, &startedAt,
+			)
+			if err == nil {
+				lt.RunID = runID
+				lt.RunNumber = runNum
+				lt.Turns = turns
+				lt.Lines = lines
+				lt.LinesAdded = linesAdded
+				lt.LinesRemoved = linesRemoved
+				lt.CostUSD = cost
+				lt.InputTokens = inputTok
+				lt.OutputTokens = outputTok
+				lt.CacheRead = cacheR
+				lt.CacheCreate = cacheC
+				lt.StartedAt = startedAt
+				if startedAt != "" {
+					if ts, perr := time.Parse(time.RFC3339, startedAt); perr == nil {
+						lt.ElapsedSec = int(now.Sub(ts).Seconds())
+					}
+				}
+			}
+
+			// Latest host_sample for live CPU + RSS + recent series.
+			if runID > 0 {
+				rows, qerr := db.Query(`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
+				FROM task_run_host_samples WHERE run_id = ?
+				ORDER BY id DESC LIMIT 30`, runID)
+				if qerr == nil {
+					var samples []liveSample
+					for rows.Next() {
+						var s liveSample
+						if scanErr := rows.Scan(&s.TS, &s.CPU, &s.RSS, &s.Cost, &s.Turns, &s.Actions); scanErr == nil {
+							samples = append(samples, s)
+						}
+					}
+					rows.Close()
+					// Reverse to chronological (oldest first) for chart consumption.
+					for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
+						samples[i], samples[j] = samples[j], samples[i]
+					}
+					lt.RecentSamples = samples
+					if n := len(samples); n > 0 {
+						lt.CPUPct = samples[n-1].CPU
+						lt.RSSMB = samples[n-1].RSS
+					}
+				}
+			}
+
+			// Action count for this task — for the in-flight run only,
+			// scope to actions recorded since started_at.
+			if startedAt != "" {
+				_ = db.QueryRow(`SELECT COUNT(*) FROM actions
+				WHERE task_id = ? AND created_at >= ?`,
+					t.ID, startedAt).Scan(&lt.ActionsCount)
+			}
+
+			if lt.RecentSamples == nil {
+				lt.RecentSamples = []liveSample{}
+			}
+
+			out = append(out, lt)
+		}
+
+		writeJSON(w, out)
+	}
+}
+
 // apiTaskRunHostSamples returns the host CPU/RSS time-series for a run.
 // Drives the orange/purple sparklines overlaid on the Run Stats card.
 func apiTaskRunHostSamples(n *node.Node) http.HandlerFunc {

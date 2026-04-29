@@ -667,6 +667,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/manifests/{id}", apiManifestDelete(n)).Methods("DELETE")
 	api.HandleFunc("/tasks/by-peer", apiTasksByPeer(n)).Methods("GET")
 	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/running/live", apiRunningTasksLive(n)).Methods("GET")
 	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
 	// Heavy panels split off the polled stats endpoint — loaded on view-show
 	// only, not on every 10s tick. See handlers_task.go for context.

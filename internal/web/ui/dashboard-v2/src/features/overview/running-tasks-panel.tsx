@@ -23,6 +23,38 @@ interface RunningTask {
   manifest_id?: string
 }
 
+interface LiveSample {
+  ts: string
+  cpu_pct: number
+  rss_mb: number
+  cost_usd: number
+  turns: number
+  actions: number
+}
+
+interface LiveTask {
+  task_id: string
+  title: string
+  manifest_id: string
+  run_id: number
+  run_number: number
+  started_at: string
+  elapsed_sec: number
+  turns: number
+  lines: number
+  lines_added: number
+  lines_removed: number
+  cost_usd: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_create_tokens: number
+  cpu_pct: number
+  rss_mb: number
+  actions_count: number
+  recent_samples: LiveSample[]
+}
+
 interface TasksStats {
   budget_exceeded: boolean
   budget_pct: number
@@ -85,6 +117,19 @@ function useRunningTasks() {
   })
 }
 
+function useRunningTasksLive() {
+  return useQuery({
+    queryKey: ['running-tasks-live'],
+    queryFn: async () => {
+      const r = await fetch('/api/tasks/running/live')
+      if (!r.ok) throw new Error(`tasks/running/live → ${r.status}`)
+      return ((await r.json()) as LiveTask[] | null) ?? []
+    },
+    refetchInterval: 1500,
+    staleTime: 0,
+  })
+}
+
 function useTasksStats() {
   return useQuery({
     queryKey: ['tasks-stats'],
@@ -138,10 +183,23 @@ export function RunningTasksPanel() {
 
 // ── 1. Tasks panel ───────────────────────────────────────────────────
 function TasksPanel() {
-  const tasks = useRunningTasks()
+  const live = useRunningTasksLive()
   const stats = useTasksStats()
-  const running = tasks.data ?? []
+  const running = live.data ?? []
   const s = stats.data
+
+  // Aggregate live metrics across all running tasks for the header.
+  const agg = useMemo(() => {
+    let cpu = 0, rss = 0, cost = 0, turns = 0, actions = 0
+    for (const t of running) {
+      cpu += t.cpu_pct
+      rss += t.rss_mb
+      cost += t.cost_usd
+      turns += t.turns
+      actions += t.actions_count
+    }
+    return { cpu, rss, cost, turns, actions }
+  }, [running])
 
   return (
     <PanelCard
@@ -151,6 +209,11 @@ function TasksPanel() {
       stats={[
         { label: 'Running', value: String(running.length), accent: 'emerald' },
         { label: 'Total', value: s ? String(s.tasks_total) : '—' },
+        { label: '∑ CPU', value: running.length > 0 ? `${agg.cpu.toFixed(0)}%` : '—' },
+        { label: '∑ RSS', value: running.length > 0 ? `${(agg.rss / 1024).toFixed(1)}G` : '—' },
+        { label: '∑ Cost·run', value: running.length > 0 ? `$${agg.cost.toFixed(4)}` : '—' },
+        { label: '∑ Turns', value: running.length > 0 ? String(agg.turns) : '—' },
+        { label: '∑ Actions', value: running.length > 0 ? String(agg.actions) : '—' },
         {
           label: 'Budget',
           value: s ? `${(s.budget_pct ?? 0).toFixed(0)}%` : '—',
@@ -158,19 +221,209 @@ function TasksPanel() {
         },
       ]}
     >
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4'>
-        <ChartTile label='Running count' note='0…N tasks live'>
-          <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
-        </ChartTile>
-        <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
-          <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
-        </ChartTile>
-        <ChartTile label='Running list' note='one bar per task' span={2}>
-          <RunningTaskBars running={running} />
-        </ChartTile>
-      </div>
+      {running.length === 0 ? (
+        <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+          <ChartTile label='Running count' note='0…N tasks live'>
+            <RunningGauge running={0} max={8} />
+          </ChartTile>
+          <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
+            <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
+          </ChartTile>
+          <div className='text-muted-foreground col-span-full rounded-md border bg-background/40 p-6 text-center text-sm'>
+            no running tasks — fire one and live tiles appear here
+          </div>
+        </div>
+      ) : (
+        <div className='space-y-3'>
+          {/* One per-task tile per running task. Each tile carries the
+              full live metric set: turns / actions / cost / lines /
+              CPU / RSS plus three live sparklines. */}
+          <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+            {running.map((t) => (
+              <RunningTaskTile key={t.task_id} t={t} />
+            ))}
+          </div>
+          {/* Side cards next to the per-task tiles: aggregate budget
+              ring + count gauge so the panel still reads as "tasks
+              overview" not just per-task drill-in. */}
+          <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+            <ChartTile label='Running count' note='0…N tasks live'>
+              <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
+            </ChartTile>
+            <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
+              <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
+            </ChartTile>
+          </div>
+        </div>
+      )}
     </PanelCard>
   )
+}
+
+// RunningTaskTile — one card per in-flight task. Renders:
+//   - title + elapsed clock
+//   - 4-up stat grid: turns / actions / cost / lines (live)
+//   - three small sparklines: CPU%, RSS MB, cost trajectory
+//   - token totals as small text
+function RunningTaskTile({ t }: { t: LiveTask }) {
+  const elapsed = formatElapsed(t.elapsed_sec)
+  const samples = t.recent_samples ?? []
+  return (
+    <div className='rounded-md border bg-background/40 p-3'>
+      <div className='mb-2 flex items-baseline justify-between gap-2'>
+        <div className='min-w-0 flex-1'>
+          <div className='truncate text-sm font-semibold' title={t.title}>
+            {t.title}
+          </div>
+          <code className='text-muted-foreground font-mono text-[10px]'>
+            {t.task_id.slice(0, 8)}…  ·  run #{t.run_number}  ·  {elapsed}
+          </code>
+        </div>
+        <span className='inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.8)]' />
+      </div>
+
+      <div className='mb-2 grid grid-cols-4 gap-2 text-xs'>
+        <Tile label='turns' value={String(t.turns)} accent='emerald' />
+        <Tile label='actions' value={String(t.actions_count)} accent='violet' />
+        <Tile label='cost' value={`$${t.cost_usd.toFixed(4)}`} accent='violet' />
+        <Tile label='lines' value={String(t.lines)} />
+      </div>
+
+      <div className='grid grid-cols-3 gap-2'>
+        <MiniSpark
+          label='CPU'
+          unit='%'
+          color='#34d399'
+          data={samples.map((s) => [s.ts, s.cpu_pct] as [string, number])}
+          current={t.cpu_pct}
+        />
+        <MiniSpark
+          label='RSS'
+          unit='M'
+          color='#a78bfa'
+          data={samples.map((s) => [s.ts, s.rss_mb] as [string, number])}
+          current={t.rss_mb}
+        />
+        <MiniSpark
+          label='cost'
+          unit=''
+          color='#f59e0b'
+          data={samples.map((s) => [s.ts, s.cost_usd] as [string, number])}
+          current={t.cost_usd}
+          prefix='$'
+        />
+      </div>
+
+      <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]'>
+        <span>in {t.input_tokens.toLocaleString()}</span>
+        <span>out {t.output_tokens.toLocaleString()}</span>
+        <span>cache_r {t.cache_read_tokens.toLocaleString()}</span>
+        <span>cache_w {t.cache_create_tokens.toLocaleString()}</span>
+        {t.lines_added > 0 && <span className='text-emerald-400'>+{t.lines_added}</span>}
+        {t.lines_removed > 0 && <span className='text-rose-400'>-{t.lines_removed}</span>}
+      </div>
+    </div>
+  )
+}
+
+function Tile({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: string
+  accent?: 'emerald' | 'violet'
+}) {
+  return (
+    <div className='rounded-md bg-zinc-900/40 px-2 py-1.5'>
+      <div className='text-muted-foreground text-[9px] uppercase tracking-wider'>{label}</div>
+      <div
+        className={cn(
+          'font-mono text-sm font-semibold tabular-nums',
+          accent === 'emerald' && 'text-emerald-300',
+          accent === 'violet' && 'text-violet-300'
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function MiniSpark({
+  label,
+  unit,
+  color,
+  data,
+  current,
+  prefix = '',
+}: {
+  label: string
+  unit: string
+  color: string
+  data: [string, number][]
+  current: number
+  prefix?: string
+}) {
+  return (
+    <div className='rounded-md bg-zinc-900/40 p-1.5'>
+      <div className='flex items-baseline justify-between'>
+        <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
+          {label}
+        </span>
+        <span className='font-mono text-[10px]' style={{ color }}>
+          {prefix}
+          {current.toFixed(unit === '%' ? 0 : unit === 'M' ? 0 : 4)}
+          {unit}
+        </span>
+      </div>
+      <div className='h-[36px]'>
+        <EChart
+          height='100%'
+          option={{
+            grid: { left: 0, right: 0, top: 2, bottom: 0 },
+            xAxis: { type: 'time', show: false },
+            yAxis: { type: 'value', show: false, scale: true },
+            series: [
+              {
+                type: 'line',
+                data,
+                smooth: true,
+                showSymbol: false,
+                lineStyle: { color, width: 1.5 },
+                areaStyle: {
+                  color: {
+                    type: 'linear' as const,
+                    x: 0,
+                    y: 0,
+                    x2: 0,
+                    y2: 1,
+                    colorStops: [
+                      { offset: 0, color: color + 'aa' },
+                      { offset: 1, color: color + '00' },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) {
+    const m = Math.floor(sec / 60)
+    const s = sec % 60
+    return `${m}m${s.toString().padStart(2, '0')}s`
+  }
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  return `${h}h${m.toString().padStart(2, '0')}m`
 }
 
 // ── 2. AI Stats panel ────────────────────────────────────────────────
