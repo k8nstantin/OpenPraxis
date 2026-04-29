@@ -393,13 +393,14 @@ func apiProductIdeas(n *node.Node) http.HandlerFunc {
 	}
 }
 
-// resolveProductID accepts a marker or full UUID and returns the full
-// UUID via Products.Get (which handles prefix matching). Empty return
-// + error message means 404-worthy.
-func resolveProductID(n *node.Node, idOrMarker string) (string, string) {
-	p, _ := n.Products.Get(idOrMarker)
+// resolveProductID validates a product UUID and returns it canonical
+// via Products.Get. Post marker rip-out (eb49bef) Get accepts only
+// the full UUID; prefixes return 404. Empty string + error message
+// means 404-worthy.
+func resolveProductID(n *node.Node, id string) (string, string) {
+	p, _ := n.Products.Get(id)
 	if p == nil {
-		return "", "product not found: " + idOrMarker
+		return "", "product not found: " + id
 	}
 	return p.ID, ""
 }

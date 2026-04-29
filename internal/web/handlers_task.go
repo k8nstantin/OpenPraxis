@@ -742,8 +742,7 @@ func apiTaskSetManifest(n *node.Node) http.HandlerFunc {
 			writeError(w, "task not found", 404)
 			return
 		}
-		// Resolve marker → full UUID so the column always carries the
-		// canonical id.
+		// Validate the manifest UUID and pass through canonical form.
 		fullID, errMsg := resolveManifestID(n, req.ManifestID)
 		if errMsg != "" {
 			writeError(w, errMsg, 404)
@@ -826,9 +825,9 @@ func apiTaskSetDependency(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Resolve the dep target to its full ID if the caller passed a
-		// marker. 404 here is a real error — the UI picker shouldn't
-		// offer something that doesn't exist, but guard defensively.
+		// Verify the dep target exists. 404 here is a real error — the
+		// UI picker shouldn't offer something that doesn't exist, but
+		// guard defensively.
 		depID := req.DependsOn
 		if depID != "" {
 			dep, err := n.Tasks.Get(depID)

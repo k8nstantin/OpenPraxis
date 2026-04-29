@@ -19,8 +19,8 @@ const manifestBlockPrefix = "manifest not satisfied"
 // legacyManifestBlockPrefix is the prefix the scheduler's
 // pre-dispatch gate wrote BEFORE #97 normalized it. Kept so the
 // activation filter still catches waiting tasks that were seeded
-// under the old format — rows in the wild today were written with
-// "blocked by manifest <marker> (<title>)". Removable once a DB
+// under the old format — rows in the wild today were written as
+// "blocked by manifest <id-prefix> (<title>)". Removable once a DB
 // audit confirms no row still has this prefix.
 const legacyManifestBlockPrefix = "blocked by manifest"
 

@@ -366,13 +366,14 @@ func enrichManifests(n *node.Node, manifests []*manifest.Manifest) []enrichedMan
 	return result
 }
 
-// resolveManifestID accepts either a 12-char marker or a full UUID and
-// returns the full UUID via Manifests.Get (which already handles prefix
-// matching). Returns "" + a 404-worthy error message when missing.
-func resolveManifestID(n *node.Node, idOrMarker string) (string, string) {
-	m, _ := n.Manifests.Get(idOrMarker)
+// resolveManifestID validates a manifest UUID and returns it canonical
+// form via Manifests.Get. Post marker rip-out (eb49bef) Get accepts
+// only the full UUID — pass a prefix and you get a 404. Returns "" +
+// a 404-worthy error message when missing.
+func resolveManifestID(n *node.Node, id string) (string, string) {
+	m, _ := n.Manifests.Get(id)
 	if m == nil {
-		return "", "manifest not found: " + idOrMarker
+		return "", "manifest not found: " + id
 	}
 	return m.ID, ""
 }

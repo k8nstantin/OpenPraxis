@@ -68,7 +68,7 @@ func TestCreate_ManifestUnsatisfied_SeedsWaiting(t *testing.T) {
 	}
 	for _, want := range []string{"mf-dep-1", "mf-dep-2"} {
 		if !strings.Contains(br, want) {
-			t.Errorf("block_reason = %q, want marker %q present", br, want)
+			t.Errorf("block_reason = %q, want id-prefix %q present", br, want)
 		}
 	}
 }

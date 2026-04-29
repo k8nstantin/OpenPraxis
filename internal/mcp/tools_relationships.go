@@ -7,10 +7,9 @@
 // by memory_*, task_*, manifest_*, product_*. Discoverable via
 // tools/list.
 //
-// All UUIDs MUST be full 36-char (visceral rule 14). Short markers are
-// accepted for convenience on src_id / dst_id (the underlying store
-// stores whatever is passed; resolution to full UUIDs is the caller's
-// responsibility for now — PR/M2 may add a marker→UUID resolver here).
+// All UUIDs MUST be full 36-char (visceral rule 14). Post marker
+// rip-out (eb49bef) the underlying entity stores enforce this at the
+// SQL layer — `id = ?` exact match only, no prefix LIKE fallback.
 package mcp
 
 import (

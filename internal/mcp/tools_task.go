@@ -147,7 +147,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 			"retired_in", "M4-T14")
 	}
 
-	// Resolve manifest marker to full ID if provided
+	// Validate the manifest UUID if provided.
 	if manifestID != "" {
 		m, err := s.node.Manifests.Get(manifestID)
 		if err != nil || m == nil {
@@ -156,7 +156,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 		manifestID = m.ID
 	}
 
-	// Resolve depends_on marker to full ID if provided
+	// Validate the depends_on UUID if provided.
 	if dependsOn != "" {
 		dep, err := s.node.Tasks.Get(dependsOn)
 		if err != nil || dep == nil {
@@ -199,7 +199,7 @@ func (s *Server) handleTaskList(ctx context.Context, req mcplib.CallToolRequest)
 	var err error
 
 	if manifestID != "" {
-		// Resolve marker
+		// Validate the manifest UUID exists.
 		m, merr := s.node.Manifests.Get(manifestID)
 		if merr != nil || m == nil {
 			return errResult("manifest not found: %s", manifestID), nil

@@ -144,12 +144,12 @@ func (s *Store) TaskReviewStatus(ctx context.Context, taskID string) (TaskReview
 		// (the scheduler, basic list views) degrade silently.
 		return TaskReviewStatus{}, nil
 	}
-	// Resolve the full ID so a marker-prefix input still hits the
-	// reader with the canonical id the comments table stores.
+	// Validate the task exists and load its canonical id (post marker
+	// rip-out: full UUID only).
 	var fullID string
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		taskID, taskID+"%").Scan(&fullID); err != nil {
+		`SELECT id FROM tasks WHERE id = ? AND deleted_at = ''`,
+		taskID).Scan(&fullID); err != nil {
 		return TaskReviewStatus{}, err
 	}
 	comments, err := s.reviewReader.ListReviewCommentsForTask(ctx, fullID, 200)

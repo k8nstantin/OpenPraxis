@@ -22,8 +22,8 @@ var ErrCycle = errors.New("manifest_dependencies: cycle detected")
 var ErrSelfLoop = errors.New("manifest_dependencies: a manifest cannot depend on itself")
 
 // Dep is the denormalized row the UI + MCP callers want when listing
-// deps or dependents: id + marker + title + current status are enough to
-// render a row without a second lookup per entry.
+// deps or dependents: id + title + current status are enough to render
+// a row without a second lookup per entry.
 type Dep struct {
 	ID         string    `json:"id"`
 	Title      string    `json:"title"`

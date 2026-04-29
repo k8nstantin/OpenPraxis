@@ -88,9 +88,10 @@ func (s *Server) registerProductTools() {
 	)
 }
 
-// resolveProductPair accepts marker-or-id inputs for a source + target
-// product and returns the full UUIDs. Mirrors the manifest resolver
-// pattern so the tool-handler layer is consistent across tiers.
+// resolveProductPair validates a source + target product UUID pair
+// via Products.Get (post marker rip-out: full UUID only). Mirrors the
+// manifest resolver so the tool-handler layer is consistent across
+// tiers.
 func (s *Server) resolveProductPair(src, dst string) (srcID, dstID, errMsg string) {
 	srcP, _ := s.node.Products.Get(src)
 	if srcP == nil {

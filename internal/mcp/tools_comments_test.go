@@ -125,8 +125,8 @@ func isErrResult(r *mcplib.CallToolResult) bool {
 	return r.IsError
 }
 
-// newTestServerWithAllStores wires Comments + Tasks + Manifests + Products so
-// the resolveCommentTarget path can look up targets by marker or full UUID.
+// newTestServerWithAllStores wires Comments + Tasks + Manifests + Products
+// so the resolveCommentTarget path can validate target full UUIDs.
 func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	dsn := "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"

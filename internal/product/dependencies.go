@@ -19,8 +19,8 @@ var ErrCycle = errors.New("product_dependencies: cycle detected")
 var ErrSelfLoop = errors.New("product_dependencies: a product cannot depend on itself")
 
 // Dep is the denormalized row UI + MCP callers want when listing deps
-// or dependents: id + marker + title + current status is enough to
-// render without a second lookup per row. Matches the Dep shape in
+// or dependents: id + title + current status is enough to render
+// without a second lookup per row. Matches the Dep shape in
 // manifest.Dep so consumers can reuse render helpers across tiers.
 type Dep struct {
 	ID        string    `json:"id"`

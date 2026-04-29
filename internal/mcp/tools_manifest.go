@@ -374,10 +374,10 @@ func (s *Server) handleManifestDelete(ctx context.Context, req mcplib.CallToolRe
 	return textResult(fmt.Sprintf("Manifest deleted.")), nil
 }
 
-// resolveManifestPair accepts marker-or-id inputs for a source + target
-// manifest, looks up both, and returns the full UUIDs. Centralizes the
-// same "Manifests.Get accepts prefixes, dep tables want full IDs"
-// translation that the dep-add/remove/list handlers all need.
+// resolveManifestPair validates a source + target manifest UUID pair
+// via Manifests.Get (post marker rip-out: full UUID only) and returns
+// canonical IDs ready for the relationships table. Used by the
+// dep-add/remove/list handlers.
 func (s *Server) resolveManifestPair(src, dst string) (srcID, dstID string, errMsg string) {
 	srcM, _ := s.node.Manifests.Get(src)
 	if srcM == nil {

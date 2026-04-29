@@ -28,7 +28,7 @@ func insertRunningTask(t *testing.T, db *sql.DB, taskID string) {
 // TestBuildPrompt_BranchPrefixOverride verifies the resolved
 // `branch_prefix` knob renders into the <git_workflow> block. The
 // manifest's acceptance bullet 4 (`branch_prefix=qa` → `git checkout -b
-// qa/<marker>`) is the concrete shape we assert.
+// qa/<id-prefix>`) is the concrete shape we assert.
 func TestBuildPrompt_BranchPrefixOverride(t *testing.T) {
 	task := &Task{ID: "019dba9f-9c5b-76ba-8221-e7e11093887f", Title: "T", Description: "D"}
 	got, err := buildPrompt(task, "M", "m body", "", "qa", nil)

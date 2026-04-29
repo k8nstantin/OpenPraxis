@@ -20,8 +20,8 @@ import (
 //   GET  /api/{scope}/{id}/description/revisions/{comment_id}
 //   POST /api/{scope}/{id}/description/restore/{comment_id}
 //
-// scope ∈ {products, manifests, tasks}. Short-marker and full-UUID
-// target IDs both work — the underlying Node helpers canonicalise.
+// scope ∈ {products, manifests, tasks}. id is the full 36-char UUID
+// of the entity (post marker rip-out — prefixes return 404).
 
 // revisionView is the JSON shape for a single description_revision entry,
 // with both unix + ISO timestamps so clients don't have to format.
