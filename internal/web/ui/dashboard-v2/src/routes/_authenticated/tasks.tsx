@@ -21,6 +21,7 @@ const tasksSearch = z.object({
       'dependencies',
       'dag',
       'schedule',
+      'live_output',
       'stats',
     ])
     .optional()
