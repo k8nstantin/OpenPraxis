@@ -598,6 +598,20 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			budgetExceeded = costToday >= dailyBudget
 		}
 
+		// Cumulative AI stats — one round-trip query against task_runs so
+		// the front-page AI Stats panel can show all-time figures
+		// alongside today's. Cheap on a few thousand rows; if/when the
+		// table grows we materialise this into a stats roll-up table.
+		var totalRuns, cumTurns, cumLines, cumErrors int
+		var cumCost float64
+		_ = n.Tasks.DB().QueryRow(`SELECT
+			COUNT(*),
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(turns), 0),
+			COALESCE(SUM(lines), 0),
+			COALESCE(SUM(errors), 0)
+		FROM task_runs WHERE status='completed'`).Scan(&totalRuns, &cumCost, &cumTurns, &cumLines, &cumErrors)
+
 		writeJSON(w, map[string]any{
 			"running":         runningCount,
 			"tasks_total":     len(tasks),
@@ -606,6 +620,12 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			"daily_budget":    dailyBudget,
 			"budget_pct":      budgetPct,
 			"budget_exceeded": budgetExceeded,
+			// Cumulative rollups across every completed run.
+			"runs_total":   totalRuns,
+			"cost_total":   math.Round(cumCost*100) / 100,
+			"turns_total":  cumTurns,
+			"lines_total":  cumLines,
+			"errors_total": cumErrors,
 		})
 	}
 }

@@ -31,6 +31,12 @@ interface TasksStats {
   running: number
   tasks_total: number
   turns_today: number
+  // Cumulative rollups across every completed task_run.
+  runs_total: number
+  cost_total: number
+  turns_total: number
+  lines_total: number
+  errors_total: number
 }
 
 interface SystemSample {
@@ -197,11 +203,40 @@ function AIStatsPanel() {
       badge='cumulative'
       badgeTone='violet'
       stats={[
-        { label: 'Actions·all', value: env ? env.total.toLocaleString() : '—', accent: 'violet' },
-        { label: 'Turns·today', value: s ? String(s.turns_today) : '—' },
-        { label: 'Cost·today', value: s ? `$${s.cost_today.toFixed(2)}` : '—' },
+        { label: 'Cost·all', value: s ? `$${s.cost_total.toFixed(2)}` : '—', accent: 'violet' },
+        { label: 'Turns·all', value: s ? s.turns_total.toLocaleString() : '—' },
+        { label: 'Actions·all', value: env ? env.total.toLocaleString() : '—' },
+        { label: 'Runs·all', value: s ? s.runs_total.toLocaleString() : '—' },
       ]}
     >
+      {/* Big-number tiles: the metrics the operator scans first. Live
+          values, today vs cumulative side-by-side so you can see "how
+          much of the all-time figure landed today". */}
+      <div className='mb-3 grid grid-cols-2 gap-2 md:grid-cols-4'>
+        <BigNumber
+          label='Cost today'
+          value={s ? `$${s.cost_today.toFixed(2)}` : '—'}
+          sub={s ? `of $${s.daily_budget} daily` : ''}
+          accent='violet'
+        />
+        <BigNumber
+          label='Turns today'
+          value={s ? s.turns_today.toLocaleString() : '—'}
+          sub={s && s.turns_total > 0 ? `${((s.turns_today / s.turns_total) * 100).toFixed(1)}% of all-time` : ''}
+        />
+        <BigNumber
+          label='Lines·all'
+          value={s ? s.lines_total.toLocaleString() : '—'}
+          sub={s && s.runs_total > 0 ? `${Math.round(s.lines_total / s.runs_total)} avg/run` : ''}
+        />
+        <BigNumber
+          label='Errors·all'
+          value={s ? s.errors_total.toLocaleString() : '—'}
+          sub='across every run'
+          accent={s && s.errors_total > 0 ? 'rose' : undefined}
+        />
+      </div>
+
       <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
         <ChartTile label='Actions / hour' note='last 12 hr buckets' span={2}>
           <HourlyBars data={hourly} color='#a78bfa' />
@@ -209,15 +244,103 @@ function AIStatsPanel() {
         <ChartTile label='Top tools' note='in last 300 actions'>
           <ToolBreakdownBars data={toolBreakdown} />
         </ChartTile>
-        <ChartTile label='Turns ratio' note='today / budget'>
-          <TurnsRatio
-            turns={s?.turns_today ?? 0}
-            budget={s?.daily_budget ?? 100}
-            cost={s?.cost_today ?? 0}
+        <ChartTile label='Cost / turn' note='all-time average'>
+          <CostPerTurnGauge
+            cost={s?.cost_total ?? 0}
+            turns={s?.turns_total ?? 0}
           />
         </ChartTile>
       </div>
     </PanelCard>
+  )
+}
+
+function BigNumber({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string
+  value: string
+  sub?: string
+  accent?: 'violet' | 'rose'
+}) {
+  return (
+    <div className='rounded-md border bg-background/40 p-2'>
+      <div className='text-muted-foreground text-[10px] uppercase tracking-wider'>
+        {label}
+      </div>
+      <div
+        className={cn(
+          'mt-1 font-mono text-xl font-semibold tabular-nums',
+          accent === 'violet' && 'text-violet-300',
+          accent === 'rose' && 'text-rose-300'
+        )}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div className='text-muted-foreground mt-0.5 text-[10px]'>{sub}</div>
+      )}
+    </div>
+  )
+}
+
+function CostPerTurnGauge({ cost, turns }: { cost: number; turns: number }) {
+  const cpt = turns > 0 ? cost / turns : 0
+  // Most agent runs land in $0.001–$0.10 per turn. Use a log-ish gauge:
+  // 0 → ∅, 0.05 → mid, 0.20+ → red. Bar fill 0..100 maps to 0..$0.20.
+  const pct = Math.min(100, (cpt / 0.2) * 100)
+  const color = cpt > 0.1 ? '#f43f5e' : cpt > 0.05 ? '#f59e0b' : '#a78bfa'
+  return (
+    <EChart
+      height='100%'
+      option={{
+        series: [
+          {
+            type: 'gauge',
+            startAngle: 200,
+            endAngle: -20,
+            min: 0,
+            max: 100,
+            progress: {
+              show: true,
+              width: 12,
+              roundCap: true,
+              itemStyle: { color },
+            },
+            axisLine: { lineStyle: { width: 12, color: [[1, '#27272a']] } },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { show: false },
+            pointer: { show: false },
+            title: { show: false },
+            detail: {
+              valueAnimation: true,
+              fontSize: 18,
+              fontWeight: 600,
+              offsetCenter: [0, '5%'],
+              formatter: () => `$${cpt.toFixed(4)}`,
+              color: '#e5e7eb',
+            },
+            data: [{ value: pct }],
+          },
+        ],
+        graphic: [
+          {
+            type: 'text',
+            left: 'center',
+            top: '70%',
+            style: {
+              text: 'per turn',
+              fill: '#94a3b8',
+              fontSize: 10,
+            },
+          },
+        ],
+      }}
+    />
   )
 }
 
