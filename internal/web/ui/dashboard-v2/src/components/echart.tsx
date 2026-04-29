@@ -85,16 +85,35 @@ export function EChart({
     }
   }, [option, themeToken])
 
+  // ResizeObserver on the wrapper — force chart.resize() on every
+  // container layout change. Without this ECharts can lock to a width
+  // computed at first paint, then overflow when the grid gives it
+  // less / more space later.
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const ro = new ResizeObserver(() => {
+      const inst = chartRef.current?.getEchartsInstance?.()
+      if (inst) inst.resize()
+    })
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [])
+
   return (
-    <ReactECharts
-      ref={chartRef}
-      option={themed}
-      style={{ height, width: '100%' }}
-      className={className}
-      notMerge
-      lazyUpdate
-      onEvents={onEvents}
-    />
+    <div ref={wrapRef} style={{ width: '100%', overflow: 'hidden' }}>
+      <ReactECharts
+        ref={chartRef}
+        option={themed}
+        style={{ height, width: '100%' }}
+        className={className}
+        notMerge
+        lazyUpdate
+        opts={{ renderer: 'canvas' }}
+        onEvents={onEvents}
+      />
+    </div>
   )
 }
 

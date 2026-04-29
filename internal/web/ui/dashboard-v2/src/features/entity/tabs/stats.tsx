@@ -156,9 +156,20 @@ function CumulativePanel({
       <ChartCell label='Cost per run'>
         <EChart
           option={{
+            tooltip: { trigger: 'axis' },
             xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'USD' },
-            series: [{ type: 'line', data: costs, smooth: true, color: '#10b981' }],
+            yAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
+            series: [
+              {
+                type: 'line',
+                data: costs,
+                smooth: true,
+                color: '#10b981',
+                symbol: 'circle',
+                symbolSize: 8,
+                label: { show: true, position: 'top', formatter: (p: { value: number }) => '$' + p.value.toFixed(2), fontSize: 10, fontWeight: 'bold' },
+              },
+            ],
           }}
         />
       </ChartCell>
@@ -166,8 +177,9 @@ function CumulativePanel({
       <ChartCell label='Cumulative cost'>
         <EChart
           option={{
+            tooltip: { trigger: 'axis' },
             xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'USD' },
+            yAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
             series: [
               {
                 type: 'line',
@@ -175,6 +187,9 @@ function CumulativePanel({
                 smooth: true,
                 areaStyle: { opacity: 0.3 },
                 color: '#3b82f6',
+                symbol: 'circle',
+                symbolSize: 8,
+                label: { show: true, position: 'top', formatter: (p: { value: number }) => '$' + p.value.toFixed(2), fontSize: 10, fontWeight: 'bold' },
               },
             ],
           }}
@@ -187,7 +202,7 @@ function CumulativePanel({
             tooltip: { trigger: 'axis' },
             legend: { data: ['input', 'output', 'cache_read', 'cache_create'] },
             xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value' },
+            yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
             series: [
               { name: 'input', type: 'line', stack: 'tokens', areaStyle: {}, data: inputs },
               { name: 'output', type: 'line', stack: 'tokens', areaStyle: {}, data: outputs },
@@ -201,9 +216,20 @@ function CumulativePanel({
       <ChartCell label='Cache-hit %'>
         <EChart
           option={{
+            tooltip: { trigger: 'axis' },
             xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', max: 100, name: '%' },
-            series: [{ type: 'line', smooth: true, data: cacheHitPct, color: '#8b5cf6' }],
+            yAxis: { type: 'value', max: 100, name: '%', axisLabel: { formatter: '{value}%' } },
+            series: [
+              {
+                type: 'line',
+                smooth: true,
+                data: cacheHitPct,
+                color: '#8b5cf6',
+                symbol: 'circle',
+                symbolSize: 8,
+                label: { show: true, position: 'top', formatter: (p: { value: number }) => p.value.toFixed(1) + '%', fontSize: 10, fontWeight: 'bold' },
+              },
+            ],
           }}
         />
       </ChartCell>
@@ -211,9 +237,20 @@ function CumulativePanel({
       <ChartCell label='Duration per run'>
         <EChart
           option={{
+            tooltip: { trigger: 'axis' },
             xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'seconds' },
-            series: [{ type: 'line', smooth: true, data: durations, color: '#f59e0b' }],
+            yAxis: { type: 'value', name: 'seconds', axisLabel: { formatter: '{value}s' } },
+            series: [
+              {
+                type: 'line',
+                smooth: true,
+                data: durations,
+                color: '#f59e0b',
+                symbol: 'circle',
+                symbolSize: 8,
+                label: { show: true, position: 'top', formatter: (p: { value: number }) => p.value.toFixed(0) + 's', fontSize: 10, fontWeight: 'bold' },
+              },
+            ],
           }}
         />
       </ChartCell>
