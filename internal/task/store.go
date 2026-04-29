@@ -283,12 +283,17 @@ func (s *Store) init() error {
 		disk_used_gb  REAL NOT NULL DEFAULT 0,
 		disk_total_gb REAL NOT NULL DEFAULT 0,
 		net_rx_mbps   REAL NOT NULL DEFAULT 0,
-		net_tx_mbps   REAL NOT NULL DEFAULT 0
+		net_tx_mbps   REAL NOT NULL DEFAULT 0,
+		disk_read_mbps  REAL NOT NULL DEFAULT 0,
+		disk_write_mbps REAL NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		return fmt.Errorf("create system_host_samples table: %w", err)
 	}
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sys_samples_ts ON system_host_samples(ts DESC)`)
+	// Idempotent ALTERs for older DBs that pre-date the disk-IO columns.
+	s.db.Exec(`ALTER TABLE system_host_samples ADD COLUMN disk_read_mbps REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE system_host_samples ADD COLUMN disk_write_mbps REAL NOT NULL DEFAULT 0`)
 
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (

@@ -259,7 +259,8 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 
 		query := `SELECT ts, cpu_pct, load_1m, load_5m, load_15m,
 			mem_used_mb, mem_total_mb, swap_used_mb,
-			disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps
+			disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps,
+			disk_read_mbps, disk_write_mbps
 			FROM system_host_samples WHERE ts >= ? AND ts <= ?`
 		args := []any{from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339)}
 		if asOfStr != "" {
@@ -287,7 +288,8 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 				&s.Load1m, &s.Load5m, &s.Load15m,
 				&s.MemUsedMB, &s.MemTotalMB, &s.SwapUsedMB,
 				&s.DiskUsedGB, &s.DiskTotalGB,
-				&s.NetRxMbps, &s.NetTxMbps); err != nil {
+				&s.NetRxMbps, &s.NetTxMbps,
+				&s.DiskReadMBps, &s.DiskWriteMBps); err != nil {
 				writeError(w, err.Error(), 500)
 				return
 			}

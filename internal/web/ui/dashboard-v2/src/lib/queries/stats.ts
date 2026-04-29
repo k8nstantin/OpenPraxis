@@ -82,6 +82,8 @@ export interface SystemHostSample {
   disk_total_gb: number
   net_rx_mbps: number
   net_tx_mbps: number
+  disk_read_mbps?: number
+  disk_write_mbps?: number
 }
 
 export interface SystemStatsResponse {

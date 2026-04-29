@@ -262,6 +262,8 @@ type SystemHostSample struct {
 	DiskTotalGB float64   `json:"disk_total_gb"`
 	NetRxMbps   float64   `json:"net_rx_mbps"`
 	NetTxMbps   float64   `json:"net_tx_mbps"`
+	DiskReadMBps  float64 `json:"disk_read_mbps"`
+	DiskWriteMBps float64 `json:"disk_write_mbps"`
 }
 
 // readSystemMetrics returns a single fresh capacity sample for the
@@ -313,18 +315,53 @@ func readSystemMetrics(prev systemNetBaseline) (SystemHostSample, systemNetBasel
 				}
 			}
 		}
-		next = systemNetBaseline{At: now, RxBytes: rx, TxBytes: tx}
+		next = systemNetBaseline{At: now, RxBytes: rx, TxBytes: tx, DiskRead: prev.DiskRead, DiskWrite: prev.DiskWrite}
+	}
+
+	// Disk I/O — gopsutil/disk.IOCounters returns a map of per-device
+	// counters. Sum across devices for a host-wide read/write rate.
+	if iom, err := gpdisk.IOCounters(); err == nil {
+		var rb, wb uint64
+		for _, ioc := range iom {
+			rb += ioc.ReadBytes
+			wb += ioc.WriteBytes
+		}
+		now := next.At
+		if now.IsZero() {
+			now = time.Now()
+		}
+		if !prev.At.IsZero() && (prev.DiskRead != 0 || prev.DiskWrite != 0) {
+			dt := now.Sub(prev.At).Seconds()
+			if dt > 0 {
+				smp.DiskReadMBps = float64(rb-prev.DiskRead) / (1024 * 1024) / dt
+				smp.DiskWriteMBps = float64(wb-prev.DiskWrite) / (1024 * 1024) / dt
+				if smp.DiskReadMBps < 0 {
+					smp.DiskReadMBps = 0
+				}
+				if smp.DiskWriteMBps < 0 {
+					smp.DiskWriteMBps = 0
+				}
+			}
+		}
+		next.DiskRead = rb
+		next.DiskWrite = wb
+		if next.At.IsZero() {
+			next.At = now
+		}
 	}
 
 	return smp, next
 }
 
-// systemNetBaseline holds the previous-tick network byte totals so the
-// next tick can compute a per-second delta. Embedded in SystemSampler.
+// systemNetBaseline holds the previous-tick network + disk-IO byte
+// totals so the next tick can compute a per-second delta. Embedded in
+// SystemSampler.
 type systemNetBaseline struct {
-	At      time.Time
-	RxBytes uint64
-	TxBytes uint64
+	At         time.Time
+	RxBytes    uint64
+	TxBytes    uint64
+	DiskRead   uint64
+	DiskWrite  uint64
 }
 
 // SystemSampler runs continuously from server start, capturing one host
@@ -391,13 +428,14 @@ func (s *SystemSampler) loop(ctx context.Context) {
 			smp, baseline = readSystemMetrics(baseline)
 			if _, err := s.db.Exec(
 				`INSERT INTO system_host_samples
-				(ts, cpu_pct, load_1m, load_5m, load_15m, mem_used_mb, mem_total_mb, swap_used_mb, disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				(ts, cpu_pct, load_1m, load_5m, load_15m, mem_used_mb, mem_total_mb, swap_used_mb, disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				smp.TS.UTC().Format(time.RFC3339Nano),
 				smp.CPUPct, smp.Load1m, smp.Load5m, smp.Load15m,
 				smp.MemUsedMB, smp.MemTotalMB, smp.SwapUsedMB,
 				smp.DiskUsedGB, smp.DiskTotalGB,
 				smp.NetRxMbps, smp.NetTxMbps,
+				smp.DiskReadMBps, smp.DiskWriteMBps,
 			); err != nil {
 				slog.Warn("system sample insert failed", "error", err)
 			}

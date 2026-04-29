@@ -151,173 +151,294 @@ function CumulativePanel({
       .slice(0, 10)
   }, [ordered, kind])
 
+  // Aggregates for the latest-run column + footer summary.
+  const totalRuns = ordered.length
+  const latest = ordered[ordered.length - 1]
+  const totalCost = cumulative[cumulative.length - 1] ?? 0
+  const totalTurns = ordered.reduce((s, r) => s + r.turns, 0)
+  const totalActions = ordered.reduce((s, r) => s + r.actions, 0)
+  const totalLines = ordered.reduce((s, r) => s + r.lines, 0)
+  const peakCpu = Math.max(0, ...ordered.map((r) => r.peak_cpu_pct ?? 0))
+  const peakRss = Math.max(0, ...ordered.map((r) => r.peak_rss_mb ?? 0))
+  const cpuPcts = ordered.map((r) => round2(r.avg_cpu_pct ?? 0))
+  const rssMbs = ordered.map((r) => round2(r.peak_rss_mb ?? 0))
+
+  // Latest-run token mix totals for the horizontal bar.
+  const latestMix = latest
+    ? {
+        input: latest.input_tokens,
+        output: latest.output_tokens,
+        cache_read: latest.cache_read_tokens,
+        cache_create: latest.cache_create_tokens,
+      }
+    : { input: 0, output: 0, cache_read: 0, cache_create: 0 }
+  const latestTotalTokens =
+    latestMix.input + latestMix.output + latestMix.cache_read + latestMix.cache_create
+  const latestCacheHitPct =
+    latestTotalTokens === 0
+      ? 0
+      : Math.round((latestMix.cache_read / latestTotalTokens) * 100)
+
   return (
-    <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-      <ChartCell label='Cost per run'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
-            series: [
-              {
-                type: 'line',
-                data: costs,
-                smooth: true,
-                color: '#10b981',
-                symbol: 'circle',
-                symbolSize: 8,
-                label: { show: true, position: 'top', formatter: (p: { value: number }) => '$' + p.value.toFixed(2), fontSize: 10, fontWeight: 'bold' },
-              },
-            ],
-          }}
-        />
-      </ChartCell>
+    <div className='border-border bg-card space-y-3 rounded-md border p-4'>
+      {/* Header */}
+      <div className='flex items-baseline gap-3'>
+        <div className='font-semibold text-sm'>
+          Run Stats — {totalRuns} run{totalRuns === 1 ? '' : 's'} (cumulative)
+        </div>
+        {latest ? (
+          <div className='text-muted-foreground text-xs'>
+            latest run #{latest.run_number} · {fmtRelTime(latest.started_at)} ·{' '}
+            {fmtDuration(latest.duration_ms)}
+          </div>
+        ) : null}
+      </div>
 
-      <ChartCell label='Cumulative cost'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
-            series: [
-              {
-                type: 'line',
-                data: cumulative,
-                smooth: true,
-                areaStyle: { opacity: 0.3 },
-                color: '#3b82f6',
-                symbol: 'circle',
-                symbolSize: 8,
-                label: { show: true, position: 'top', formatter: (p: { value: number }) => '$' + p.value.toFixed(2), fontSize: 10, fontWeight: 'bold' },
-              },
-            ],
-          }}
-        />
-      </ChartCell>
-
-      <ChartCell label='Token mix per run'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            legend: { data: ['input', 'output', 'cache_read', 'cache_create'] },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
-            series: [
-              { name: 'input', type: 'line', stack: 'tokens', areaStyle: {}, data: inputs },
-              { name: 'output', type: 'line', stack: 'tokens', areaStyle: {}, data: outputs },
-              { name: 'cache_read', type: 'line', stack: 'tokens', areaStyle: {}, data: cacheRead },
-              { name: 'cache_create', type: 'line', stack: 'tokens', areaStyle: {}, data: cacheCreate },
-            ],
-          }}
-        />
-      </ChartCell>
-
-      <ChartCell label='Cache-hit %'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', max: 100, name: '%', axisLabel: { formatter: '{value}%' } },
-            series: [
-              {
-                type: 'line',
-                smooth: true,
-                data: cacheHitPct,
-                color: '#8b5cf6',
-                symbol: 'circle',
-                symbolSize: 8,
-                label: { show: true, position: 'top', formatter: (p: { value: number }) => p.value.toFixed(1) + '%', fontSize: 10, fontWeight: 'bold' },
-              },
-            ],
-          }}
-        />
-      </ChartCell>
-
-      <ChartCell label='Duration per run'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value', name: 'seconds', axisLabel: { formatter: '{value}s' } },
-            series: [
-              {
-                type: 'line',
-                smooth: true,
-                data: durations,
-                color: '#f59e0b',
-                symbol: 'circle',
-                symbolSize: 8,
-                label: { show: true, position: 'top', formatter: (p: { value: number }) => p.value.toFixed(0) + 's', fontSize: 10, fontWeight: 'bold' },
-              },
-            ],
-          }}
-        />
-      </ChartCell>
-
-      <ChartCell label='Status breakdown'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'item' },
-            legend: { bottom: 0 },
-            series: [
-              {
-                type: 'pie',
-                radius: ['40%', '70%'],
-                data: Object.entries(statusCounts).map(([name, value]) => ({
-                  name,
-                  value,
-                })),
-                label: { color: 'inherit' },
-              },
-            ],
-          }}
-        />
-      </ChartCell>
-
-      {topTasks && topTasks.length > 0 ? (
-        <ChartCell label='Top 10 tasks by cost'>
-          <EChart
-            option={{
-              xAxis: { type: 'value', name: 'USD' },
-              yAxis: {
-                type: 'category',
-                data: topTasks.map((t) => t.id.slice(0, 12)),
-                inverse: true,
-              },
-              series: [
-                {
-                  type: 'bar',
-                  data: topTasks.map((t) => t.cost),
-                  color: '#22c55e',
-                },
-              ],
-            }}
-          />
-        </ChartCell>
+      {/* Token mix horizontal stacked bar (latest run) */}
+      {latestTotalTokens > 0 ? (
+        <div className='space-y-1'>
+          <div className='text-muted-foreground text-[10px] uppercase tracking-wider'>
+            Token mix (run #{latest!.run_number})
+          </div>
+          <TokenMixBar mix={latestMix} />
+        </div>
       ) : null}
 
-      <ChartCell label='Errors + Compactions per run'>
-        <EChart
-          option={{
-            tooltip: { trigger: 'axis' },
-            legend: { data: ['errors', 'compactions'] },
-            xAxis: { type: 'category', data: xs, boundaryGap: false, axisLabel: { interval: 0 } },
-            yAxis: { type: 'value' },
-            series: [
-              { name: 'errors', type: 'line', data: errors, color: '#ef4444' },
-              {
-                name: 'compactions',
-                type: 'line',
-                data: compactions,
-                color: '#0ea5e9',
-              },
-            ],
-          }}
-        />
-      </ChartCell>
+      {/* Cache-hit ring + sparkline rows side-by-side */}
+      <div className='flex items-stretch gap-4'>
+        <CacheHitRing pct={latestCacheHitPct} />
+        <div className='min-w-0 flex-1 space-y-1'>
+          <SparkRow label='cost' values={costs} latest={`$${totalCost.toFixed(2)}`} color='#10b981' />
+          <SparkRow label='turns' values={ordered.map((r) => r.turns)} latest={fmtCount(totalTurns)} color='#3b82f6' />
+          <SparkRow label='actions' values={ordered.map((r) => r.actions)} latest={fmtCount(totalActions)} color='#f59e0b' />
+          <SparkRow label='cpu%' values={cpuPcts} latest={`${Math.round(latest?.avg_cpu_pct ?? 0)}%`} color='#fb923c' />
+          <SparkRow label='rss mb' values={rssMbs} latest={fmtCount(latest?.peak_rss_mb ?? 0)} color='#a855f7' />
+        </div>
+      </div>
+
+      {/* Footer summary */}
+      <div className='border-border text-muted-foreground border-t pt-2 text-[11px]'>
+        Turns {fmtCount(totalTurns)} · Actions {fmtCount(totalActions)} · Lines{' '}
+        {fmtCount(totalLines)} · Peak CPU {Math.round(peakCpu)}% · Peak RSS{' '}
+        {Math.round(peakRss)} MB
+        {latest?.model ? ` · ${latest.model}` : ''}
+        {latest?.pricing_version ? ` · pricing ${latest.pricing_version}` : ''}
+      </div>
+
+      {/* Status donut + Top 10 (only when there's something to show) */}
+      {(Object.keys(statusCounts).length > 1 || (topTasks && topTasks.length > 0)) ? (
+        <div className='grid grid-cols-1 gap-3 pt-2 lg:grid-cols-2'>
+          {Object.keys(statusCounts).length > 1 ? (
+            <ChartCell label='Status breakdown'>
+              <EChart
+                option={{
+                  tooltip: { trigger: 'item' },
+                  legend: { bottom: 0 },
+                  series: [
+                    {
+                      type: 'pie',
+                      radius: ['40%', '70%'],
+                      data: Object.entries(statusCounts).map(([name, value]) => ({
+                        name,
+                        value,
+                      })),
+                      label: { color: 'inherit' },
+                    },
+                  ],
+                }}
+                height={200}
+              />
+            </ChartCell>
+          ) : null}
+
+          {topTasks && topTasks.length > 0 ? (
+            <ChartCell label='Top 10 tasks by cost'>
+              <EChart
+                option={{
+                  xAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
+                  yAxis: {
+                    type: 'category',
+                    data: topTasks.map((t) => t.id.slice(0, 12)),
+                    inverse: true,
+                  },
+                  series: [
+                    {
+                      type: 'bar',
+                      data: topTasks.map((t) => t.cost),
+                      color: '#22c55e',
+                      label: { show: true, position: 'right', formatter: (p: { value: number }) => '$' + p.value.toFixed(2) },
+                    },
+                  ],
+                }}
+                height={200}
+              />
+            </ChartCell>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
+}
+
+// Inline-SVG sparkline row — label / line / latest value. Same DNA as
+// Portal A's run-stats.js. Pure SVG, no library, scales with container.
+function SparkRow({
+  label,
+  values,
+  latest,
+  color,
+}: {
+  label: string
+  values: number[]
+  latest: string
+  color: string
+}) {
+  if (!values.length) {
+    return (
+      <div className='flex items-center gap-3 text-xs'>
+        <span className='text-muted-foreground w-16 shrink-0'>{label}</span>
+        <span className='text-muted-foreground flex-1'>—</span>
+        <span className='font-mono'>—</span>
+      </div>
+    )
+  }
+  const W = 600
+  const H = 28
+  const padX = 4
+  const padY = 4
+  const minV = Math.min(...values)
+  let maxV = Math.max(...values)
+  if (maxV === minV) maxV = minV + 1
+  const stepX = values.length > 1 ? (W - padX * 2) / (values.length - 1) : 0
+  const pts = values.map((v, i) => {
+    const x = padX + i * stepX
+    const y = H - padY - ((v - minV) / (maxV - minV)) * (H - padY * 2)
+    return [x, y] as [number, number]
+  })
+  const path = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  return (
+    <div className='flex items-center gap-3 text-xs'>
+      <span className='text-muted-foreground w-16 shrink-0'>{label}</span>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio='none'
+        className='block h-7 flex-1'
+        aria-label={label}
+      >
+        <polyline
+          points={path}
+          fill='none'
+          stroke={color}
+          strokeWidth={1.5}
+          vectorEffect='non-scaling-stroke'
+        />
+        {pts.length === 1 ? (
+          <circle cx={pts[0][0]} cy={pts[0][1]} r={2.5} fill={color} />
+        ) : (
+          <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r={2.5} fill={color} />
+        )}
+      </svg>
+      <span className='font-mono w-20 shrink-0 text-right tabular-nums'>{latest}</span>
+    </div>
+  )
+}
+
+// Token mix horizontal stacked bar — input / output / cache-read /
+// cache-create as flexbox segments sized by token count, label inside
+// each segment when wide enough.
+function TokenMixBar({
+  mix,
+}: {
+  mix: { input: number; output: number; cache_read: number; cache_create: number }
+}) {
+  const total = mix.input + mix.output + mix.cache_read + mix.cache_create
+  if (total === 0) return null
+  const segs = [
+    { label: 'input', n: mix.input, color: '#fbbf24' },
+    { label: 'output', n: mix.output, color: '#3b82f6' },
+    { label: 'cache-read', n: mix.cache_read, color: '#10b981' },
+    { label: 'cache-create', n: mix.cache_create, color: '#dc2626' },
+  ].filter((s) => s.n > 0)
+  return (
+    <div className='flex h-7 w-full overflow-hidden rounded'>
+      {segs.map((s) => {
+        const pct = (s.n / total) * 100
+        return (
+          <div
+            key={s.label}
+            className='flex items-center justify-center text-[10px] font-medium text-black/80'
+            style={{ width: `${pct}%`, backgroundColor: s.color }}
+            title={`${s.label}: ${s.n.toLocaleString()}`}
+          >
+            {pct >= 8 ? `${s.label} ${fmtTokens(s.n)}` : ''}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Cache-hit ring — small donut (60×60) with the % rendered in the
+// middle. Pure SVG so it scales with the container without ECharts.
+function CacheHitRing({ pct }: { pct: number }) {
+  const R = 22
+  const C = 28
+  const circumference = 2 * Math.PI * R
+  const dash = (Math.max(0, Math.min(100, pct)) / 100) * circumference
+  return (
+    <div className='flex w-20 shrink-0 flex-col items-center justify-center gap-0.5'>
+      <svg viewBox='0 0 56 56' className='h-14 w-14' aria-label='cache hit'>
+        <circle
+          cx={C}
+          cy={C}
+          r={R}
+          fill='none'
+          stroke='currentColor'
+          strokeOpacity={0.15}
+          strokeWidth={6}
+        />
+        <circle
+          cx={C}
+          cy={C}
+          r={R}
+          fill='none'
+          stroke='#3b82f6'
+          strokeWidth={6}
+          strokeDasharray={`${dash} ${circumference}`}
+          strokeLinecap='round'
+          transform={`rotate(-90 ${C} ${C})`}
+        />
+        <text
+          x={C}
+          y={C + 4}
+          textAnchor='middle'
+          fontSize='13'
+          fontWeight='bold'
+          fill='currentColor'
+        >
+          {pct}%
+        </text>
+      </svg>
+      <span className='text-muted-foreground text-[9px] uppercase tracking-wider'>
+        cache hit
+      </span>
+    </div>
+  )
+}
+
+function fmtRelTime(iso: string): string {
+  if (!iso) return '—'
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return '—'
+  const diff = Date.now() - t
+  const s = Math.floor(diff / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
 }
 
 // ── Per-run ───────────────────────────────────────────────────────────
@@ -795,6 +916,33 @@ function SystemPanel() {
                     name: 'tx',
                     type: 'line',
                     data: samples.map((s) => [s.ts, round2(s.net_tx_mbps)]),
+                  },
+                ],
+              }}
+            />
+          </ChartCell>
+
+          <ChartCell label='Disk I/O (MB/s)'>
+            <EChart
+              option={{
+                tooltip: { trigger: 'axis' },
+                legend: { data: ['read', 'write'] },
+                xAxis: { type: 'time' },
+                yAxis: { type: 'value', name: 'MB/s' },
+                series: [
+                  {
+                    name: 'read',
+                    type: 'line',
+                    smooth: true,
+                    data: samples.map((s) => [s.ts, round2(s.disk_read_mbps ?? 0)]),
+                    color: '#06b6d4',
+                  },
+                  {
+                    name: 'write',
+                    type: 'line',
+                    smooth: true,
+                    data: samples.map((s) => [s.ts, round2(s.disk_write_mbps ?? 0)]),
+                    color: '#f97316',
                   },
                 ],
               }}
