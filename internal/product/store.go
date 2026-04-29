@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // Product is a top-level organizational entity: Peer → Product → Manifest → Task.
@@ -39,6 +41,11 @@ type Product struct {
 // Store manages product persistence.
 type Store struct {
 	db *sql.DB
+	// rels is the unified relationships SCD-2 store. Wired post-init via
+	// SetRelationshipsBackend so the package import direction (relationships
+	// has no internal deps) stays one-way. All dependency reads + writes
+	// route through this; the legacy product_dependencies table is dormant.
+	rels *relationships.Store
 	// onTerminalTransition fires AFTER a successful Update that moved
 	// the product from a non-terminal status (draft/open) into a
 	// terminal one (closed/archive). Wired in node.go to
@@ -65,7 +72,11 @@ func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, productID stri
 	s.onDepRemoved = fn
 }
 
-// NewStore creates a product store.
+// NewStore creates a product store. The dependency layer auto-wires a
+// default relationships backend against the same DB handle so tests
+// (and any caller that doesn't explicitly call SetRelationshipsBackend)
+// see a working dep API. The node-level wiring overrides this with the
+// shared singleton store when the production graph spins up.
 func NewStore(db *sql.DB) (*Store, error) {
 	s := &Store{db: db}
 	if err := s.init(); err != nil {
@@ -74,6 +85,11 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := s.initDependenciesSchema(); err != nil {
 		return nil, err
 	}
+	rels, err := relationships.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("init relationships backend: %w", err)
+	}
+	s.SetRelationshipsBackend(rels)
 	s.logSchemaReady()
 	return s, nil
 }
@@ -222,25 +238,43 @@ func (s *Store) Delete(id string) error {
 }
 
 // EnrichRecursiveCosts populates totals on a single product by walking
-// descendant sub-products via product_dependencies and summing their
-// manifests → tasks → task_runs. Used by the single-product GET so a
-// product whose tasks live under sub-product manifests still surfaces
-// the cumulative cost on its dashboard. Direct-only EnrichWithCosts
-// stays in place for the list endpoints (cheaper, batched).
+// descendant sub-products via the unified relationships store and
+// summing their manifests → tasks → task_runs. Used by the single-
+// product GET so a product whose tasks live under sub-product
+// manifests still surfaces the cumulative cost on its dashboard.
+// Direct-only EnrichWithCosts stays in place for the list endpoints
+// (cheaper, batched).
 func (s *Store) EnrichRecursiveCosts(p *Product) {
-	if p == nil {
+	if p == nil || s.rels == nil {
 		return
 	}
-	// Edge direction in product_dependencies: parent.product_id →
-	// child.depends_on_product_id (umbrella has rows with product_id=
-	// itself for each sub-product). Walk that to collect descendants.
-	row := s.db.QueryRow(`
-		WITH RECURSIVE descendants(id) AS (
-			SELECT ?
-			UNION ALL
-			SELECT pd.depends_on_product_id FROM product_dependencies pd
-			INNER JOIN descendants d ON pd.product_id = d.id
-		)
+	ctx := context.Background()
+	// Walk follows EdgeDependsOn outwards. For products this is
+	// "depender → dependee", which in the umbrella convention means
+	// "umbrella → sub-product" — exactly the descendant set we want
+	// to roll costs up from. Self-row included at depth 0.
+	rows, err := s.rels.Walk(ctx, p.ID, relationships.KindProduct,
+		[]string{relationships.EdgeDependsOn}, relationships.MaxWalkDepth)
+	if err != nil {
+		return
+	}
+	descendantIDs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Kind != relationships.KindProduct {
+			continue
+		}
+		descendantIDs = append(descendantIDs, r.ID)
+	}
+	if len(descendantIDs) == 0 {
+		return
+	}
+	placeholders := strings.Repeat("?,", len(descendantIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(descendantIDs))
+	for i, id := range descendantIDs {
+		args[i] = id
+	}
+	row := s.db.QueryRow(fmt.Sprintf(`
 		SELECT
 			COUNT(DISTINCT m.id),
 			COUNT(DISTINCT t.id),
@@ -248,11 +282,11 @@ func (s *Store) EnrichRecursiveCosts(p *Product) {
 			COALESCE(SUM(tr.cost_usd), 0),
 			COALESCE(SUM(tr.actions), 0),
 			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
-		FROM descendants d
-		LEFT JOIN manifests m ON m.project_id = d.id AND m.deleted_at = ''
+		FROM manifests m
 		LEFT JOIN tasks t ON t.manifest_id = m.id AND t.deleted_at = ''
-		LEFT JOIN task_runs tr ON tr.task_id = t.id`,
-		p.ID,
+		LEFT JOIN task_runs tr ON tr.task_id = t.id
+		WHERE m.project_id IN (%s) AND m.deleted_at = ''`, placeholders),
+		args...,
 	)
 	var manifests, tasks, turns, actions, tokens int
 	var cost float64

@@ -148,25 +148,29 @@ func TestSetDependency_TransitiveCycleRejected(t *testing.T) {
 	}
 }
 
-// TestSetDependency_SCDHistoryAccumulates — every SetDependency
-// call produces one SCD row. Previous active row gets valid_to
-// stamped; new row becomes active. ListDepHistory returns them
+// TestSetDependency_SCDHistoryAccumulates — every non-clear
+// SetDependency call lands one row in the unified relationships SCD-2
+// store; the matching close (when the dep changes or is cleared)
+// stamps valid_to on the prior row. ListDepHistory returns the rows
 // newest-first.
+//
+// Post-PR/M3 the "cleared" sentinel row that the legacy
+// task_dependency table emitted is no longer present — the
+// relationships store represents "no current dep" by absence of any
+// row with valid_to=''. The audit trail still tells the full story:
+// two closed rows (P1 → P2) ordered newest-first.
 func TestSetDependency_SCDHistoryAccumulates(t *testing.T) {
 	s := openRepoTestStore(t)
 	parent1 := mustCreateTask(t, s, "P1", "")
 	parent2 := mustCreateTask(t, s, "P2", "")
 	child := mustCreateTask(t, s, "child", "")
 
-	// 1) set dep to P1
 	if err := s.SetDependency(child.ID, parent1.ID); err != nil {
 		t.Fatalf("set to P1: %v", err)
 	}
-	// 2) change dep to P2
 	if err := s.SetDependency(child.ID, parent2.ID); err != nil {
 		t.Fatalf("change to P2: %v", err)
 	}
-	// 3) clear dep
 	if err := s.SetDependency(child.ID, ""); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -175,25 +179,22 @@ func TestSetDependency_SCDHistoryAccumulates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDepHistory: %v", err)
 	}
-	if len(hist) != 3 {
-		t.Fatalf("history rows = %d, want 3 (one per set call)", len(hist))
+	if len(hist) != 2 {
+		t.Fatalf("history rows = %d, want 2 (P1 + P2 closed; clear is absence)", len(hist))
 	}
-	// Newest first: cleared (depends_on=''), then P2, then P1
-	if hist[0].DependsOn != "" || hist[0].ValidTo != "" {
-		t.Errorf("newest row = %+v, want cleared dep with valid_to=''", hist[0])
+	// Newest first: P2 closed, then P1 closed. Both must have valid_to
+	// stamped (no current dep — clear closed P2's row).
+	if hist[0].DependsOn != parent2.ID {
+		t.Errorf("newest row depends_on = %q, want %q", hist[0].DependsOn, parent2.ID)
 	}
-	if hist[1].DependsOn != parent2.ID {
-		t.Errorf("second row depends_on = %q, want %q", hist[1].DependsOn, parent2.ID)
+	if hist[1].DependsOn != parent1.ID {
+		t.Errorf("second row depends_on = %q, want %q", hist[1].DependsOn, parent1.ID)
 	}
-	if hist[2].DependsOn != parent1.ID {
-		t.Errorf("third row depends_on = %q, want %q", hist[2].DependsOn, parent1.ID)
+	if hist[0].ValidTo == "" {
+		t.Errorf("P2 row valid_to = empty; clear should have stamped it")
 	}
-	// Older rows must have valid_to stamped (no longer active).
 	if hist[1].ValidTo == "" {
-		t.Errorf("second row valid_to = empty; should be stamped when the next revision was written")
-	}
-	if hist[2].ValidTo == "" {
-		t.Errorf("third row valid_to = empty; should be stamped")
+		t.Errorf("P1 row valid_to = empty; superseded by P2 should have stamped it")
 	}
 }
 

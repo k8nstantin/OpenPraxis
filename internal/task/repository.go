@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // ManifestReadinessChecker is the hook task.Store consults to decide
@@ -440,22 +442,54 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 	return err
 }
 
-// writeSCDDepRow closes the currently-active row (if any) and inserts
-// a new active row. Uses two statements in sequence — SQLite
-// transactions would add correctness if the two statements could race
-// against concurrent writers for the same task_id, but SetDependency
-// is operator-initiated and per-task serialization is implicit.
+// writeSCDDepRow lands a new dependency revision in the unified
+// relationships SCD-2 store. Direction: src=task (depender),
+// dst=parent (dependee).
+//
+//   - dependsOn=="" represents "dep cleared" — the prior current edge
+//     (if any) is closed via Remove and no new edge is opened.
+//   - dependsOn!="" closes any prior current edge for this task and
+//     opens a fresh one via Create. relationships.Create runs the
+//     close + insert in one transaction so audit history is intact.
+//
+// The legacy task_dependency table is no longer written to. The
+// migration already copied historical rows into relationships, and
+// every new revision lands here directly.
 func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string) error {
-	if _, err := s.db.Exec(
-		`UPDATE task_dependency SET valid_to = ? WHERE task_id = ? AND valid_to = ''`,
-		now, taskID); err != nil {
-		return fmt.Errorf("close prior dep row: %w", err)
+	if s.rels == nil {
+		return fmt.Errorf("task_dependency: relationships backend not wired")
 	}
-	if _, err := s.db.Exec(
-		`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
-		 VALUES (?, ?, ?, '', ?, ?)`,
-		taskID, dependsOn, now, changedBy, reason); err != nil {
-		return fmt.Errorf("insert new dep row: %w", err)
+	ctx := context.Background()
+	// Close any prior current edge for this task. We have to enumerate
+	// because relationships keys edges on (src, dst, kind, valid_from)
+	// not just src — a task can have at most one current parent dep at
+	// a time but the prior dep could have been a different parent.
+	prior, err := s.rels.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
+	if err != nil {
+		return fmt.Errorf("read prior dep: %w", err)
+	}
+	for _, p := range prior {
+		if p.DstKind != relationships.KindTask {
+			continue
+		}
+		if err := s.rels.Remove(ctx, p.SrcID, p.DstID,
+			relationships.EdgeDependsOn, changedBy, "superseded by SetDependency"); err != nil {
+			return fmt.Errorf("close prior dep edge: %w", err)
+		}
+	}
+	if dependsOn == "" {
+		return nil // clear path — no new edge opened
+	}
+	if err := s.rels.Create(ctx, relationships.Edge{
+		SrcKind:   relationships.KindTask,
+		SrcID:     taskID,
+		DstKind:   relationships.KindTask,
+		DstID:     dependsOn,
+		Kind:      relationships.EdgeDependsOn,
+		CreatedBy: changedBy,
+		Reason:    reason,
+	}); err != nil {
+		return fmt.Errorf("insert new dep edge: %w", err)
 	}
 	return nil
 }
@@ -474,14 +508,28 @@ type DepHistoryEntry struct {
 }
 
 // ListDepHistory returns every dep revision for a task, newest
-// valid_from first. limit<=0 defaults to 50.
+// valid_from first. limit<=0 defaults to 50. Reads the unified
+// relationships table — all task→task EdgeDependsOn rows where
+// src_id = taskID, current + closed history together.
 func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if s.rels == nil {
+		// Legacy tests that don't wire the relationships backend get an
+		// empty history rather than an error so the dep-related test
+		// suite that doesn't assert history still runs cleanly.
+		return nil, nil
+	}
+	// Pull every revision (current + closed) ordered by valid_from DESC
+	// directly from the relationships table. The unified store doesn't
+	// expose a "history for src=any dst" reader, so we issue a custom
+	// query against the same DB handle.
 	rows, err := s.db.Query(
-		`SELECT id, task_id, depends_on, valid_from, valid_to, changed_by, reason
-		 FROM task_dependency WHERE task_id = ? ORDER BY valid_from DESC, id DESC LIMIT ?`,
+		`SELECT src_id, dst_id, valid_from, valid_to, created_by, reason
+		 FROM relationships
+		 WHERE src_id = ? AND src_kind = 'task' AND kind = 'depends_on'
+		 ORDER BY valid_from DESC LIMIT ?`,
 		taskID, limit)
 	if err != nil {
 		return nil, err
@@ -490,7 +538,7 @@ func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, err
 	var out []DepHistoryEntry
 	for rows.Next() {
 		var e DepHistoryEntry
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.DependsOn,
+		if err := rows.Scan(&e.TaskID, &e.DependsOn,
 			&e.ValidFrom, &e.ValidTo, &e.ChangedBy, &e.Reason); err != nil {
 			return nil, err
 		}
@@ -499,18 +547,24 @@ func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, err
 	return out, rows.Err()
 }
 
-// BackfillTaskDepSCD seeds task_dependency for tasks that had a
-// non-empty tasks.depends_on cache but no SCD row yet. Runs on
-// startup; idempotent via the "already has an active row" check.
-// Legacy rows land with valid_from = the task's updated_at so the
-// history doesn't all collapse to "now".
+// BackfillTaskDepSCD seeds the unified relationships store from the
+// legacy tasks.depends_on cache column for tasks that have a parent
+// dep but no current relationships row yet. Idempotent — the Get
+// probe + composite PK keep re-runs at zero rows. Legacy rows land
+// with valid_from = the task's updated_at so the history doesn't all
+// collapse to "now".
+//
+// Called on store init; nil rels backend is treated as "skip" (test
+// stores that don't wire the relationships backend keep working).
 func (s *Store) BackfillTaskDepSCD() (int, error) {
-	rows, err := s.db.Query(`
+	if s.rels == nil {
+		return 0, nil
+	}
+	ctx := context.Background()
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.id, t.depends_on, t.updated_at
 		FROM tasks t
-		WHERE t.depends_on != '' AND t.deleted_at = ''
-		  AND NOT EXISTS (SELECT 1 FROM task_dependency d
-		                  WHERE d.task_id = t.id AND d.valid_to = '')`)
+		WHERE t.depends_on != '' AND t.deleted_at = ''`)
 	if err != nil {
 		return 0, err
 	}
@@ -529,10 +583,25 @@ func (s *Store) BackfillTaskDepSCD() (int, error) {
 	}
 	n := 0
 	for _, p := range pending {
-		if _, err := s.db.Exec(
-			`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
-			 VALUES (?, ?, ?, '', 'scd-backfill', 'seeded from legacy tasks.depends_on')`,
-			p.id, p.dep, p.when); err == nil {
+		if p.id == p.dep {
+			continue
+		}
+		if _, found, err := s.rels.Get(ctx, p.id, p.dep, relationships.EdgeDependsOn); err != nil {
+			return n, err
+		} else if found {
+			continue
+		}
+		if err := s.rels.BackfillRow(ctx, relationships.Edge{
+			SrcKind:   relationships.KindTask,
+			SrcID:     p.id,
+			DstKind:   relationships.KindTask,
+			DstID:     p.dep,
+			Kind:      relationships.EdgeDependsOn,
+			ValidFrom: p.when,
+			ValidTo:   "",
+			CreatedBy: "scd-backfill",
+			Reason:    "seeded from legacy tasks.depends_on column",
+		}); err == nil {
 			n++
 		}
 	}

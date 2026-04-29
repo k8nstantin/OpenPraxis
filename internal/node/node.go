@@ -274,6 +274,31 @@ func New(cfg *config.Config) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init relationships store: %w", err)
 	}
+	// PR/M2 + PR/M3 — copy every row out of the three legacy dependency
+	// tables (product_dependencies / manifest_dependencies /
+	// task_dependency) into the unified relationships SCD-2 table.
+	// Idempotent — re-running on a migrated DB inserts zero rows. The
+	// legacy tables are NOT dropped; they sit dormant as historical
+	// safety. All read + write paths in product / manifest / task have
+	// been cut over to read from relationships.
+	if _, err := relationshipsStore.MigrateLegacyDeps(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate legacy deps to relationships: %w", err)
+	}
+	// Wire the relationships store into the legacy dep stores so their
+	// Add/Remove/List methods read + write the unified table while
+	// keeping their existing call signatures. Callers across web/mcp
+	// don't need to change.
+	productStore.SetRelationshipsBackend(relationshipsStore)
+	manifestStore.SetRelationshipsBackend(relationshipsStore)
+	taskStore.SetRelationshipsBackend(relationshipsStore)
+	// Re-fire the task SCD backfill now that the relationships backend
+	// is wired — task.NewStore ran the backfill before the wiring,
+	// which is a no-op when rels is nil. Pulls any tasks.depends_on
+	// cache rows that didn't make it into task_dependency (and thus
+	// into relationships via MigrateLegacyDeps) on prior boots.
+	if _, err := taskStore.BackfillTaskDepSCD(); err != nil {
+		return nil, fmt.Errorf("backfill task dep SCD: %w", err)
+	}
 
 	// Central SCD-2 schedules table. Migration is idempotent
 	// (CREATE TABLE / INDEX IF NOT EXISTS). Same DB handle as every

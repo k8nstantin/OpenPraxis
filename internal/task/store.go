@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // Task represents scheduled work against a manifest.
@@ -104,11 +106,35 @@ type Store struct {
 	productChecker  ProductReadinessChecker  // nil = skip product-level satisfaction check
 	reviewWriter    ReviewWriter             // nil = reject/approve return ErrReviewNotAvailable
 	reviewReader    ReviewReader             // nil = TaskReviewStatus returns empty without error
+	// rels is the unified relationships SCD-2 store. After PR/M3 every
+	// task→task dependency mutation lands here AND on the legacy
+	// tasks.depends_on cache column (out of scope for this PR — kept
+	// because the scheduler + runner read it directly). The legacy
+	// task_dependency SCD audit table is dormant.
+	rels *relationships.Store
 }
 
-// NewStore creates a task store.
+// SetRelationshipsBackend wires the unified relationships SCD-2 store
+// for task→task dependency edges. Call once at startup before any
+// SetDependency mutation runs.
+func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
+	s.rels = r
+}
+
+// NewStore creates a task store. Auto-wires a default relationships
+// backend against the same DB handle so tests + any caller that
+// doesn't explicitly call SetRelationshipsBackend get a working dep
+// API. node-level wiring overrides this with the shared singleton.
 func NewStore(db *sql.DB) (*Store, error) {
 	s := &Store{db: db}
+	// Init the relationships backend BEFORE init() so the
+	// BackfillTaskDepSCD call inside init() can see the unified store
+	// and seed it from the legacy tasks.depends_on cache column.
+	rels, err := relationships.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("init relationships backend: %w", err)
+	}
+	s.rels = rels
 	if err := s.init(); err != nil {
 		return nil, err
 	}

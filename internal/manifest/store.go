@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // Manifest is a detailed development spec document.
@@ -45,6 +47,11 @@ type Manifest struct {
 // Store manages manifest persistence.
 type Store struct {
 	db *sql.DB
+	// rels is the unified relationships SCD-2 store. Wired post-init via
+	// SetRelationshipsBackend so the package import direction (relationships
+	// has no internal deps) stays one-way. All dependency reads + writes
+	// route through this; the legacy manifest_dependencies table is dormant.
+	rels *relationships.Store
 	// onTerminalTransition fires AFTER a successful Update that moved
 	// the manifest from a non-terminal status (draft/open) into a
 	// terminal one (closed/archive). Wired in node.go to
@@ -96,12 +103,22 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := s.initDependenciesSchema(); err != nil {
 		return nil, err
 	}
-	// One-shot backfill of the legacy comma-separated depends_on column
-	// into the new join table. Idempotent via PRIMARY KEY dedup; safe to
-	// run every boot until the column is retired in a follow-up PR.
-	if _, err := s.BackfillLegacyDependsOn(context.Background()); err != nil {
-		return nil, fmt.Errorf("backfill manifest dependencies: %w", err)
+	// Auto-wire a default relationships backend against the same DB
+	// handle so tests + any caller that doesn't explicitly call
+	// SetRelationshipsBackend get a working dep API. node-level wiring
+	// overrides this with the shared singleton.
+	rels, err := relationships.New(s.db)
+	if err != nil {
+		return nil, fmt.Errorf("init relationships backend: %w", err)
 	}
+	s.rels = rels
+	// PR/M3 (2026-04-28): the legacy `manifests.depends_on` →
+	// `manifest_dependencies` backfill is no longer fired here. All rows
+	// have long since landed in manifest_dependencies on prior boots and
+	// from there into the unified relationships store via
+	// relationships.MigrateLegacyDeps (called from node.go). The
+	// BackfillLegacyDependsOn function is kept on the type for forensic /
+	// emergency reseed scenarios but is not part of the boot path.
 	return s, nil
 }
 
