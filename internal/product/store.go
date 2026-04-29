@@ -71,6 +71,13 @@ func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, productID stri
 	s.onDepRemoved = fn
 }
 
+// SetRelationshipsBackend wires the unified relationships SCD-2 store
+// for product dependency / ownership edges. Call once at startup before
+// any mutation runs.
+func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
+	s.rels = r
+}
+
 // NewStore creates a product store. The dependency layer auto-wires a
 // default relationships backend against the same DB handle so tests
 // (and any caller that doesn't explicitly call SetRelationshipsBackend)
@@ -88,7 +95,7 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init relationships backend: %w", err)
 	}
-	s.SetRelationshipsBackend(rels)
+	s.rels = rels
 	s.logSchemaReady()
 	return s, nil
 }

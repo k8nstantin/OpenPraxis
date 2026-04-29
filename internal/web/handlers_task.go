@@ -1470,7 +1470,6 @@ func resolveTaskID(n *node.Node, idOrMarker string) (string, string) {
 // {id, marker, title, status} contract products + manifests use.
 type taskDepRow struct {
 	ID     string `json:"id"`
-	Marker string `json:"marker"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
 }
@@ -1501,7 +1500,7 @@ func apiTaskDepList(n *node.Node) http.HandlerFunc {
 				dep, _ := n.Tasks.Get(t.DependsOn)
 				if dep != nil {
 					deps = append(deps, taskDepRow{
-						ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status,
+						ID: dep.ID, Title: dep.Title, Status: dep.Status,
 					})
 				}
 			}
@@ -1572,7 +1571,7 @@ func apiTaskDepAdd(n *node.Node) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, taskDepRow{ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status})
+		writeJSON(w, taskDepRow{ID: dep.ID, Title: dep.Title, Status: dep.Status})
 	}
 }
 

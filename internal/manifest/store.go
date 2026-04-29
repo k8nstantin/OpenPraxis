@@ -87,6 +87,13 @@ func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, manifestID str
 	s.onDepRemoved = fn
 }
 
+// SetRelationshipsBackend wires the unified relationships SCD-2 store
+// for manifest dependency / ownership edges. Call once at startup before
+// any mutation runs.
+func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
+	s.rels = r
+}
+
 // NewStore creates a manifest store.
 func NewStore(db *sql.DB) (*Store, error) {
 	s := &Store{db: db}
