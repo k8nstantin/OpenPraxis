@@ -9,6 +9,7 @@ import { CommentsTab } from './tabs/comments'
 import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
+import { LiveOutputTab } from './tabs/live-output'
 import { MainTab } from './tabs/main'
 import { ScheduleTab } from './tabs/schedule'
 import { StatsTab } from './tabs/stats'
@@ -109,6 +110,9 @@ export function EntityDetailPane({
               <TabsTrigger value='dependencies'>Dependencies</TabsTrigger>
               <TabsTrigger value='dag'>DAG</TabsTrigger>
               <TabsTrigger value='schedule'>Schedule</TabsTrigger>
+              {kind === 'task' && (
+                <TabsTrigger value='live_output'>Live Output</TabsTrigger>
+              )}
               <TabsTrigger value='stats'>Stats</TabsTrigger>
             </TabsList>
 
@@ -130,6 +134,11 @@ export function EntityDetailPane({
             <TabsContent value='schedule'>
               <ScheduleTab kind={kind} entityId={entityId} />
             </TabsContent>
+            {kind === 'task' && (
+              <TabsContent value='live_output'>
+                <LiveOutputTab entityId={entityId} />
+              </TabsContent>
+            )}
             <TabsContent value='stats'>
               <StatsTab kind={kind} entityId={entityId} />
             </TabsContent>

@@ -867,3 +867,58 @@ export function useCreateAndLinkUpstreamManifest(
     },
   })
 }
+
+// ── Task live output ─────────────────────────────────────────────────
+//
+// `/api/tasks/{id}/output` returns `{lines: string[], running: bool}`
+// from the runner's 200-line ring buffer. Polled while running, then
+// settles. When the task is no longer running, the last completed run's
+// full `output` blob is the source of truth — fetched via the runs hook.
+
+export interface TaskOutputResponse {
+  lines: string[]
+  running: boolean
+}
+
+export function useTaskOutput(taskId: string | undefined) {
+  return useQuery({
+    queryKey: ['task', taskId ?? '', 'output'],
+    queryFn: () => fetchJSON<TaskOutputResponse>(`/api/tasks/${taskId}/output`),
+    enabled: !!taskId,
+    // Poll while running; once `running:false` the query stops refetching
+    // automatically (refetchInterval reads the latest data).
+    refetchInterval: (q) => (q.state.data?.running ? 750 : false),
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+  })
+}
+
+export interface TaskRunRow {
+  id: number
+  task_id: string
+  run_number: number
+  output: string
+  status: string
+  actions: number
+  lines: number
+  cost_usd: number
+  turns: number
+  model: string
+  started_at: string
+  completed_at: string
+}
+
+// Most-recent run for this task — used to source the full output blob
+// once the runner ring buffer has been flushed (i.e. task no longer
+// running). The list endpoint returns runs ordered DESC by run_number.
+export function useTaskLatestRun(taskId: string | undefined) {
+  return useQuery({
+    queryKey: ['task', taskId ?? '', 'latest-run'],
+    queryFn: async () => {
+      const rows = await fetchJSON<TaskRunRow[]>(`/api/tasks/${taskId}/runs`)
+      return rows[0] ?? null
+    },
+    enabled: !!taskId,
+    staleTime: 5 * 1000,
+  })
+}
