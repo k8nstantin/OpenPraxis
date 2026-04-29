@@ -68,13 +68,155 @@ func (s *Store) MigrateLegacyDeps(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("migrate task deps: %w", err)
 	}
-	total := productCount + manifestCount + taskCount
+	// Ownership FKs — manifest.project_id (product owns manifest) and
+	// task.manifest_id (manifest owns task). Same idempotent shape; the
+	// columns stay live on each entity for now (dormant), reads route
+	// through ListIncoming/ListOutgoing(EdgeOwns) going forward.
+	ownsManifestCount, err := s.migrateManifestOwnership(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("migrate manifest ownership: %w", err)
+	}
+	ownsTaskCount, err := s.migrateTaskOwnership(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("migrate task ownership: %w", err)
+	}
+	total := productCount + manifestCount + taskCount + ownsManifestCount + ownsTaskCount
 	if total > 0 {
-		slog.Info("relationships: backfilled legacy dep rows",
-			"product", productCount, "manifest", manifestCount,
-			"task", taskCount, "total", total)
+		slog.Info("relationships: backfilled legacy rows",
+			"product_deps", productCount, "manifest_deps", manifestCount,
+			"task_deps", taskCount, "owns_manifest", ownsManifestCount,
+			"owns_task", ownsTaskCount, "total", total)
 	}
 	return total, nil
+}
+
+// migrateManifestOwnership copies every `manifests.project_id != ''`
+// row into a relationships EdgeOwns edge with src=product, dst=manifest.
+// `manifests.created_at` is RFC3339 (TEXT), unlike the integer unix
+// timestamps on the legacy dep tables — parse it directly.
+func (s *Store) migrateManifestOwnership(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, project_id, created_at FROM manifests
+		 WHERE project_id IS NOT NULL AND project_id != ''
+		   AND deleted_at = ''`)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer rows.Close()
+
+	type legacy struct {
+		manifestID, productID, createdAt string
+	}
+	var pending []legacy
+	for rows.Next() {
+		var l legacy
+		if err := rows.Scan(&l.manifestID, &l.productID, &l.createdAt); err != nil {
+			return 0, err
+		}
+		pending = append(pending, l)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	inserted := 0
+	for _, l := range pending {
+		if l.manifestID == "" || l.productID == "" {
+			continue
+		}
+		// Skip if already migrated.
+		if _, found, err := s.Get(ctx, l.productID, l.manifestID, EdgeOwns); err != nil {
+			return inserted, err
+		} else if found {
+			continue
+		}
+		validFrom := l.createdAt
+		if validFrom == "" {
+			validFrom = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		e := Edge{
+			SrcKind:   KindProduct,
+			SrcID:     l.productID,
+			DstKind:   KindManifest,
+			DstID:     l.manifestID,
+			Kind:      EdgeOwns,
+			ValidFrom: validFrom,
+			ValidTo:   "",
+			CreatedBy: "system",
+			Reason:    "backfill from manifests.project_id",
+		}
+		if err := s.BackfillRow(ctx, e); err != nil {
+			return inserted, fmt.Errorf("manifest ownership %s→%s: %w", l.productID, l.manifestID, err)
+		}
+		inserted++
+	}
+	return inserted, nil
+}
+
+// migrateTaskOwnership copies every `tasks.manifest_id != ''` row into
+// a relationships EdgeOwns edge with src=manifest, dst=task.
+func (s *Store) migrateTaskOwnership(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, manifest_id, created_at FROM tasks
+		 WHERE manifest_id IS NOT NULL AND manifest_id != ''
+		   AND deleted_at = ''`)
+	if err != nil {
+		if isNoSuchTable(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer rows.Close()
+
+	type legacy struct {
+		taskID, manifestID, createdAt string
+	}
+	var pending []legacy
+	for rows.Next() {
+		var l legacy
+		if err := rows.Scan(&l.taskID, &l.manifestID, &l.createdAt); err != nil {
+			return 0, err
+		}
+		pending = append(pending, l)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	inserted := 0
+	for _, l := range pending {
+		if l.taskID == "" || l.manifestID == "" {
+			continue
+		}
+		if _, found, err := s.Get(ctx, l.manifestID, l.taskID, EdgeOwns); err != nil {
+			return inserted, err
+		} else if found {
+			continue
+		}
+		validFrom := l.createdAt
+		if validFrom == "" {
+			validFrom = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		e := Edge{
+			SrcKind:   KindManifest,
+			SrcID:     l.manifestID,
+			DstKind:   KindTask,
+			DstID:     l.taskID,
+			Kind:      EdgeOwns,
+			ValidFrom: validFrom,
+			ValidTo:   "",
+			CreatedBy: "system",
+			Reason:    "backfill from tasks.manifest_id",
+		}
+		if err := s.BackfillRow(ctx, e); err != nil {
+			return inserted, fmt.Errorf("task ownership %s→%s: %w", l.manifestID, l.taskID, err)
+		}
+		inserted++
+	}
+	return inserted, nil
 }
 
 // migrateProductDeps copies product_dependencies → relationships.
