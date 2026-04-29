@@ -102,13 +102,20 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	// innermost blocker is named in block_reason; outer checks re-run
 	// at activation time as inner blockers clear.
 	//
-	// productID is derived from manifests.project_id. Kept as a local
-	// SELECT rather than a dedicated cross-package store method so the
-	// task package doesn't need to import product.
-	if initialStatus == StatusPending && manifestID != "" && s.productChecker != nil {
+	// productID is resolved through the relationships store. The
+	// legacy `manifests.project_id` column was dropped in PR/M3 — we
+	// look up the manifest's parent product via ListIncoming(EdgeOwns)
+	// instead.
+	if initialStatus == StatusPending && manifestID != "" && s.productChecker != nil && s.rels != nil {
 		var productID string
-		_ = s.db.QueryRow(`SELECT project_id FROM manifests WHERE id = ? AND deleted_at = ''`,
-			manifestID).Scan(&productID)
+		if edges, err := s.rels.ListIncoming(context.Background(), manifestID, relationships.EdgeOwns); err == nil {
+			for _, e := range edges {
+				if e.SrcKind == relationships.KindProduct {
+					productID = e.SrcID
+					break
+				}
+			}
+		}
 		if productID != "" {
 			ok, unsatisfied, err := s.productChecker.IsSatisfied(context.Background(), productID)
 			if err == nil && !ok {
@@ -119,20 +126,18 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		}
 	}
 
-	_, err := s.db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, manifestID, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn, blockReason,
+	_, err := s.db.Exec(`INSERT INTO tasks (id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn, blockReason,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
 
-	// Ownership wiring: write the canonical EdgeOwns(manifest → task)
-	// row into the relationships SCD-2 table. The DAG endpoint walks
-	// relationships only — without this row the new task is invisible
-	// in the manifest's graph view. The legacy manifest_id column is
-	// also populated (above) for the readers still hitting it; column
-	// drop is a follow-up.
+	// Ownership wiring (PR/M3): the EdgeOwns(manifest → task) row IS
+	// the canonical ownership record. The legacy manifest_id column
+	// was dropped in this PR — every reader that needs the parent
+	// looks it up via relationships.ListIncoming.
 	if manifestID != "" && s.rels != nil {
 		if err := s.rels.Create(context.Background(), relationships.Edge{
 			SrcKind:   relationships.KindManifest,
@@ -189,26 +194,61 @@ func (s *Store) Get(id string) (*Task, error) {
 	row := s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ? AND deleted_at = ''`, id)
 	t, err := scanTask(row)
 	if err == nil && t != nil {
+		s.populateOwnership([]*Task{t})
 		s.enrichWithCosts([]*Task{t})
 	}
 	return t, err
 }
 
-// ListByManifest returns tasks for a manifest.
+// ListByManifest returns tasks owned by a manifest. Reads ownership
+// from the relationships store (legacy tasks.manifest_id column was
+// dropped in PR/M3).
 func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE manifest_id = ? AND deleted_at = '' ORDER BY created_at DESC LIMIT ?`, manifestID, limit)
+	if s.rels == nil {
+		return nil, fmt.Errorf("task.ListByManifest: relationships backend not wired")
+	}
+	ctx := context.Background()
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return nil, err
+	}
+	taskIDs := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindTask {
+			taskIDs = append(taskIDs, e.DstID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(taskIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(taskIDs)+1)
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT `+taskColumns+`
+		FROM tasks WHERE id IN (`+placeholders+`) AND deleted_at = ''
+		ORDER BY created_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	tasks, err := scanTasks(rows)
-	if err == nil {
-		s.enrichWithCosts(tasks)
+	if err != nil {
+		return nil, err
 	}
-	return tasks, err
+	// Caller already knows the manifest — short-circuit the rels
+	// lookup that populateOwnership would otherwise do.
+	for _, t := range tasks {
+		t.ManifestID = manifestID
+	}
+	s.enrichWithCosts(tasks)
+	return tasks, nil
 }
 
 // List returns all tasks.
@@ -247,6 +287,7 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 	defer rows.Close()
 	tasks, err := scanTasks(rows)
 	if err == nil {
+		s.populateOwnership(tasks)
 		s.enrichWithCosts(tasks)
 	}
 	return tasks, err
@@ -285,17 +326,48 @@ func (s *Store) Update(id string, title, description *string) (*Task, error) {
 	return s.Get(id)
 }
 
-// SetManifest swaps a task's primary manifest_id. Used to re-home a task
+// SetManifest swaps a task's primary manifest. Used to re-home a task
 // when an operator splits / restructures manifests after the task was
-// originally created. Returns the task as it stands after the update.
+// originally created. Post-PR/M3 the canonical manifest pointer is the
+// EdgeOwns(manifest → task) row in the relationships store; this
+// closes the prior edge (if any) and opens a new one.
+//
+// Returns the task as it stands after the update.
 func (s *Store) SetManifest(taskID, manifestID string) (*Task, error) {
+	if s.rels == nil {
+		return nil, fmt.Errorf("set manifest: relationships backend not wired")
+	}
+	ctx := context.Background()
+	prior := s.lookupOwner(ctx, taskID)
+	if prior != manifestID {
+		if prior != "" {
+			if err := s.rels.Remove(ctx, prior, taskID, relationships.EdgeOwns,
+				"task.Store.SetManifest", "task reparented"); err != nil {
+				return nil, fmt.Errorf("set manifest: close prior owner: %w", err)
+			}
+		}
+		if manifestID != "" {
+			if err := s.rels.Create(ctx, relationships.Edge{
+				SrcKind:   relationships.KindManifest,
+				SrcID:     manifestID,
+				DstKind:   relationships.KindTask,
+				DstID:     taskID,
+				Kind:      relationships.EdgeOwns,
+				CreatedBy: "task.Store.SetManifest",
+				Reason:    "task reparented",
+			}); err != nil {
+				return nil, fmt.Errorf("set manifest: open new owner: %w", err)
+			}
+		}
+	}
+	// Bump updated_at so list sorts move the task to the top after a
+	// re-home, mirroring pre-M3 behaviour.
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
-		"UPDATE tasks SET manifest_id = ?, updated_at = ? WHERE id = ? AND deleted_at = ''",
-		manifestID, now, taskID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("set manifest: %w", err)
+	if _, err := s.db.Exec(
+		"UPDATE tasks SET updated_at = ? WHERE id = ? AND deleted_at = ''",
+		now, taskID,
+	); err != nil {
+		return nil, fmt.Errorf("set manifest: bump updated_at: %w", err)
 	}
 	return s.Get(taskID)
 }
@@ -339,7 +411,12 @@ func (s *Store) ListDeleted(limit int) ([]*Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanTasks(rows)
+	tasks, err := scanTasks(rows)
+	if err != nil {
+		return nil, err
+	}
+	s.populateOwnership(tasks)
+	return tasks, nil
 }
 
 // Restore un-deletes a soft-deleted task.
@@ -1009,7 +1086,7 @@ func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT t.id, t.manifest_id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
+	rows, err := s.db.Query(`SELECT t.id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
 		FROM tasks t JOIN task_manifests tm ON t.id = tm.task_id
 		WHERE tm.manifest_id = ? AND t.deleted_at = '' ORDER BY t.created_at DESC LIMIT ?`, manifestID, limit)
 	if err != nil {
@@ -1018,6 +1095,7 @@ func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task
 	defer rows.Close()
 	tasks, err := scanTasks(rows)
 	if err == nil {
+		s.populateOwnership(tasks)
 		s.enrichWithCosts(tasks)
 	}
 	return tasks, err

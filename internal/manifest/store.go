@@ -129,6 +129,10 @@ func NewStore(db *sql.DB) (*Store, error) {
 }
 
 func (s *Store) init() error {
+	// Schema after PR/M3: ownership lives in `relationships` (EdgeOwns
+	// product → manifest). The legacy `project_id` column is no longer
+	// part of CREATE TABLE; existing DBs get it dropped by
+	// relationships.DropOwnershipColumns at boot.
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS manifests (
 		id TEXT PRIMARY KEY,
 		title TEXT NOT NULL,
@@ -155,28 +159,24 @@ func (s *Store) init() error {
 	if err != nil {
 		return err
 	}
+	// Legacy ALTERs kept for upgrade path on DBs that pre-date these
+	// columns. project_id is intentionally absent — relationships.
+	// DropOwnershipColumns is responsible for removing it from any DB
+	// that still has it.
 	s.db.Exec(`ALTER TABLE manifests ADD COLUMN source_node TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE manifests ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE manifests ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_manifests_project ON manifests(project_id)`)
 	s.db.Exec(`ALTER TABLE manifests ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
 // Create stores a new manifest.
 //
-// Ownership wiring: when projectID is non-empty, also writes the
-// canonical `EdgeOwns(product → manifest)` row into the relationships
-// SCD-2 table at the same instant. The DAG endpoint reads from
-// relationships only, so this is what makes the manifest appear under
-// its product in the dashboard graph.
-//
-// We continue to populate the legacy `manifests.project_id` column
-// alongside the relationships row for backward compatibility with the
-// handful of readers still hitting the column directly (handlers_stats
-// JOIN, settings_adapter, list responses). Those readers will migrate
-// to relationships.ListIncoming in a follow-up; column drop happens
-// after that lands.
+// Ownership wiring (PR/M3): when projectID is non-empty, opens an
+// `EdgeOwns(product → manifest)` row in the relationships SCD-2 table.
+// That edge IS the canonical ownership record — the legacy
+// `manifests.project_id` column was dropped in this PR. Every read
+// path (DAG endpoint, hierarchy walkers, settings resolver,
+// ListByProject) consults relationships.
 func (s *Store) Create(title, description, content, status, author, sourceNode, projectID, dependsOn string, jiraRefs, tags []string) (*Manifest, error) {
 	if status == "" {
 		status = "draft"
@@ -193,9 +193,9 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 	jiraJSON, _ := json.Marshal(jiraRefs)
 	tagsJSON, _ := json.Marshal(tags)
 
-	_, err := s.db.Exec(`INSERT INTO manifests (id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		id, title, description, content, status, string(jiraJSON), string(tagsJSON), author, sourceNode, projectID, dependsOn,
+	_, err := s.db.Exec(`INSERT INTO manifests (id, title, description, content, status, jira_refs, tags, author, source_node, depends_on, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		id, title, description, content, status, string(jiraJSON), string(tagsJSON), author, sourceNode, dependsOn,
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
@@ -211,10 +211,6 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 			CreatedBy: author,
 			Reason:    "manifest created under product",
 		}); err != nil {
-			// Don't fail the create — the manifest row landed and the
-			// project_id column carries the ownership. A follow-up sweep
-			// can backfill missing rels rows. But surface the error to
-			// the caller's logs so we don't silently drift again.
 			return nil, fmt.Errorf("manifest created but relationships row failed: %w", err)
 		}
 	}
@@ -232,6 +228,13 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 // from a non-terminal value (draft/open) to a terminal one
 // (closed/archive). The handler propagates the close into downstream
 // waiting tasks — see SetTerminalTransitionHandler.
+//
+// Ownership re-parenting (projectID changing): post-PR/M3 the legacy
+// `manifests.project_id` column is gone, so the parent product is no
+// longer a column on the row. If projectID differs from the manifest's
+// current parent (resolved via the relationships store), we close the
+// prior EdgeOwns edge and open a new one. Empty projectID = "no
+// parent"; the prior edge (if any) is closed without replacement.
 func (s *Store) Update(id, title, description, content, status, projectID, dependsOn string, jiraRefs, tags []string) error {
 	// Read prior status so we can detect the non-terminal → terminal
 	// edge. An error here (e.g. row doesn't exist) falls through and
@@ -244,12 +247,39 @@ func (s *Store) Update(id, title, description, content, status, projectID, depen
 	jiraJSON, _ := json.Marshal(jiraRefs)
 	tagsJSON, _ := json.Marshal(tags)
 
-	_, err := s.db.Exec(`UPDATE manifests SET title=?, description=?, content=?, status=?, project_id=?, depends_on=?, jira_refs=?, tags=?,
+	_, err := s.db.Exec(`UPDATE manifests SET title=?, description=?, content=?, status=?, depends_on=?, jira_refs=?, tags=?,
 		version=version+1, updated_at=? WHERE id=?`,
-		title, description, content, status, projectID, dependsOn, string(jiraJSON), string(tagsJSON),
+		title, description, content, status, dependsOn, string(jiraJSON), string(tagsJSON),
 		now.Format(time.RFC3339), id)
 	if err != nil {
 		return err
+	}
+
+	// Reconcile ownership edge if the caller's projectID differs from
+	// what relationships currently records. No-op when both are equal,
+	// including when both are empty.
+	if s.rels != nil {
+		ctx := context.Background()
+		priorProjectID := s.lookupOwner(ctx, id)
+		if priorProjectID != projectID {
+			if priorProjectID != "" {
+				_ = s.rels.Remove(ctx, priorProjectID, id, relationships.EdgeOwns,
+					"manifest.Store.Update", "manifest reparented")
+			}
+			if projectID != "" {
+				if err := s.rels.Create(ctx, relationships.Edge{
+					SrcKind:   relationships.KindProduct,
+					SrcID:     projectID,
+					DstKind:   relationships.KindManifest,
+					DstID:     id,
+					Kind:      relationships.EdgeOwns,
+					CreatedBy: "manifest.Store.Update",
+					Reason:    "manifest reparented",
+				}); err != nil {
+					return fmt.Errorf("update manifest ownership: %w", err)
+				}
+			}
+		}
 	}
 
 	// Fire propagation ONLY on the non-terminal → terminal edge.
@@ -258,81 +288,119 @@ func (s *Store) Update(id, title, description, content, status, projectID, depen
 	// idempotent on its own but we save the work.
 	if s.onTerminalTransition != nil &&
 		!IsTerminalStatus(priorStatus) && IsTerminalStatus(status) {
-		// Fire in-process. If the handler blocks, the Update returns
-		// only after propagation completes — intentional, so the
-		// operator sees "close + downstream activated" as one atomic
-		// unit from their UI's POV. Handlers that want async behavior
-		// should spawn internally.
 		s.onTerminalTransition(context.Background(), id)
 	}
 	return nil
 }
 
-// Get retrieves a manifest by full UUID.
+// lookupOwner returns the current product owner of a manifest from the
+// relationships store, or "" if no current EdgeOwns row points at it.
+// Used by Update to detect re-parenting and by the post-scan ownership
+// populator to fill Manifest.ProjectID.
+func (s *Store) lookupOwner(ctx context.Context, manifestID string) string {
+	if s.rels == nil {
+		return ""
+	}
+	edges, err := s.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return ""
+	}
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindProduct {
+			return e.SrcID
+		}
+	}
+	return ""
+}
+
+// populateOwnership fills ProjectID on a slice of manifests by issuing
+// a single batched ListIncomingForMany lookup against the relationships
+// store. Empty input is a no-op. Used by every read path (Get / List /
+// ListByProject / Search / ListDeleted) so consumers continue to see
+// `manifest.ProjectID` populated even though the column is gone.
+func (s *Store) populateOwnership(manifests []*Manifest) {
+	if s.rels == nil || len(manifests) == 0 {
+		return
+	}
+	ctx := context.Background()
+	ids := make([]string, 0, len(manifests))
+	mapByID := make(map[string]*Manifest, len(manifests))
+	for _, m := range manifests {
+		if m == nil {
+			continue
+		}
+		ids = append(ids, m.ID)
+		mapByID[m.ID] = m
+	}
+	if len(ids) == 0 {
+		return
+	}
+	byDst, err := s.rels.ListIncomingForMany(ctx, ids, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	for mid, edges := range byDst {
+		m, ok := mapByID[mid]
+		if !ok {
+			continue
+		}
+		for _, e := range edges {
+			if e.SrcKind == relationships.KindProduct {
+				m.ProjectID = e.SrcID
+				break
+			}
+		}
+	}
+}
+
+// Get retrieves a manifest by full UUID. ProjectID is populated post-
+// scan from the relationships store (the legacy column was dropped in
+// PR/M3).
 func (s *Store) Get(id string) (*Manifest, error) {
-	row := s.db.QueryRow(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
+	row := s.db.QueryRow(`SELECT `+manifestColumns+`
 		FROM manifests WHERE id = ? AND deleted_at = ''`, id)
 	m, err := scanManifest(row)
 	if err == nil && m != nil {
+		s.populateOwnership([]*Manifest{m})
 		s.EnrichWithCosts([]*Manifest{m})
 	}
 	return m, err
 }
 
-// ListByProject returns manifests belonging to a project. Reads
-// canonical ownership from the relationships SCD-2 store via
-// `EdgeOwns(product → manifest)`. Falls back to the legacy
-// `manifests.project_id` column when the relationships backend isn't
-// wired (test fixtures + boot path before SetRelationshipsBackend).
+// ListByProject returns manifests belonging to a project, reading
+// ownership from the relationships SCD-2 store via
+// `EdgeOwns(product → manifest)`. Post-PR/M3 there is no legacy column
+// fallback — the column is gone.
 func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	if s.rels != nil {
-		ctx := context.Background()
-		edges, err := s.rels.ListOutgoing(ctx, projectID, relationships.EdgeOwns)
-		if err != nil {
-			return nil, err
-		}
-		ids := make([]string, 0, len(edges))
-		for _, e := range edges {
-			if e.DstKind == relationships.KindManifest {
-				ids = append(ids, e.DstID)
-			}
-		}
-		if len(ids) == 0 {
-			// Fall through to legacy JOIN — could be a test fixture
-			// that writes only to manifests.project_id without the
-			// EdgeOwns row. Production has both populated post-backfill,
-			// so legacy returns identical 0-row result there.
-			goto legacyFallback
-		}
-		placeholders := strings.Repeat("?,", len(ids))
-		placeholders = placeholders[:len(placeholders)-1]
-		args := make([]any, 0, len(ids)+1)
-		for _, id := range ids {
-			args = append(args, id)
-		}
-		args = append(args, limit)
-		rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
-			FROM manifests WHERE id IN (`+placeholders+`) AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, args...)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		var results []*Manifest
-		for rows.Next() {
-			m, err := scanManifestRows(rows)
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, m)
-		}
-		return results, rows.Err()
+	if s.rels == nil {
+		return nil, fmt.Errorf("manifest.ListByProject: relationships backend not wired")
 	}
-legacyFallback:
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
-		FROM manifests WHERE project_id = ? AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, projectID, limit)
+	ctx := context.Background()
+	edges, err := s.rels.ListOutgoing(ctx, projectID, relationships.EdgeOwns)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindManifest {
+			ids = append(ids, e.DstID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(ids)+1)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT `+manifestColumns+`
+		FROM manifests WHERE id IN (`+placeholders+`) AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -343,9 +411,15 @@ legacyFallback:
 		if err != nil {
 			return nil, err
 		}
+		// Caller already knows the projectID — short-circuit the
+		// rels lookup for this hot path.
+		m.ProjectID = projectID
 		results = append(results, m)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // List returns manifests sorted by updated_at.
@@ -367,7 +441,7 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		limit = 50 // defensive — negative is ambiguous, fall back to a sane cap
 	}
 
-	query := `SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at FROM manifests WHERE deleted_at = ''`
+	query := `SELECT ` + manifestColumns + ` FROM manifests WHERE deleted_at = ''`
 	var args []any
 
 	if status != "" {
@@ -397,8 +471,12 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		}
 		results = append(results, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.populateOwnership(results)
 	s.EnrichWithCosts(results)
-	return results, rows.Err()
+	return results, nil
 }
 
 // Search finds manifests matching a query. Supports id-substring and
@@ -412,7 +490,7 @@ func (s *Store) Search(query string, limit int) ([]*Manifest, error) {
 		return nil, nil
 	}
 	pattern := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
+	rows, err := s.db.Query(`SELECT `+manifestColumns+`
 		FROM manifests WHERE deleted_at = '' AND (id LIKE ? OR title LIKE ? OR description LIKE ? OR content LIKE ? OR jira_refs LIKE ? OR tags LIKE ?)
 		ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, pattern, pattern, pattern, pattern, pattern, pattern, limit)
 	if err != nil {
@@ -428,8 +506,12 @@ func (s *Store) Search(query string, limit int) ([]*Manifest, error) {
 		}
 		results = append(results, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.populateOwnership(results)
 	s.EnrichWithCosts(results)
-	return results, rows.Err()
+	return results, nil
 }
 
 // EnrichWithCosts populates TotalTasks, TotalTurns, and TotalCost from task_runs for each manifest.
@@ -444,91 +526,69 @@ func (s *Store) EnrichWithCosts(manifests []*Manifest) {
 		ids = append(ids, m.ID)
 	}
 
-	// Resolve task ownership via the unified relationships store. Falls
-	// back to the legacy tasks.manifest_id JOIN when the relationships
-	// backend isn't wired (test bootstrap path).
-	if s.rels != nil {
-		ctx := context.Background()
-		ownsByMan, err := s.rels.ListOutgoingForMany(ctx, ids, relationships.EdgeOwns)
-		if err != nil {
-			return
-		}
-		// Flatten to (taskID → manifestID) so a single SQL aggregate over
-		// task_runs yields the per-manifest totals without N+1.
-		taskToMan := make(map[string]string)
-		allTaskIDs := []string{}
-		for mID, edges := range ownsByMan {
-			for _, e := range edges {
-				if e.DstKind != relationships.KindTask {
-					continue
-				}
-				taskToMan[e.DstID] = mID
-				allTaskIDs = append(allTaskIDs, e.DstID)
-			}
-		}
-		if len(allTaskIDs) == 0 {
-			return
-		}
-		placeholders := strings.Repeat("?,", len(allTaskIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		args := make([]any, len(allTaskIDs))
-		for i, id := range allTaskIDs {
-			args[i] = id
-		}
-		rows, err := s.db.Query(`SELECT t.id, COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
-			FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
-			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''
-			GROUP BY t.id`, args...)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-		// Initialise per-manifest task counts from the ownership graph;
-		// tasks with no runs still count toward TotalTasks.
-		for mID := range mMap {
-			edges := ownsByMan[mID]
-			n := 0
-			for _, e := range edges {
-				if e.DstKind == relationships.KindTask {
-					n++
-				}
-			}
-			mMap[mID].TotalTasks = n
-		}
-		for rows.Next() {
-			var tID string
-			var turns int
-			var cost float64
-			if err := rows.Scan(&tID, &turns, &cost); err == nil {
-				if mID, ok := taskToMan[tID]; ok {
-					if m, ok := mMap[mID]; ok {
-						m.TotalTurns += turns
-						m.TotalCost += cost
-					}
-				}
-			}
-		}
+	// Resolve task ownership via the unified relationships store. The
+	// legacy tasks.manifest_id JOIN was retired in PR/M3 — this path
+	// is the sole source of truth.
+	if s.rels == nil {
 		return
 	}
-
-	// Legacy fallback — only reached when rels backend isn't wired.
-	rows, err := s.db.Query(`SELECT t.manifest_id, COUNT(DISTINCT t.id), COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
+	ctx := context.Background()
+	ownsByMan, err := s.rels.ListOutgoingForMany(ctx, ids, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	// Flatten to (taskID → manifestID) so a single SQL aggregate over
+	// task_runs yields the per-manifest totals without N+1.
+	taskToMan := make(map[string]string)
+	allTaskIDs := []string{}
+	for mID, edges := range ownsByMan {
+		for _, e := range edges {
+			if e.DstKind != relationships.KindTask {
+				continue
+			}
+			taskToMan[e.DstID] = mID
+			allTaskIDs = append(allTaskIDs, e.DstID)
+		}
+	}
+	// Initialise per-manifest task counts from the ownership graph;
+	// tasks with no runs still count toward TotalTasks.
+	for mID := range mMap {
+		edges := ownsByMan[mID]
+		n := 0
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				n++
+			}
+		}
+		mMap[mID].TotalTasks = n
+	}
+	if len(allTaskIDs) == 0 {
+		return
+	}
+	placeholders := strings.Repeat("?,", len(allTaskIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(allTaskIDs))
+	for i, id := range allTaskIDs {
+		args[i] = id
+	}
+	rows, err := s.db.Query(`SELECT t.id, COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
 		FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
-		WHERE t.manifest_id != '' AND t.deleted_at = ''
-		GROUP BY t.manifest_id`)
+		WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''
+		GROUP BY t.id`, args...)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var mid string
-		var tasks, turns int
+		var tID string
+		var turns int
 		var cost float64
-		if err := rows.Scan(&mid, &tasks, &turns, &cost); err == nil {
-			if m, ok := mMap[mid]; ok {
-				m.TotalTasks = tasks
-				m.TotalTurns = turns
-				m.TotalCost = cost
+		if err := rows.Scan(&tID, &turns, &cost); err == nil {
+			if mID, ok := taskToMan[tID]; ok {
+				if m, ok := mMap[mID]; ok {
+					m.TotalTurns += turns
+					m.TotalCost += cost
+				}
 			}
 		}
 	}
@@ -546,58 +606,36 @@ func (s *Store) EnrichRecursiveCosts(m *Manifest) {
 		return
 	}
 	// Resolve owned task IDs through the relationships store; aggregate
-	// task_runs WHERE task_id IN (...). Falls back to the legacy
-	// tasks.manifest_id JOIN when rels isn't wired.
-	if s.rels != nil {
-		ctx := context.Background()
-		edges, err := s.rels.ListOutgoing(ctx, m.ID, relationships.EdgeOwns)
-		if err != nil {
-			return
-		}
-		taskIDs := make([]string, 0, len(edges))
-		for _, e := range edges {
-			if e.DstKind == relationships.KindTask {
-				taskIDs = append(taskIDs, e.DstID)
-			}
-		}
-		if len(taskIDs) == 0 {
-			m.TotalTasks = 0
-			m.TotalTurns = 0
-			m.TotalCost = 0
-			m.TotalActions = 0
-			m.TotalTokens = 0
-			return
-		}
-		placeholders := strings.Repeat("?,", len(taskIDs))
-		placeholders = placeholders[:len(placeholders)-1]
-		args := make([]any, len(taskIDs))
-		for i, id := range taskIDs {
-			args[i] = id
-		}
-		row := s.db.QueryRow(`
-			SELECT
-				COUNT(DISTINCT t.id),
-				COALESCE(SUM(tr.turns), 0),
-				COALESCE(SUM(tr.cost_usd), 0),
-				COALESCE(SUM(tr.actions), 0),
-				COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
-			FROM tasks t
-			LEFT JOIN task_runs tr ON tr.task_id = t.id
-			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''`,
-			args...,
-		)
-		var tasks, turns, actions, tokens int
-		var cost float64
-		if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
-			m.TotalTasks = tasks
-			m.TotalTurns = turns
-			m.TotalCost = cost
-			m.TotalActions = actions
-			m.TotalTokens = tokens
-		}
+	// task_runs WHERE task_id IN (...). The legacy tasks.manifest_id
+	// JOIN was retired in PR/M3.
+	if s.rels == nil {
 		return
 	}
-	// Legacy fallback.
+	ctx := context.Background()
+	edges, err := s.rels.ListOutgoing(ctx, m.ID, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	taskIDs := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindTask {
+			taskIDs = append(taskIDs, e.DstID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		m.TotalTasks = 0
+		m.TotalTurns = 0
+		m.TotalCost = 0
+		m.TotalActions = 0
+		m.TotalTokens = 0
+		return
+	}
+	placeholders := strings.Repeat("?,", len(taskIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(taskIDs))
+	for i, id := range taskIDs {
+		args[i] = id
+	}
 	row := s.db.QueryRow(`
 		SELECT
 			COUNT(DISTINCT t.id),
@@ -607,8 +645,8 @@ func (s *Store) EnrichRecursiveCosts(m *Manifest) {
 			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
 		FROM tasks t
 		LEFT JOIN task_runs tr ON tr.task_id = t.id
-		WHERE t.manifest_id = ? AND t.deleted_at = ''`,
-		m.ID,
+		WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''`,
+		args...,
 	)
 	var tasks, turns, actions, tokens int
 	var cost float64
@@ -633,7 +671,7 @@ func (s *Store) ListDeleted(limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
+	rows, err := s.db.Query(`SELECT `+manifestColumns+`
 		FROM manifests WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -647,7 +685,11 @@ func (s *Store) ListDeleted(limit int) ([]*Manifest, error) {
 		}
 		results = append(results, m)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.populateOwnership(results)
+	return results, nil
 }
 
 // Restore un-deletes a soft-deleted manifest.
@@ -689,12 +731,18 @@ func (m *Manifest) HasDependency(manifestID string) bool {
 	return false
 }
 
+// manifestColumns is the canonical SELECT projection for manifests.
+// Mirrors scanManifest / scanManifestRows; PR/M3 dropped project_id
+// from this list along with the underlying column. Manifest.ProjectID
+// is now populated post-scan via populateOwnership / explicit assignment.
+const manifestColumns = `id, title, description, content, status, jira_refs, tags, author, source_node, depends_on, version, created_at, updated_at`
+
 func scanManifest(row *sql.Row) (*Manifest, error) {
 	var m Manifest
 	var jiraStr, tagsStr, createdStr, updatedStr string
 
 	err := row.Scan(&m.ID, &m.Title, &m.Description, &m.Content, &m.Status,
-		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
+		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -719,7 +767,7 @@ func scanManifestRows(rows *sql.Rows) (*Manifest, error) {
 	var jiraStr, tagsStr, createdStr, updatedStr string
 
 	err := rows.Scan(&m.ID, &m.Title, &m.Description, &m.Content, &m.Status,
-		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.ProjectID, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
+		&jiraStr, &tagsStr, &m.Author, &m.SourceNode, &m.DependsOn, &m.Version, &createdStr, &updatedStr)
 	if err != nil {
 		return nil, err
 	}
