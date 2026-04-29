@@ -862,6 +862,24 @@ function cacheHit(r: RunRow): number {
   return (r.cache_read_tokens / total) * 100
 }
 
+// Compact-number formatters for chart axis tick labels and data
+// labels — keeps "22000000" from sprawling across the gutter.
+function fmtTokens(n: number): string {
+  if (!Number.isFinite(n)) return ''
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (abs >= 1_000) return (n / 1_000).toFixed(1) + 'k'
+  return String(n)
+}
+
+function fmtCount(n: number): string {
+  if (!Number.isFinite(n)) return ''
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (abs >= 1_000) return (n / 1_000).toFixed(1) + 'k'
+  return String(Math.round(n))
+}
+
 function fmtTime(iso: string): string {
   if (!iso) return '—'
   const d = new Date(iso)
