@@ -184,7 +184,10 @@ func (s *Store) List(status string, limit int) ([]*Product, error) {
 		args = append(args, status)
 	}
 
-	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC`
+	// Chronological — newest first. Status-first ordering hid newly
+	// created products under the wall of legacy drafts; chronological
+	// matches what the operator actually wants when they open the list.
+	query += ` ORDER BY created_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)

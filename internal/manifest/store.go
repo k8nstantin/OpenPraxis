@@ -158,6 +158,19 @@ func (s *Store) init() error {
 }
 
 // Create stores a new manifest.
+//
+// Ownership wiring: when projectID is non-empty, also writes the
+// canonical `EdgeOwns(product → manifest)` row into the relationships
+// SCD-2 table at the same instant. The DAG endpoint reads from
+// relationships only, so this is what makes the manifest appear under
+// its product in the dashboard graph.
+//
+// We continue to populate the legacy `manifests.project_id` column
+// alongside the relationships row for backward compatibility with the
+// handful of readers still hitting the column directly (handlers_stats
+// JOIN, settings_adapter, list responses). Those readers will migrate
+// to relationships.ListIncoming in a follow-up; column drop happens
+// after that lands.
 func (s *Store) Create(title, description, content, status, author, sourceNode, projectID, dependsOn string, jiraRefs, tags []string) (*Manifest, error) {
 	if status == "" {
 		status = "draft"
@@ -180,6 +193,24 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
+	}
+
+	if projectID != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindProduct,
+			SrcID:     projectID,
+			DstKind:   relationships.KindManifest,
+			DstID:     id,
+			Kind:      relationships.EdgeOwns,
+			CreatedBy: author,
+			Reason:    "manifest created under product",
+		}); err != nil {
+			// Don't fail the create — the manifest row landed and the
+			// project_id column carries the ownership. A follow-up sweep
+			// can backfill missing rels rows. But surface the error to
+			// the caller's logs so we don't silently drift again.
+			return nil, fmt.Errorf("manifest created but relationships row failed: %w", err)
+		}
 	}
 
 	return &Manifest{
@@ -338,7 +369,9 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		args = append(args, status)
 	}
 
-	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC`
+	// Chronological — newest first. Same rationale as Product.List:
+	// operators expect "what did I create most recently" at the top.
+	query += ` ORDER BY created_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)

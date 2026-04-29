@@ -127,6 +127,44 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		return nil, err
 	}
 
+	// Ownership wiring: write the canonical EdgeOwns(manifest → task)
+	// row into the relationships SCD-2 table. The DAG endpoint walks
+	// relationships only — without this row the new task is invisible
+	// in the manifest's graph view. The legacy manifest_id column is
+	// also populated (above) for the readers still hitting it; column
+	// drop is a follow-up.
+	if manifestID != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindManifest,
+			SrcID:     manifestID,
+			DstKind:   relationships.KindTask,
+			DstID:     id,
+			Kind:      relationships.EdgeOwns,
+			CreatedBy: createdBy,
+			Reason:    "task created under manifest",
+		}); err != nil {
+			return nil, fmt.Errorf("task created but relationships row failed: %w", err)
+		}
+	}
+
+	// task-level depends_on edge (when set): write the EdgeDependsOn
+	// row at create time as well. SetDependency() handles updates after
+	// create; but a fresh task with depends_on still needs the edge to
+	// land so the activation walker sees the gate.
+	if dependsOn != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindTask,
+			SrcID:     id,
+			DstKind:   relationships.KindTask,
+			DstID:     dependsOn,
+			Kind:      relationships.EdgeDependsOn,
+			CreatedBy: createdBy,
+			Reason:    "initial depends_on at create",
+		}); err != nil {
+			return nil, fmt.Errorf("task created but depends_on edge failed: %w", err)
+		}
+	}
+
 	return &Task{
 		ID: id, Marker: id[:12], ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
