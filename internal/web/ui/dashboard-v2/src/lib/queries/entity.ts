@@ -908,16 +908,14 @@ export interface TaskRunRow {
   completed_at: string
 }
 
-// Most-recent run for this task — used to source the full output blob
-// once the runner ring buffer has been flushed (i.e. task no longer
-// running). The list endpoint returns runs ordered DESC by run_number.
-export function useTaskLatestRun(taskId: string | undefined) {
+// All runs for this task, DESC by run_number. Endpoint returns rows
+// with full `output` blobs included — eager fetch is fine for the
+// typical case (1–10 runs, <1MB each); revisit with metadata-only
+// + lazy per-run fetch if a hot task hits multi-MB territory.
+export function useTaskRuns(taskId: string | undefined) {
   return useQuery({
-    queryKey: ['task', taskId ?? '', 'latest-run'],
-    queryFn: async () => {
-      const rows = await fetchJSON<TaskRunRow[]>(`/api/tasks/${taskId}/runs`)
-      return rows[0] ?? null
-    },
+    queryKey: ['task', taskId ?? '', 'runs'],
+    queryFn: () => fetchJSON<TaskRunRow[]>(`/api/tasks/${taskId}/runs`),
     enabled: !!taskId,
     staleTime: 5 * 1000,
   })
