@@ -303,9 +303,10 @@ function NewScheduleForm({
 }) {
   const create = useCreateSchedule(kind, entityId)
 
+  const [mode, setMode] = useState<'recurring' | 'one_shot'>('recurring')
   const [intervalValue, setIntervalValue] = useState<string>('1')
   const [intervalUnit, setIntervalUnit] = useState<
-    'minute' | 'hour' | 'day' | 'week'
+    'second' | 'minute' | 'hour' | 'day' | 'week'
   >('hour')
   const [date, setDate] = useState<Date | undefined>(() => {
     const tomorrow = new Date()
@@ -323,7 +324,7 @@ function NewScheduleForm({
 
   const onSave = async () => {
     if (!date) {
-      toast.error('Please pick a start date.')
+      toast.error('Please pick a date.')
       return
     }
     const runAt = combineDateTime(date, time)
@@ -331,20 +332,24 @@ function NewScheduleForm({
       toast.error('Invalid time — use HH:MM (24h).')
       return
     }
-    const ivl = Number.parseInt(intervalValue, 10)
-    if (!Number.isFinite(ivl) || ivl <= 0) {
-      toast.error('Interval must be a positive integer.')
-      return
+    // One-shot fires once at runAt — cron_expr is empty so the runner
+    // (post-cutover) treats it as a single-fire schedule.
+    let reccLabel = ''
+    if (mode === 'recurring') {
+      const ivl = Number.parseInt(intervalValue, 10)
+      if (!Number.isFinite(ivl) || ivl <= 0) {
+        toast.error('Interval must be a positive integer.')
+        return
+      }
+      reccLabel = `every ${ivl} ${intervalUnit}${ivl === 1 ? '' : 's'}`
     }
-    // Build a friendly recurrence label that the backend stores in
-    // cron_expr (legacy column, no actual cron parsing). The runner
-    // cutover (follow-up PR) will read interval_value + interval_unit
-    // directly via new schedules columns.
-    const reccLabel = `every ${ivl} ${intervalUnit}${ivl === 1 ? '' : 's'}`
 
     let max = 0
     let stopAt = ''
-    if (endCondition === 'after_n') {
+    if (mode === 'one_shot') {
+      // Single fire — no end condition. max_runs=1, stop_at empty.
+      max = 1
+    } else if (endCondition === 'after_n') {
       const parsed = Number.parseInt(maxRuns, 10)
       if (!Number.isFinite(parsed) || parsed <= 0) {
         toast.error('Max runs must be a positive integer.')
@@ -382,33 +387,60 @@ function NewScheduleForm({
     <Card data-testid='new-schedule-form'>
       <CardContent className='space-y-4 p-4'>
         <div className='space-y-2'>
-          <Label>Run every</Label>
-          <div className='flex items-center gap-2'>
-            <Input
-              type='number'
-              min={1}
-              value={intervalValue}
-              onChange={(e) => setIntervalValue(e.target.value)}
-              className='w-24'
-            />
-            <Select
-              value={intervalUnit}
-              onValueChange={(v) =>
-                setIntervalUnit(v as 'minute' | 'hour' | 'day' | 'week')
-              }
-            >
-              <SelectTrigger className='w-40'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='minute'>Minutes</SelectItem>
-                <SelectItem value='hour'>Hours</SelectItem>
-                <SelectItem value='day'>Days</SelectItem>
-                <SelectItem value='week'>Weeks</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Label>Schedule type</Label>
+          <RadioGroup
+            value={mode}
+            onValueChange={(v) => setMode(v as 'recurring' | 'one_shot')}
+            className='flex gap-6'
+          >
+            <div className='flex items-center gap-2'>
+              <RadioGroupItem value='recurring' id='mode-recurring' />
+              <Label htmlFor='mode-recurring' className='font-normal'>
+                Recurring
+              </Label>
+            </div>
+            <div className='flex items-center gap-2'>
+              <RadioGroupItem value='one_shot' id='mode-oneshot' />
+              <Label htmlFor='mode-oneshot' className='font-normal'>
+                Run once at a specific time
+              </Label>
+            </div>
+          </RadioGroup>
         </div>
+
+        {mode === 'recurring' ? (
+          <div className='space-y-2'>
+            <Label>Run every</Label>
+            <div className='flex items-center gap-2'>
+              <Input
+                type='number'
+                min={1}
+                value={intervalValue}
+                onChange={(e) => setIntervalValue(e.target.value)}
+                className='w-24'
+              />
+              <Select
+                value={intervalUnit}
+                onValueChange={(v) =>
+                  setIntervalUnit(
+                    v as 'second' | 'minute' | 'hour' | 'day' | 'week'
+                  )
+                }
+              >
+                <SelectTrigger className='w-40'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='second'>Seconds</SelectItem>
+                  <SelectItem value='minute'>Minutes</SelectItem>
+                  <SelectItem value='hour'>Hours</SelectItem>
+                  <SelectItem value='day'>Days</SelectItem>
+                  <SelectItem value='week'>Weeks</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ) : null}
 
         <div className='grid grid-cols-2 gap-3'>
           <div className='space-y-2'>
@@ -461,6 +493,7 @@ function NewScheduleForm({
           </p>
         </div>
 
+        {mode === 'recurring' ? (
         <div className='space-y-2'>
           <Label>End condition</Label>
           <RadioGroup
@@ -521,6 +554,7 @@ function NewScheduleForm({
             </div>
           </RadioGroup>
         </div>
+        ) : null}
 
         <div className='flex items-center justify-end gap-2 pt-2'>
           {create.isError ? (
