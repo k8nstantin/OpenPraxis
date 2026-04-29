@@ -3,18 +3,22 @@ import { Link } from '@tanstack/react-router'
 import { History, Pencil, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  useAddDownstreamProductDep,
+  useAddDownstreamDep,
+  useAddUpstreamDep,
   useAllManifests,
+  useAllProducts,
+  useEntity,
+  useEntityChildren,
+  useEntityComments,
+  useEntityDependencies,
   useLinkManifest,
-  useProductComments,
-  useProductDependencies,
-  useProductManifests,
-  useProducts,
-  useRemoveDownstreamProductDep,
-  useRestoreDependencySnapshot,
+  useRemoveDownstreamDep,
+  useRemoveUpstreamDep,
+  useRestoreEntityDependencySnapshot,
   useUnlinkManifest,
-} from '@/lib/queries/products'
-import type { Comment } from '@/lib/types'
+  type EntityKind,
+} from '@/lib/queries/entity'
+import type { Comment, Manifest } from '@/lib/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,71 +44,85 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 type ConfirmTarget =
-  | {
-      kind: 'remove-subproduct'
-      row: PickerRow
-    }
-  | {
-      kind: 'remove-manifest'
-      row: PickerRow
-    }
+  | { kind: 'remove-downstream'; row: PickerRow }
+  | { kind: 'remove-manifest'; row: PickerRow }
+  | { kind: 'remove-upstream'; row: PickerRow }
   | {
       kind: 'restore'
       revisionLabel: string
-      snapshot: {
-        downstream: string[]
-        manifests: string[]
-      }
+      snapshot: { downstream: string[]; manifests: string[] }
     }
 
-// Dependencies tab — view + edit, with confirmation dialogs on every
-// mutating action and a toast on success/failure. Revision history
-// items are clickable → Restore prompt → applies the prior snapshot
-// back as current state via diff + replay.
-export function DependenciesTab({ productId }: { productId: string }) {
-  const subs = useProductDependencies(productId)
-  const manifests = useProductManifests(productId)
-  const allProducts = useProducts()
+// Dependencies tab — generic over products + manifests.
+//
+// Products surface two sections: Sub-products (downstream products
+// depending on this) + Manifests (owned children).
+//
+// Manifests surface one section: Depends on (upstream manifests this
+// blocks-on). Manifests don't own manifests, so the second section is
+// dropped. Children (tasks) are out of scope here — they get their own
+// menu later.
+export function DependenciesTab({
+  kind,
+  entityId,
+}: {
+  kind: EntityKind
+  entityId: string
+}) {
+  const isProduct = kind === 'product'
+  const deps = useEntityDependencies(kind, entityId)
+  const children = useEntityChildren(kind, entityId)
+  const allProducts = useAllProducts()
   const allManifests = useAllManifests()
-  const comments = useProductComments(productId)
+  const comments = useEntityComments(kind, entityId)
 
   const [editing, setEditing] = useState(false)
-  const [picker, setPicker] = useState<null | 'subproduct' | 'manifest'>(null)
+  const [picker, setPicker] = useState<
+    null | 'subproduct' | 'manifest-link' | 'manifest-upstream'
+  >(null)
   const [confirm, setConfirm] = useState<ConfirmTarget | null>(null)
 
-  const addSub = useAddDownstreamProductDep(productId)
-  const remSub = useRemoveDownstreamProductDep(productId)
-  const linkM = useLinkManifest(productId)
-  const unlinkM = useUnlinkManifest(productId)
-  const restore = useRestoreDependencySnapshot(productId)
+  // Mutation hooks. Products use downstream (sub-products) + manifest-
+  // re-parent. Manifests use upstream (depends-on) only.
+  const addDownstream = useAddDownstreamDep(kind, entityId)
+  const remDownstream = useRemoveDownstreamDep(kind, entityId)
+  const addUpstream = useAddUpstreamDep(kind, entityId)
+  const remUpstream = useRemoveUpstreamDep(kind, entityId)
+  const linkM = useLinkManifest(entityId)
+  const unlinkM = useUnlinkManifest(entityId)
+  const restore = useRestoreEntityDependencySnapshot(kind, entityId)
 
-  const subRows: PickerRow[] = (subs.data ?? []).map((d) => ({
+  // Products: deps = sub-products (downstream).
+  // Manifests: deps = upstream (depends-on).
+  const depRows: PickerRow[] = (deps.data ?? []).map((d) => ({
     id: d.id,
     marker: d.marker,
     title: d.title,
     status: d.status,
   }))
-  const manifestRows: PickerRow[] = (manifests.data ?? []).map((m) => ({
-    id: m.id,
-    marker: m.marker,
-    title: m.title,
-    status: m.status,
-  }))
+  const childRows: PickerRow[] = (children.data ?? []).map(
+    (m: { id: string; marker?: string; title?: string; status?: string }) => ({
+      id: m.id,
+      marker: m.marker ?? m.id.slice(0, 12),
+      title: m.title ?? m.id.slice(0, 12),
+      status: m.status ?? '',
+    })
+  )
 
   const snapshot = useMemo(
     () => ({
-      upstream: [],
-      downstream: subRows.map((r) => r.id),
-      manifests: manifestRows.map((r) => r.id),
+      upstream: isProduct ? [] : depRows.map((r) => r.id),
+      downstream: isProduct ? depRows.map((r) => r.id) : [],
+      manifests: isProduct ? childRows.map((r) => r.id) : [],
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subs.data, manifests.data]
+    [deps.data, children.data, isProduct]
   )
 
   const pickerCandidates = useMemo<PickerRow[]>(() => {
-    if (picker === 'manifest') {
+    if (picker === 'manifest-link') {
       return (allManifests.data ?? [])
-        .filter((m) => !manifestRows.some((r) => r.id === m.id))
+        .filter((m) => !childRows.some((r) => r.id === m.id))
         .map((m) => ({
           id: m.id,
           marker: m.marker,
@@ -113,7 +131,7 @@ export function DependenciesTab({ productId }: { productId: string }) {
         }))
     }
     if (picker === 'subproduct') {
-      const exclude = new Set([productId, ...subRows.map((r) => r.id)])
+      const exclude = new Set([entityId, ...depRows.map((r) => r.id)])
       return (allProducts.data ?? [])
         .filter((p) => !exclude.has(p.id))
         .map((p) => ({
@@ -123,9 +141,20 @@ export function DependenciesTab({ productId }: { productId: string }) {
           status: p.status,
         }))
     }
+    if (picker === 'manifest-upstream') {
+      const exclude = new Set([entityId, ...depRows.map((r) => r.id)])
+      return (allManifests.data ?? [])
+        .filter((m) => !exclude.has(m.id))
+        .map((m) => ({
+          id: m.id,
+          marker: m.marker,
+          title: m.title,
+          status: m.status,
+        }))
+    }
     return []
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picker, allProducts.data, allManifests.data, subs.data, manifests.data])
+  }, [picker, allProducts.data, allManifests.data, deps.data, children.data])
 
   const revisions = useMemo<Comment[]>(() => {
     if (!comments.data) return []
@@ -141,18 +170,21 @@ export function DependenciesTab({ productId }: { productId: string }) {
   const onConfirm = async () => {
     if (!confirm) return
     try {
-      if (confirm.kind === 'remove-subproduct') {
-        await remSub.mutateAsync({ target: confirm.row, snapshot })
+      if (confirm.kind === 'remove-downstream') {
+        await remDownstream.mutateAsync({ target: confirm.row, snapshot })
         toast.success(`Removed sub-product "${confirm.row.title}"`)
       } else if (confirm.kind === 'remove-manifest') {
         await unlinkM.mutateAsync({ target: confirm.row, snapshot })
         toast.success(`Unlinked manifest "${confirm.row.title}"`)
+      } else if (confirm.kind === 'remove-upstream') {
+        await remUpstream.mutateAsync({ target: confirm.row, snapshot })
+        toast.success(`Removed upstream "${confirm.row.title}"`)
       } else if (confirm.kind === 'restore') {
         const result = await restore.mutateAsync({
           snapshot: confirm.snapshot,
           revisionLabel: confirm.revisionLabel,
-          currentDownstream: subRows,
-          currentManifests: manifestRows,
+          currentDownstream: depRows,
+          currentManifests: childRows,
         })
         const summary = result
           ? `+${result.addedSubs + result.addedManifests} −${result.removedSubs + result.removedManifests}`
@@ -169,42 +201,88 @@ export function DependenciesTab({ productId }: { productId: string }) {
     <div className='space-y-3'>
       <Card>
         <CardContent className='space-y-1 p-3 text-sm'>
-          <p>
-            <span className='font-medium'>
-              Products and sub-products both own manifests.
-            </span>{' '}
-            Each manifest contains tasks (atomic work units agents
-            execute). The same editor applies at every level of the tree.
-          </p>
-          <p className='text-muted-foreground font-mono text-xs'>
-            Product ── owns ──▶ Sub-products · Manifests &nbsp; │
-            &nbsp; Manifest ── owns ──▶ Tasks (separate menu)
-          </p>
+          {isProduct ? (
+            <>
+              <p>
+                <span className='font-medium'>
+                  Products and sub-products both own manifests.
+                </span>{' '}
+                Each manifest contains tasks (atomic work units agents
+                execute). The same editor applies at every level of the tree.
+              </p>
+              <p className='text-muted-foreground font-mono text-xs'>
+                Product ── owns ──▶ Sub-products · Manifests &nbsp; │
+                &nbsp; Manifest ── owns ──▶ Tasks (separate menu)
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                <span className='font-medium'>
+                  Manifests can depend on other manifests.
+                </span>{' '}
+                A manifest stays in <em>waiting</em> until everything in
+                "Depends on" reaches a terminal status (closed / archive).
+                Tasks owned by this manifest live in the Tasks menu.
+              </p>
+              <p className='text-muted-foreground font-mono text-xs'>
+                Manifest ── depends on ──▶ Upstream manifests &nbsp; │
+                &nbsp; Manifest ── owns ──▶ Tasks
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
 
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-        <DepSection
-          title='Sub-products'
-          subtitle='Products nested under this one. Each is itself a product and can own its own sub-products + manifests. Click a row to drill in.'
-          editing={editing}
-          rows={subRows}
-          loading={subs.isLoading}
-          error={subs.error}
-          onAdd={() => setPicker('subproduct')}
-          onRemove={(row) => setConfirm({ kind: 'remove-subproduct', row })}
-          rowHref='/products'
-        />
-        <DepSection
-          title='Manifests'
-          subtitle='Plans owned directly by this product (or sub-product) at this level of the tree. Each manifest contains tasks (separate menu).'
-          editing={editing}
-          rows={manifestRows}
-          loading={manifests.isLoading}
-          error={manifests.error}
-          onAdd={() => setPicker('manifest')}
-          onRemove={(row) => setConfirm({ kind: 'remove-manifest', row })}
-        />
+      <div
+        className={
+          isProduct
+            ? 'grid grid-cols-1 gap-3 md:grid-cols-2'
+            : 'grid grid-cols-1 gap-3'
+        }
+      >
+        {isProduct ? (
+          <>
+            <DepSection
+              title='Sub-products'
+              subtitle='Products nested under this one. Each is itself a product and can own its own sub-products + manifests. Click a row to drill in.'
+              editing={editing}
+              rows={depRows}
+              loading={deps.isLoading}
+              error={deps.error}
+              onAdd={() => setPicker('subproduct')}
+              onRemove={(row) =>
+                setConfirm({ kind: 'remove-downstream', row })
+              }
+              rowHref='/products'
+            />
+            <DepSection
+              title='Manifests'
+              subtitle='Plans owned directly by this product (or sub-product) at this level of the tree. Each manifest contains tasks (separate menu).'
+              editing={editing}
+              rows={childRows}
+              loading={children.isLoading}
+              error={children.error}
+              onAdd={() => setPicker('manifest-link')}
+              onRemove={(row) =>
+                setConfirm({ kind: 'remove-manifest', row })
+              }
+              rowHref='/manifests'
+            />
+          </>
+        ) : (
+          <DepSection
+            title='Depends on'
+            subtitle='Upstream manifests this one waits on. Each must reach a terminal status before this manifest can flip to scheduled.'
+            editing={editing}
+            rows={depRows}
+            loading={deps.isLoading}
+            error={deps.error}
+            onAdd={() => setPicker('manifest-upstream')}
+            onRemove={(row) => setConfirm({ kind: 'remove-upstream', row })}
+            rowHref='/manifests'
+          />
+        )}
       </div>
 
       <div className='flex justify-end'>
@@ -275,27 +353,36 @@ export function DependenciesTab({ productId }: { productId: string }) {
         open={picker !== null}
         onOpenChange={(open) => setPicker(open ? picker : null)}
         title={
-          picker === 'subproduct' ? 'Add sub-product' : 'Link a manifest'
+          picker === 'subproduct'
+            ? 'Add sub-product'
+            : picker === 'manifest-link'
+              ? 'Link a manifest'
+              : 'Add upstream manifest'
         }
         description={
           picker === 'subproduct'
             ? 'Pick a product to nest under this one.'
-            : 'Pick a manifest to re-parent under this product.'
+            : picker === 'manifest-link'
+              ? 'Pick a manifest to re-parent under this product.'
+              : 'Pick a manifest this one will depend on. It must finish first.'
         }
         rows={pickerCandidates}
         loading={
-          picker === 'manifest'
-            ? allManifests.isLoading
-            : allProducts.isLoading
+          picker === 'subproduct'
+            ? allProducts.isLoading
+            : allManifests.isLoading
         }
         onPick={async (row) => {
           try {
             if (picker === 'subproduct') {
-              await addSub.mutateAsync({ target: row, snapshot })
+              await addDownstream.mutateAsync({ target: row, snapshot })
               toast.success(`Added sub-product "${row.title}"`)
-            } else if (picker === 'manifest') {
+            } else if (picker === 'manifest-link') {
               await linkM.mutateAsync({ target: row, snapshot })
               toast.success(`Linked manifest "${row.title}"`)
+            } else if (picker === 'manifest-upstream') {
+              await addUpstream.mutateAsync({ target: row, snapshot })
+              toast.success(`Added upstream "${row.title}"`)
             }
           } catch (e) {
             toast.error(`Failed: ${String(e)}`)
@@ -308,15 +395,13 @@ export function DependenciesTab({ productId }: { productId: string }) {
         onOpenChange={(open) => !open && setConfirm(null)}
       >
         <AlertDialogContent>
-          {confirm?.kind === 'remove-subproduct' ? (
+          {confirm?.kind === 'remove-downstream' ? (
             <>
               <AlertDialogHeader>
-                <AlertDialogTitle>
-                  Remove sub-product?
-                </AlertDialogTitle>
+                <AlertDialogTitle>Remove sub-product?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Remove <span className='font-medium'>{confirm.row.title}</span>{' '}
-                  from this product? It stays as a standalone product —
+                  Remove <span className='font-medium'>{confirm.row.title}</span>
+                  {' '}from this product? It stays as a standalone product —
                   this only severs the parent edge. Action is logged
                   in revision history; you can restore.
                 </AlertDialogDescription>
@@ -333,17 +418,34 @@ export function DependenciesTab({ productId }: { productId: string }) {
               <AlertDialogHeader>
                 <AlertDialogTitle>Unlink manifest?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Unlink <span className='font-medium'>{confirm.row.title}</span>{' '}
-                  from this product? Tasks owned by this manifest stay
+                  Unlink <span className='font-medium'>{confirm.row.title}</span>
+                  {' '}from this product? Tasks owned by this manifest stay
                   with the manifest but won't show up under this
-                  product anymore. Action is logged in revision
-                  history; you can restore.
+                  product anymore. Action is logged in revision history.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction onClick={onConfirm}>
                   Unlink
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : confirm?.kind === 'remove-upstream' ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove upstream dep?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Sever the depends-on edge from this manifest to{' '}
+                  <span className='font-medium'>{confirm.row.title}</span>.
+                  This manifest's waiting tasks may unblock as a result.
+                  Action is logged in revision history.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onConfirm}>
+                  Remove
                 </AlertDialogAction>
               </AlertDialogFooter>
             </>
@@ -393,7 +495,7 @@ function DepSection({
   error: unknown
   onAdd: () => void
   onRemove: (row: PickerRow) => void
-  rowHref?: '/products'
+  rowHref?: '/products' | '/manifests'
 }) {
   return (
     <Card>
@@ -436,7 +538,7 @@ function DepSection({
                 {rowHref ? (
                   <Link
                     to={rowHref}
-                    search={{ id: r.id, tab: 'description' }}
+                    search={{ id: r.id, tab: 'main' }}
                     className='min-w-0 flex-1'
                   >
                     <div className='truncate font-medium'>{r.title}</div>
@@ -516,9 +618,13 @@ function RevisionRow({
         ? 'upstream dep'
         : kind === 'manifest'
           ? 'manifest'
-          : kind === 'snapshot'
-            ? 'snapshot'
-            : 'item'
+          : kind === 'manifest_upstream'
+            ? 'upstream manifest'
+            : kind === 'manifest_downstream'
+              ? 'downstream manifest'
+              : kind === 'snapshot'
+                ? 'snapshot'
+                : 'item'
   const summary =
     op === 'restore'
       ? `Restored to ${targetTitle}`
@@ -566,6 +672,11 @@ function RevisionRow({
     </div>
   )
 }
+
+// Suppress unused-import warning — `Manifest` is referenced indirectly
+// via the queries layer's typing; keep the import so future tweaks
+// don't have to re-add it.
+export type { Manifest }
 
 function fmtTime(ts: number | string): string {
   const t = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)

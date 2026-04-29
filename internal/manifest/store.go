@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // Manifest is a detailed development spec document.
@@ -30,15 +32,26 @@ type Manifest struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// Computed from linked tasks — populated by EnrichWithCosts()
-	TotalTasks int     `json:"total_tasks"`
-	TotalTurns int     `json:"total_turns"`
-	TotalCost  float64 `json:"total_cost"`
+	// Computed from linked tasks — populated by EnrichWithCosts() (list-
+	// path: turns + cost only) or EnrichRecursiveCosts() (single-get path:
+	// adds actions + tokens). Manifests don't recurse like products do —
+	// the "recursive" name is kept for symmetry with product.Store but
+	// the walk is just task_runs joined to tasks where manifest_id = m.id.
+	TotalTasks   int     `json:"total_tasks"`
+	TotalTurns   int     `json:"total_turns"`
+	TotalCost    float64 `json:"total_cost"`
+	TotalActions int     `json:"total_actions"`
+	TotalTokens  int     `json:"total_tokens"`
 }
 
 // Store manages manifest persistence.
 type Store struct {
 	db *sql.DB
+	// rels is the unified relationships SCD-2 store. Wired post-init via
+	// SetRelationshipsBackend so the package import direction (relationships
+	// has no internal deps) stays one-way. All dependency reads + writes
+	// route through this; the legacy manifest_dependencies table is dormant.
+	rels *relationships.Store
 	// onTerminalTransition fires AFTER a successful Update that moved
 	// the manifest from a non-terminal status (draft/open) into a
 	// terminal one (closed/archive). Wired in node.go to
@@ -90,12 +103,22 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := s.initDependenciesSchema(); err != nil {
 		return nil, err
 	}
-	// One-shot backfill of the legacy comma-separated depends_on column
-	// into the new join table. Idempotent via PRIMARY KEY dedup; safe to
-	// run every boot until the column is retired in a follow-up PR.
-	if _, err := s.BackfillLegacyDependsOn(context.Background()); err != nil {
-		return nil, fmt.Errorf("backfill manifest dependencies: %w", err)
+	// Auto-wire a default relationships backend against the same DB
+	// handle so tests + any caller that doesn't explicitly call
+	// SetRelationshipsBackend get a working dep API. node-level wiring
+	// overrides this with the shared singleton.
+	rels, err := relationships.New(s.db)
+	if err != nil {
+		return nil, fmt.Errorf("init relationships backend: %w", err)
 	}
+	s.rels = rels
+	// PR/M3 (2026-04-28): the legacy `manifests.depends_on` →
+	// `manifest_dependencies` backfill is no longer fired here. All rows
+	// have long since landed in manifest_dependencies on prior boots and
+	// from there into the unified relationships store via
+	// relationships.MigrateLegacyDeps (called from node.go). The
+	// BackfillLegacyDependsOn function is kept on the type for forensic /
+	// emergency reseed scenarios but is not part of the boot path.
 	return s, nil
 }
 
@@ -135,6 +158,19 @@ func (s *Store) init() error {
 }
 
 // Create stores a new manifest.
+//
+// Ownership wiring: when projectID is non-empty, also writes the
+// canonical `EdgeOwns(product → manifest)` row into the relationships
+// SCD-2 table at the same instant. The DAG endpoint reads from
+// relationships only, so this is what makes the manifest appear under
+// its product in the dashboard graph.
+//
+// We continue to populate the legacy `manifests.project_id` column
+// alongside the relationships row for backward compatibility with the
+// handful of readers still hitting the column directly (handlers_stats
+// JOIN, settings_adapter, list responses). Those readers will migrate
+// to relationships.ListIncoming in a follow-up; column drop happens
+// after that lands.
 func (s *Store) Create(title, description, content, status, author, sourceNode, projectID, dependsOn string, jiraRefs, tags []string) (*Manifest, error) {
 	if status == "" {
 		status = "draft"
@@ -157,6 +193,24 @@ func (s *Store) Create(title, description, content, status, author, sourceNode, 
 		now.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
+	}
+
+	if projectID != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindProduct,
+			SrcID:     projectID,
+			DstKind:   relationships.KindManifest,
+			DstID:     id,
+			Kind:      relationships.EdgeOwns,
+			CreatedBy: author,
+			Reason:    "manifest created under product",
+		}); err != nil {
+			// Don't fail the create — the manifest row landed and the
+			// project_id column carries the ownership. A follow-up sweep
+			// can backfill missing rels rows. But surface the error to
+			// the caller's logs so we don't silently drift again.
+			return nil, fmt.Errorf("manifest created but relationships row failed: %w", err)
+		}
 	}
 
 	return &Manifest{
@@ -219,11 +273,58 @@ func (s *Store) Get(id string) (*Manifest, error) {
 	return m, err
 }
 
-// ListByProject returns manifests belonging to a project.
+// ListByProject returns manifests belonging to a project. Reads
+// canonical ownership from the relationships SCD-2 store via
+// `EdgeOwns(product → manifest)`. Falls back to the legacy
+// `manifests.project_id` column when the relationships backend isn't
+// wired (test fixtures + boot path before SetRelationshipsBackend).
 func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if s.rels != nil {
+		ctx := context.Background()
+		edges, err := s.rels.ListOutgoing(ctx, projectID, relationships.EdgeOwns)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(edges))
+		for _, e := range edges {
+			if e.DstKind == relationships.KindManifest {
+				ids = append(ids, e.DstID)
+			}
+		}
+		if len(ids) == 0 {
+			// Fall through to legacy JOIN — could be a test fixture
+			// that writes only to manifests.project_id without the
+			// EdgeOwns row. Production has both populated post-backfill,
+			// so legacy returns identical 0-row result there.
+			goto legacyFallback
+		}
+		placeholders := strings.Repeat("?,", len(ids))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, 0, len(ids)+1)
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		args = append(args, limit)
+		rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
+			FROM manifests WHERE id IN (`+placeholders+`) AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var results []*Manifest
+		for rows.Next() {
+			m, err := scanManifestRows(rows)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, m)
+		}
+		return results, rows.Err()
+	}
+legacyFallback:
 	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE project_id = ? AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, projectID, limit)
 	if err != nil {
@@ -268,7 +369,9 @@ func (s *Store) List(status string, limit int) ([]*Manifest, error) {
 		args = append(args, status)
 	}
 
-	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC`
+	// Chronological — newest first. Same rationale as Product.List:
+	// operators expect "what did I create most recently" at the top.
+	query += ` ORDER BY created_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -332,11 +435,80 @@ func (s *Store) EnrichWithCosts(manifests []*Manifest) {
 		return
 	}
 	mMap := make(map[string]*Manifest, len(manifests))
+	ids := make([]string, 0, len(manifests))
 	for _, m := range manifests {
 		mMap[m.ID] = m
+		ids = append(ids, m.ID)
 	}
 
-	// Aggregate cost from task_runs via tasks.manifest_id
+	// Resolve task ownership via the unified relationships store. Falls
+	// back to the legacy tasks.manifest_id JOIN when the relationships
+	// backend isn't wired (test bootstrap path).
+	if s.rels != nil {
+		ctx := context.Background()
+		ownsByMan, err := s.rels.ListOutgoingForMany(ctx, ids, relationships.EdgeOwns)
+		if err != nil {
+			return
+		}
+		// Flatten to (taskID → manifestID) so a single SQL aggregate over
+		// task_runs yields the per-manifest totals without N+1.
+		taskToMan := make(map[string]string)
+		allTaskIDs := []string{}
+		for mID, edges := range ownsByMan {
+			for _, e := range edges {
+				if e.DstKind != relationships.KindTask {
+					continue
+				}
+				taskToMan[e.DstID] = mID
+				allTaskIDs = append(allTaskIDs, e.DstID)
+			}
+		}
+		if len(allTaskIDs) == 0 {
+			return
+		}
+		placeholders := strings.Repeat("?,", len(allTaskIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(allTaskIDs))
+		for i, id := range allTaskIDs {
+			args[i] = id
+		}
+		rows, err := s.db.Query(`SELECT t.id, COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
+			FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
+			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''
+			GROUP BY t.id`, args...)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		// Initialise per-manifest task counts from the ownership graph;
+		// tasks with no runs still count toward TotalTasks.
+		for mID := range mMap {
+			edges := ownsByMan[mID]
+			n := 0
+			for _, e := range edges {
+				if e.DstKind == relationships.KindTask {
+					n++
+				}
+			}
+			mMap[mID].TotalTasks = n
+		}
+		for rows.Next() {
+			var tID string
+			var turns int
+			var cost float64
+			if err := rows.Scan(&tID, &turns, &cost); err == nil {
+				if mID, ok := taskToMan[tID]; ok {
+					if m, ok := mMap[mID]; ok {
+						m.TotalTurns += turns
+						m.TotalCost += cost
+					}
+				}
+			}
+		}
+		return
+	}
+
+	// Legacy fallback — only reached when rels backend isn't wired.
 	rows, err := s.db.Query(`SELECT t.manifest_id, COUNT(DISTINCT t.id), COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
 		FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
 		WHERE t.manifest_id != '' AND t.deleted_at = ''
@@ -356,6 +528,93 @@ func (s *Store) EnrichWithCosts(manifests []*Manifest) {
 				m.TotalCost = cost
 			}
 		}
+	}
+}
+
+// EnrichRecursiveCosts populates totals on a single manifest by summing
+// task_runs across every task owned by this manifest. Used by the
+// single-manifest GET so the dashboard surfaces actions + tokens
+// alongside the existing turns + cost. Manifests don't have descendants
+// the way products do (no recursive walk over manifest_dependencies);
+// the "recursive" name is kept for symmetry with product.Store, but the
+// query is a flat task_runs JOIN tasks WHERE manifest_id = m.id.
+func (s *Store) EnrichRecursiveCosts(m *Manifest) {
+	if m == nil {
+		return
+	}
+	// Resolve owned task IDs through the relationships store; aggregate
+	// task_runs WHERE task_id IN (...). Falls back to the legacy
+	// tasks.manifest_id JOIN when rels isn't wired.
+	if s.rels != nil {
+		ctx := context.Background()
+		edges, err := s.rels.ListOutgoing(ctx, m.ID, relationships.EdgeOwns)
+		if err != nil {
+			return
+		}
+		taskIDs := make([]string, 0, len(edges))
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				taskIDs = append(taskIDs, e.DstID)
+			}
+		}
+		if len(taskIDs) == 0 {
+			m.TotalTasks = 0
+			m.TotalTurns = 0
+			m.TotalCost = 0
+			m.TotalActions = 0
+			m.TotalTokens = 0
+			return
+		}
+		placeholders := strings.Repeat("?,", len(taskIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(taskIDs))
+		for i, id := range taskIDs {
+			args[i] = id
+		}
+		row := s.db.QueryRow(`
+			SELECT
+				COUNT(DISTINCT t.id),
+				COALESCE(SUM(tr.turns), 0),
+				COALESCE(SUM(tr.cost_usd), 0),
+				COALESCE(SUM(tr.actions), 0),
+				COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
+			FROM tasks t
+			LEFT JOIN task_runs tr ON tr.task_id = t.id
+			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''`,
+			args...,
+		)
+		var tasks, turns, actions, tokens int
+		var cost float64
+		if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
+			m.TotalTasks = tasks
+			m.TotalTurns = turns
+			m.TotalCost = cost
+			m.TotalActions = actions
+			m.TotalTokens = tokens
+		}
+		return
+	}
+	// Legacy fallback.
+	row := s.db.QueryRow(`
+		SELECT
+			COUNT(DISTINCT t.id),
+			COALESCE(SUM(tr.turns), 0),
+			COALESCE(SUM(tr.cost_usd), 0),
+			COALESCE(SUM(tr.actions), 0),
+			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
+		FROM tasks t
+		LEFT JOIN task_runs tr ON tr.task_id = t.id
+		WHERE t.manifest_id = ? AND t.deleted_at = ''`,
+		m.ID,
+	)
+	var tasks, turns, actions, tokens int
+	var cost float64
+	if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
+		m.TotalTasks = tasks
+		m.TotalTurns = turns
+		m.TotalCost = cost
+		m.TotalActions = actions
+		m.TotalTokens = tokens
 	}
 }
 

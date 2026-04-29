@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // ErrCycle is returned by AddDep when the requested edge would introduce a
@@ -16,31 +18,24 @@ import (
 var ErrCycle = errors.New("manifest_dependencies: cycle detected")
 
 // ErrSelfLoop is returned when a manifest is asked to depend on itself.
-// Enforced at the DB layer via CHECK, but we also guard before the insert
-// so the error carries a clearer message than the raw sqlite constraint
-// text.
 var ErrSelfLoop = errors.New("manifest_dependencies: a manifest cannot depend on itself")
 
 // Dep is the denormalized row the UI + MCP callers want when listing
 // deps or dependents: id + marker + title + current status are enough to
 // render a row without a second lookup per entry.
 type Dep struct {
-	ID         string    `json:"id"`
-	Marker     string    `json:"marker"`
-	Title      string    `json:"title"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-	CreatedBy  string    `json:"created_by"`
+	ID        string    `json:"id"`
+	Marker    string    `json:"marker"`
+	Title     string    `json:"title"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
 }
 
 // terminalManifestStatuses are the statuses that mean "this manifest is
 // done enough that its dependents can stop waiting on it." Per the session
 // decision on issue #74 we use the existing status taxonomy — `closed`
 // and `archive` count as terminal; `draft` and `open` do not.
-//
-// Kept as a var (not a const) because the scheduler enforcement path
-// passes this set into a SQL IN clause and having it in one place means
-// the predicate can't drift between the store and the scheduler.
 var terminalManifestStatuses = []string{"closed", "archive"}
 
 // IsTerminalStatus reports whether a manifest.status value counts as
@@ -55,18 +50,24 @@ func IsTerminalStatus(status string) bool {
 }
 
 // TerminalManifestStatuses returns a copy of the terminal-status set.
-// Exported for use by scheduler/runner code that needs to build SQL IN
-// predicates from the same source of truth.
 func TerminalManifestStatuses() []string {
 	out := make([]string, len(terminalManifestStatuses))
 	copy(out, terminalManifestStatuses)
 	return out
 }
 
-// initDependenciesSchema creates the manifest_dependencies join table plus
-// its indexes. Idempotent. Called from Store.init() after the main
-// manifests table exists, so FK-like semantics can rely on the parent
-// tables being present.
+// SetRelationshipsBackend wires the unified relationships SCD-2 store
+// as the source of truth for manifest→manifest dependency edges. After
+// PR/M3 cutover, every dep read + write routes through this; the
+// legacy manifest_dependencies table is dormant historical safety.
+func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
+	s.rels = r
+}
+
+// initDependenciesSchema creates the legacy manifest_dependencies join
+// table so existing rows survive the boot. Idempotent. After PR/M3 the
+// store no longer reads or writes this table — relationships is the
+// source of truth.
 func (s *Store) initDependenciesSchema() error {
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS manifest_dependencies (
 		manifest_id            TEXT NOT NULL,
@@ -89,15 +90,18 @@ func (s *Store) initDependenciesSchema() error {
 }
 
 // BackfillLegacyDependsOn copies edges out of the legacy comma-separated
-// manifests.depends_on column into manifest_dependencies. Idempotent —
-// re-running is a no-op because PRIMARY KEY dedup catches existing rows.
-// Safe to run on every startup until the legacy column is dropped in a
-// follow-up PR.
+// manifests.depends_on column into the unified relationships store as
+// EdgeDependsOn rows. Idempotent — Get probe per row. Not called from
+// the boot path after PR/M3; retained for forensic / emergency reseed
+// from the legacy column.
 //
-// Returns the number of new rows inserted. Does NOT clear the legacy
-// column; dual-read + dual-write keep the old path working while the
-// migration settles.
+// Returns the number of new rows inserted.
 func (s *Store) BackfillLegacyDependsOn(ctx context.Context) (int, error) {
+	if s.rels == nil {
+		// Nothing to do until the backend is wired; treat as zero-row
+		// migrate so callers can run this idempotently.
+		return 0, nil
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, depends_on FROM manifests WHERE depends_on != '' AND deleted_at = ''`)
 	if err != nil {
@@ -118,7 +122,6 @@ func (s *Store) BackfillLegacyDependsOn(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	now := time.Now().UTC().Unix()
 	inserted := 0
 	for _, e := range entries {
 		for _, raw := range strings.Split(e.depList, ",") {
@@ -126,17 +129,27 @@ func (s *Store) BackfillLegacyDependsOn(ctx context.Context) (int, error) {
 			if depID == "" || depID == e.manifestID {
 				continue
 			}
-			res, err := s.db.ExecContext(ctx,
-				`INSERT OR IGNORE INTO manifest_dependencies (manifest_id, depends_on_manifest_id, created_at, created_by)
-				 VALUES (?, ?, ?, 'legacy-backfill')`,
-				e.manifestID, depID, now)
-			if err != nil {
-				slog.Warn("backfill manifest dep failed",
-					"component", "manifest", "manifest_id", e.manifestID, "depends_on", depID, "error", err)
+			if _, found, err := s.rels.Get(ctx, e.manifestID, depID, relationships.EdgeDependsOn); err != nil {
+				slog.Warn("backfill manifest dep get failed",
+					"manifest_id", e.manifestID, "depends_on", depID, "error", err)
+				continue
+			} else if found {
 				continue
 			}
-			n, _ := res.RowsAffected()
-			inserted += int(n)
+			if err := s.rels.Create(ctx, relationships.Edge{
+				SrcKind:   relationships.KindManifest,
+				SrcID:     e.manifestID,
+				DstKind:   relationships.KindManifest,
+				DstID:     depID,
+				Kind:      relationships.EdgeDependsOn,
+				CreatedBy: "legacy-backfill",
+				Reason:    "backfill from manifests.depends_on column",
+			}); err != nil {
+				slog.Warn("backfill manifest dep create failed",
+					"manifest_id", e.manifestID, "depends_on", depID, "error", err)
+				continue
+			}
+			inserted++
 		}
 	}
 	if inserted > 0 {
@@ -146,16 +159,18 @@ func (s *Store) BackfillLegacyDependsOn(ctx context.Context) (int, error) {
 	return inserted, nil
 }
 
-// AddDep adds a manifest→depends_on_manifest edge after cycle detection.
+// AddDep adds a manifest→depends_on_manifest edge in the relationships
+// store after cycle detection. Direction: src=depender, dst=dependee.
 //
 //   - rejects self-loops (ErrSelfLoop)
-//   - rejects edges that would close a cycle (ErrCycle), computed via DFS
-//     from depends_on_manifest_id back to manifest_id over the current
-//     edge set
-//   - idempotent on duplicate edges (INSERT OR IGNORE)
+//   - rejects edges that would close a cycle (ErrCycle)
+//   - idempotent on duplicate edges (Get probe)
 //
-// On success, also appends to the legacy comma-separated column so any
-// un-migrated reader sees the new edge until the column is retired.
+// Also keeps the legacy comma-separated `manifests.depends_on` column
+// in sync so any code path that still reads it (CheckManifestDeps,
+// ParseDependsOn, propagation walkers) sees the new edge. The cache
+// column is OUT OF SCOPE for the relationships migration — kept as a
+// denormalised lookup that's regenerated from the relationships graph.
 func (s *Store) AddDep(ctx context.Context, manifestID, dependsOnID, createdBy string) error {
 	if manifestID == "" || dependsOnID == "" {
 		return fmt.Errorf("manifest_dependencies: empty manifest id")
@@ -163,11 +178,14 @@ func (s *Store) AddDep(ctx context.Context, manifestID, dependsOnID, createdBy s
 	if manifestID == dependsOnID {
 		return ErrSelfLoop
 	}
+	if s.rels == nil {
+		return fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
 
-	// Cycle check: would inserting (manifestID → dependsOnID) create a
-	// cycle? That happens iff dependsOnID can already reach manifestID
-	// by following existing edges. DFS from dependsOnID; bail on first
-	// hit.
+	// Cycle check via DFS over the relationships graph: would inserting
+	// (manifestID → dependsOnID) create a cycle? That happens iff
+	// dependsOnID can already reach manifestID. DFS from dependsOnID;
+	// bail on first hit.
 	reaches, err := s.pathExists(ctx, dependsOnID, manifestID)
 	if err != nil {
 		return fmt.Errorf("cycle check: %w", err)
@@ -177,16 +195,24 @@ func (s *Store) AddDep(ctx context.Context, manifestID, dependsOnID, createdBy s
 			ErrCycle, manifestID, dependsOnID)
 	}
 
-	now := time.Now().UTC().Unix()
-	if _, err := s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO manifest_dependencies (manifest_id, depends_on_manifest_id, created_at, created_by)
-		 VALUES (?, ?, ?, ?)`,
-		manifestID, dependsOnID, now, createdBy); err != nil {
-		return fmt.Errorf("insert manifest dep: %w", err)
+	if _, found, err := s.rels.Get(ctx, manifestID, dependsOnID, relationships.EdgeDependsOn); err != nil {
+		return err
+	} else if found {
+		return nil
 	}
 
-	// Dual-write: append to legacy comma-separated column so readers
-	// that still query `manifests.depends_on` see the edge.
+	if err := s.rels.Create(ctx, relationships.Edge{
+		SrcKind:   relationships.KindManifest,
+		SrcID:     manifestID,
+		DstKind:   relationships.KindManifest,
+		DstID:     dependsOnID,
+		Kind:      relationships.EdgeDependsOn,
+		CreatedBy: createdBy,
+		Reason:    "manifest dep added",
+	}); err != nil {
+		return err
+	}
+
 	if err := s.syncLegacyDependsOn(ctx, manifestID); err != nil {
 		slog.Warn("sync legacy depends_on failed", "component", "manifest",
 			"manifest_id", manifestID, "error", err)
@@ -195,20 +221,20 @@ func (s *Store) AddDep(ctx context.Context, manifestID, dependsOnID, createdBy s
 }
 
 // RemoveDep is idempotent — removing an edge that doesn't exist returns
-// nil, not an error. The legacy column is re-synced from the join table
-// after the delete so the comma-separated list stays canonical-ish.
+// nil, not an error. The legacy `manifests.depends_on` cache column is
+// re-synced from the relationships graph after the close so it stays
+// canonical.
 //
-// Fires the onDepRemoved handler (if wired) after a successful delete +
+// Fires the onDepRemoved handler (if wired) after a successful close +
 // legacy sync. The handler rehabs any now-unblocked waiting tasks per
-// Option B — see SetDepRemovedHandler. Firing unconditionally (not only
-// when the edge actually existed) keeps the contract simple: "after
-// this call, the edge is gone and any rehab that should have happened
-// has happened." A no-op delete followed by a no-op rehab is fine.
+// Option B.
 func (s *Store) RemoveDep(ctx context.Context, manifestID, dependsOnID string) error {
-	if _, err := s.db.ExecContext(ctx,
-		`DELETE FROM manifest_dependencies WHERE manifest_id = ? AND depends_on_manifest_id = ?`,
-		manifestID, dependsOnID); err != nil {
-		return fmt.Errorf("delete manifest dep: %w", err)
+	if s.rels == nil {
+		return fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
+	if err := s.rels.Remove(ctx, manifestID, dependsOnID,
+		relationships.EdgeDependsOn, "http-api", "removed via manifest_dependencies API"); err != nil {
+		return fmt.Errorf("remove manifest dep: %w", err)
 	}
 	if err := s.syncLegacyDependsOn(ctx, manifestID); err != nil {
 		slog.Warn("sync legacy depends_on failed", "component", "manifest",
@@ -221,78 +247,75 @@ func (s *Store) RemoveDep(ctx context.Context, manifestID, dependsOnID string) e
 }
 
 // ListDeps returns the out-edges: manifests this one depends on.
-// Joined against the manifests table so each row carries the denormalized
-// status + title the UI renders. Results sorted by created_at so the
-// UI order matches the insertion order.
+// Joined against the manifests table so each row carries the
+// denormalized status + title the UI renders.
 func (s *Store) ListDeps(ctx context.Context, manifestID string) ([]Dep, error) {
-	return s.queryDeps(ctx,
-		`SELECT m.id, m.title, m.status, d.created_at, d.created_by
-		 FROM manifest_dependencies d
-		 JOIN manifests m ON m.id = d.depends_on_manifest_id
-		 WHERE d.manifest_id = ? AND m.deleted_at = ''
-		 ORDER BY d.created_at ASC`,
-		manifestID)
+	if s.rels == nil {
+		return nil, fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeDependsOn)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichEdgesAsDeps(ctx, edges, true)
 }
 
-// ListDependents returns the in-edges: manifests that depend on this one.
-// Same shape as ListDeps; used by the watcher audit callback to walk
-// impacted manifests when a parent closes.
+// ListDependents returns the in-edges: manifests that depend on this
+// one. Same shape as ListDeps; used by the watcher audit callback to
+// walk impacted manifests when a parent closes.
 func (s *Store) ListDependents(ctx context.Context, manifestID string) ([]Dep, error) {
-	return s.queryDeps(ctx,
-		`SELECT m.id, m.title, m.status, d.created_at, d.created_by
-		 FROM manifest_dependencies d
-		 JOIN manifests m ON m.id = d.manifest_id
-		 WHERE d.depends_on_manifest_id = ? AND m.deleted_at = ''
-		 ORDER BY d.created_at ASC`,
-		manifestID)
+	if s.rels == nil {
+		return nil, fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
+	edges, err := s.rels.ListIncoming(ctx, manifestID, relationships.EdgeDependsOn)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichEdgesAsDeps(ctx, edges, false)
 }
 
-// IsSatisfied reports whether every manifest this one depends on is in a
-// terminal status. The second return is the list of unsatisfied dep
-// manifest IDs — populated so the caller can build a human-readable
-// block_reason for the task row without a second round-trip.
+// IsSatisfied reports whether every manifest this one depends on is in
+// a terminal status. The second return is the list of unsatisfied dep
+// manifest IDs.
 func (s *Store) IsSatisfied(ctx context.Context, manifestID string) (bool, []string, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT m.id, m.status
-		 FROM manifest_dependencies d
-		 JOIN manifests m ON m.id = d.depends_on_manifest_id
-		 WHERE d.manifest_id = ? AND m.deleted_at = ''`, manifestID)
+	if s.rels == nil {
+		return false, nil, fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeDependsOn)
 	if err != nil {
 		return false, nil, err
 	}
-	defer rows.Close()
-
 	var unsatisfied []string
-	for rows.Next() {
-		var id, status string
-		if err := rows.Scan(&id, &status); err != nil {
-			return false, nil, err
+	for _, e := range edges {
+		if e.DstKind != relationships.KindManifest {
+			continue
+		}
+		var status, deletedAt string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT status, deleted_at FROM manifests WHERE id = ?`, e.DstID).Scan(&status, &deletedAt); err != nil {
+			continue // missing dep — don't block on phantom
+		}
+		if deletedAt != "" {
+			continue
 		}
 		if !IsTerminalStatus(status) {
-			unsatisfied = append(unsatisfied, id)
+			unsatisfied = append(unsatisfied, e.DstID)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, nil, err
 	}
 	return len(unsatisfied) == 0, unsatisfied, nil
 }
 
-// pathExists does a DFS from src, returning true if dst is reachable by
-// walking manifest_dependencies edges (src → ... → dst). Cycle detection
-// uses it in reverse: "does B already reach A? if so A→B would close a
+// pathExists does a DFS from src over the relationships dep graph,
+// returning true if dst is reachable. Cycle detection on AddDep uses
+// it in reverse: "does B already reach A? if so A→B would close a
 // cycle."
-//
-// The visited set caps traversal so pre-existing cycles in the DB (which
-// shouldn't happen but mustn't hang the process) terminate. Manifests are
-// counted in the dozens per node so O(V+E) traversal is fine; if this
-// ever shows up in a profile, we switch to storing transitive closure on
-// each row.
 func (s *Store) pathExists(ctx context.Context, src, dst string) (bool, error) {
+	if s.rels == nil {
+		return false, fmt.Errorf("manifest_dependencies: relationships backend not wired")
+	}
 	visited := map[string]bool{}
 	stack := []string{src}
 	for len(stack) > 0 {
-		// Pop.
 		node := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
@@ -304,83 +327,128 @@ func (s *Store) pathExists(ctx context.Context, src, dst string) (bool, error) {
 		}
 		visited[node] = true
 
-		rows, err := s.db.QueryContext(ctx,
-			`SELECT depends_on_manifest_id FROM manifest_dependencies WHERE manifest_id = ?`, node)
+		edges, err := s.rels.ListOutgoing(ctx, node, relationships.EdgeDependsOn)
 		if err != nil {
 			return false, err
 		}
-		for rows.Next() {
-			var next string
-			if err := rows.Scan(&next); err != nil {
-				rows.Close()
-				return false, err
+		for _, e := range edges {
+			if e.DstKind != relationships.KindManifest {
+				continue
 			}
-			if !visited[next] {
-				stack = append(stack, next)
+			if !visited[e.DstID] {
+				stack = append(stack, e.DstID)
 			}
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return false, err
-		}
-		rows.Close()
 	}
 	return false, nil
 }
 
-// queryDeps is the shared scan path for ListDeps + ListDependents. Marker
-// is derived here so callers don't have to duplicate the 12-char prefix
-// rule.
-func (s *Store) queryDeps(ctx context.Context, query, id string) ([]Dep, error) {
-	rows, err := s.db.QueryContext(ctx, query, id)
+// enrichEdgesAsDeps joins relationships rows against the manifests
+// table to produce the Dep shape the UI renders. outgoing controls
+// which side of the edge is the "other" manifest to fetch — true for
+// ListDeps (dst is the dep), false for ListDependents (src is the
+// dependent).
+func (s *Store) enrichEdgesAsDeps(ctx context.Context, edges []relationships.Edge, outgoing bool) ([]Dep, error) {
+	if len(edges) == 0 {
+		return nil, nil
+	}
+	type lookup struct {
+		other string
+		edge  relationships.Edge
+	}
+	lookups := make([]lookup, 0, len(edges))
+	ids := make([]string, 0, len(edges))
+	for _, e := range edges {
+		var other, otherKind string
+		if outgoing {
+			other, otherKind = e.DstID, e.DstKind
+		} else {
+			other, otherKind = e.SrcID, e.SrcKind
+		}
+		if otherKind != relationships.KindManifest {
+			continue
+		}
+		lookups = append(lookups, lookup{other: other, edge: e})
+		ids = append(ids, other)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, title, status FROM manifests
+		 WHERE id IN (`+placeholders+`) AND deleted_at = ''`,
+		args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var out []Dep
+	type info struct{ title, status string }
+	titles := make(map[string]info, len(ids))
 	for rows.Next() {
-		var d Dep
-		var createdAtUnix int64
-		if err := rows.Scan(&d.ID, &d.Title, &d.Status, &createdAtUnix, &d.CreatedBy); err != nil {
+		var id, title, status string
+		if err := rows.Scan(&id, &title, &status); err != nil {
 			return nil, err
 		}
-		d.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
+		titles[id] = info{title: title, status: status}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Dep, 0, len(lookups))
+	for _, l := range lookups {
+		t, ok := titles[l.other]
+		if !ok {
+			continue
+		}
+		d := Dep{
+			ID:        l.other,
+			Title:     t.title,
+			Status:    t.status,
+			CreatedBy: l.edge.CreatedBy,
+		}
 		if len(d.ID) >= 12 {
 			d.Marker = d.ID[:12]
 		}
+		if l.edge.ValidFrom != "" {
+			if pt, err := time.Parse(time.RFC3339Nano, l.edge.ValidFrom); err == nil {
+				d.CreatedAt = pt.UTC()
+			}
+		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-// syncLegacyDependsOn regenerates the comma-separated manifests.depends_on
-// column from the current join-table rows for manifestID. Keeps legacy
-// readers seeing a consistent view until the column is dropped. Called
-// after Add/RemoveDep.
+// syncLegacyDependsOn regenerates the comma-separated
+// manifests.depends_on column from the current relationships rows for
+// manifestID. Keeps legacy readers (CheckManifestDeps,
+// ParseDependsOn, propagation walkers) seeing a consistent view. The
+// cache column is OUT OF SCOPE for the relationships migration but
+// must stay aligned with the graph after every Add/RemoveDep.
 func (s *Store) syncLegacyDependsOn(ctx context.Context, manifestID string) error {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT depends_on_manifest_id FROM manifest_dependencies WHERE manifest_id = ? ORDER BY created_at ASC`,
-		manifestID)
+	if s.rels == nil {
+		return nil
+	}
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeDependsOn)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return err
+	// Sort by valid_from so the cache order matches insertion order.
+	sortedIDs := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind != relationships.KindManifest {
+			continue
 		}
-		ids = append(ids, id)
+		sortedIDs = append(sortedIDs, e.DstID)
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE manifests SET depends_on = ?, updated_at = ? WHERE id = ?`,
-		strings.Join(ids, ","), time.Now().UTC().Format(time.RFC3339), manifestID)
+		strings.Join(sortedIDs, ","), time.Now().UTC().Format(time.RFC3339), manifestID)
 	return err
 }

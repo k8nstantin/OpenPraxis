@@ -148,7 +148,8 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 func apiTaskList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		tasks, err := n.Tasks.List(status, 50)
+		// limit=0 → unbounded. v2 list pane paginates client-side.
+		tasks, err := n.Tasks.List(status, 0)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -210,6 +211,11 @@ func apiTaskGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
+		// Single-task GET is the read path for the portal-v2 task detail
+		// page — mirror manifest's EnrichRecursiveCosts so the Main-tab
+		// gauges have actions + tokens on top of the cheaper turns + cost
+		// already populated by Get.
+		n.Tasks.EnrichRunStats(t)
 		writeJSON(w, EnrichWithHTML(t, map[string]string{"description": t.Description}))
 	}
 }
@@ -323,6 +329,345 @@ func apiTaskRuns(n *node.Node) http.HandlerFunc {
 			runs = []task.TaskRun{}
 		}
 		writeJSON(w, runs)
+	}
+}
+
+// apiCumulativeTrend returns time-bucketed cumulative totals for cost,
+// turns, and actions over a configurable window. Powers the AI Stats
+// panel trend charts so they show real history instead of an
+// in-memory accumulator that resets on every reload.
+//
+// Window control:
+//   - default: today (since 00:00 UTC). Matches "Cost·today / Turns·today"
+//     framing operators expect.
+//   - ?since=<rfc3339>: explicit start time (drill-down — e.g. 7d ago
+//     for weekly trends, or the product creation timestamp for "since
+//     ever").
+//   - ?period=<duration>: rolling window from now (e.g. 1h, 24h).
+//     Convenient when "today" doesn't quite fit.
+//
+// Strategy:
+//   - For cost / turns: pre-window total = SUM(...) WHERE completed_at < window_start.
+//     Then walk task_runs in [window_start, now] in completed_at order,
+//     emit a sample after each run with the running total.
+//   - For actions: pre-window count = COUNT(*) WHERE created_at < window_start.
+//     Then bucket actions in the window by minute and emit cumulative
+//     sample at each bucket boundary.
+//   - All three series share a uniform sampling grid so the chart is
+//     dense regardless of how clumpy the underlying events are.
+func apiCumulativeTrend(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=10")
+		now := time.Now().UTC()
+
+		var periodStart time.Time
+		if since := r.URL.Query().Get("since"); since != "" {
+			if t, err := time.Parse(time.RFC3339, since); err == nil {
+				periodStart = t.UTC()
+			}
+		}
+		if periodStart.IsZero() {
+			if periodStr := r.URL.Query().Get("period"); periodStr != "" {
+				if d, err := time.ParseDuration(periodStr); err == nil && d > 0 {
+					periodStart = now.Add(-d)
+				}
+			}
+		}
+		if periodStart.IsZero() {
+			// Default: today (00:00 UTC). Operator's mental model
+			// matches the existing "today" rollups on /api/tasks/stats.
+			periodStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		}
+		period := now.Sub(periodStart)
+		if period <= 0 {
+			period = time.Hour
+		}
+
+		db := n.Tasks.DB()
+
+		// Pre-period baselines.
+		var baseCost float64
+		var baseTurns int64
+		var baseActions int64
+		_ = db.QueryRow(`SELECT COALESCE(SUM(cost_usd),0), COALESCE(SUM(turns),0)
+			FROM task_runs WHERE status='completed' AND completed_at != '' AND completed_at < ?`,
+			periodStart.Format(time.RFC3339)).Scan(&baseCost, &baseTurns)
+		_ = db.QueryRow(`SELECT COUNT(*) FROM actions WHERE created_at < ?`,
+			periodStart.Format(time.RFC3339)).Scan(&baseActions)
+
+		// Walk the period at 1-minute resolution, accumulating runs and
+		// actions as their timestamps cross each tick.
+		type sample struct {
+			TS      string  `json:"ts"`
+			Cost    float64 `json:"cost"`
+			Turns   int64   `json:"turns"`
+			Actions int64   `json:"actions"`
+		}
+		bucketDur := time.Minute
+		// Cap buckets at 240 (4h at 1m, 24h at 6m) — auto-coarsen if
+		// the period would otherwise produce too many samples.
+		buckets := int(period / bucketDur)
+		if buckets > 240 {
+			bucketDur = period / 240
+			buckets = 240
+		}
+
+		// Pre-fetch task_runs in the period with their completed_at.
+		runRows, err := db.Query(`SELECT completed_at, cost_usd, turns FROM task_runs
+			WHERE status='completed' AND completed_at != '' AND completed_at >= ? AND completed_at <= ?
+			ORDER BY completed_at ASC`,
+			periodStart.Format(time.RFC3339), now.Format(time.RFC3339))
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		type runEvent struct {
+			at    time.Time
+			cost  float64
+			turns int64
+		}
+		var runs []runEvent
+		for runRows.Next() {
+			var atStr string
+			var cost float64
+			var turns int64
+			if scanErr := runRows.Scan(&atStr, &cost, &turns); scanErr == nil {
+				if at, perr := time.Parse(time.RFC3339, atStr); perr == nil {
+					runs = append(runs, runEvent{at: at, cost: cost, turns: turns})
+				}
+			}
+		}
+		runRows.Close()
+
+		// Pre-fetch action timestamps in the period (just timestamps,
+		// each one is a +1 increment).
+		actRows, err := db.Query(`SELECT created_at FROM actions
+			WHERE created_at >= ? AND created_at <= ?
+			ORDER BY created_at ASC`,
+			periodStart.Format(time.RFC3339), now.Format(time.RFC3339))
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		var acts []time.Time
+		for actRows.Next() {
+			var atStr string
+			if scanErr := actRows.Scan(&atStr); scanErr == nil {
+				if at, perr := time.Parse(time.RFC3339, atStr); perr == nil {
+					acts = append(acts, at)
+				}
+			}
+		}
+		actRows.Close()
+
+		samples := make([]sample, 0, buckets+1)
+		runIdx := 0
+		actIdx := 0
+		curCost := baseCost
+		curTurns := baseTurns
+		curActions := baseActions
+		for i := 0; i <= buckets; i++ {
+			t := periodStart.Add(time.Duration(i) * bucketDur)
+			// Roll forward any runs whose completed_at <= t.
+			for runIdx < len(runs) && !runs[runIdx].at.After(t) {
+				curCost += runs[runIdx].cost
+				curTurns += runs[runIdx].turns
+				runIdx++
+			}
+			for actIdx < len(acts) && !acts[actIdx].After(t) {
+				curActions++
+				actIdx++
+			}
+			samples = append(samples, sample{
+				TS:      t.Format(time.RFC3339),
+				Cost:    math.Round(curCost*100) / 100,
+				Turns:   curTurns,
+				Actions: curActions,
+			})
+		}
+
+		writeJSON(w, map[string]any{
+			"samples":     samples,
+			"period":      period.String(),
+			"bucket":      bucketDur.String(),
+			"base_cost":   math.Round(baseCost*100) / 100,
+			"base_turns":  baseTurns,
+			"base_actions": baseActions,
+		})
+	}
+}
+
+// apiRunningTasksLive returns every currently-running task enriched
+// with its in-flight run metrics (turns, actions, cost, lines, latest
+// CPU%, latest RSS, recent sample series for sparklines). Single
+// round-trip — the front-page Tasks panel can render per-task tiles
+// without N+1 fetches.
+func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+
+		type liveSample struct {
+			TS      string  `json:"ts"`
+			CPU     float64 `json:"cpu_pct"`
+			RSS     float64 `json:"rss_mb"`
+			Cost    float64 `json:"cost_usd"`
+			Turns   int     `json:"turns"`
+			Actions int     `json:"actions"`
+		}
+		type liveTask struct {
+			TaskID         string       `json:"task_id"`
+			Title          string       `json:"title"`
+			ManifestID     string       `json:"manifest_id"`
+			RunID          int64        `json:"run_id"`
+			RunNumber      int          `json:"run_number"`
+			StartedAt      string       `json:"started_at"`
+			ElapsedSec     int          `json:"elapsed_sec"`
+			Turns          int          `json:"turns"`
+			Lines          int          `json:"lines"`
+			LinesAdded     int          `json:"lines_added"`
+			LinesRemoved   int          `json:"lines_removed"`
+			CostUSD        float64      `json:"cost_usd"`
+			InputTokens    int          `json:"input_tokens"`
+			OutputTokens   int          `json:"output_tokens"`
+			CacheRead      int          `json:"cache_read_tokens"`
+			CacheCreate    int          `json:"cache_create_tokens"`
+			CPUPct         float64      `json:"cpu_pct"`
+			RSSMB          float64      `json:"rss_mb"`
+			ActionsCount   int          `json:"actions_count"`
+			RecentSamples  []liveSample `json:"recent_samples"`
+		}
+
+		// Source of truth for an IN-FLIGHT task is the Runner's
+		// in-memory state — task_runs is only written at completion.
+		// Fall back to the running-status DB rows when the runner is
+		// nil (e.g. orphan recovery during boot).
+		now := time.Now().UTC()
+		db := n.Tasks.DB()
+
+		type running struct {
+			id         string
+			title      string
+			manifestID string
+			startedAt  time.Time
+			actions    int
+			lines      int
+			cost       float64
+			model      string
+		}
+		var runningSet []running
+
+		if runner := n.GetRunner(); runner != nil {
+			for _, rt := range runner.ListRunning() {
+				runningSet = append(runningSet, running{
+					id:         rt.TaskID,
+					title:      rt.Title,
+					manifestID: "", // filled below from tasks row if needed
+					startedAt:  rt.StartedAt,
+					actions:    rt.Actions,
+					lines:      rt.Lines,
+					cost:       rt.CumulativeCostUSD,
+					model:      rt.Model,
+				})
+			}
+		} else {
+			rows, err := n.Tasks.List("running", 50)
+			if err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
+			for _, t := range rows {
+				runningSet = append(runningSet, running{
+					id: t.ID, title: t.Title, manifestID: t.ManifestID,
+				})
+			}
+		}
+
+		out := make([]liveTask, 0, len(runningSet))
+		for _, r := range runningSet {
+			lt := liveTask{
+				TaskID:       r.id,
+				Title:        r.title,
+				ManifestID:   r.manifestID,
+				CostUSD:      r.cost,
+				Lines:        r.lines,
+				ActionsCount: r.actions,
+			}
+			if !r.startedAt.IsZero() {
+				lt.StartedAt = r.startedAt.UTC().Format(time.RFC3339)
+				lt.ElapsedSec = int(now.Sub(r.startedAt).Seconds())
+			}
+			if lt.ManifestID == "" {
+				_ = db.QueryRow(`SELECT manifest_id FROM tasks WHERE id = ?`, r.id).Scan(&lt.ManifestID)
+			}
+
+			// task_runs row for the live run (one is created at run start
+			// in the modern path; if not yet present we fall back to
+			// runner state captured above).
+			var runID int64
+			var runNum, turns, linesAdded, linesRemoved int
+			var inputTok, outputTok, cacheR, cacheC int
+			var dbStartedAt string
+			err := db.QueryRow(`SELECT id, run_number, turns, lines_added, lines_removed,
+				input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+				started_at
+			FROM task_runs
+			WHERE task_id = ? AND (completed_at = '' OR status = 'running')
+			ORDER BY id DESC LIMIT 1`, r.id).Scan(
+				&runID, &runNum, &turns, &linesAdded, &linesRemoved,
+				&inputTok, &outputTok, &cacheR, &cacheC, &dbStartedAt,
+			)
+			if err == nil {
+				lt.RunID = runID
+				lt.RunNumber = runNum
+				lt.Turns = turns
+				lt.LinesAdded = linesAdded
+				lt.LinesRemoved = linesRemoved
+				lt.InputTokens = inputTok
+				lt.OutputTokens = outputTok
+				lt.CacheRead = cacheR
+				lt.CacheCreate = cacheC
+				if lt.StartedAt == "" {
+					lt.StartedAt = dbStartedAt
+				}
+			}
+
+			// task_run_host_samples — the host sampler tags samples with
+			// the in-flight run_id. If the run_id isn't in task_runs yet
+			// (very early in the run) the sampler may already have been
+			// writing under a different anchor; the sparklines just stay
+			// empty until the row lands.
+			if runID > 0 {
+				sampleRows, qerr := db.Query(`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
+				FROM task_run_host_samples WHERE run_id = ?
+				ORDER BY id DESC LIMIT 30`, runID)
+				if qerr == nil {
+					var samples []liveSample
+					for sampleRows.Next() {
+						var s liveSample
+						if scanErr := sampleRows.Scan(&s.TS, &s.CPU, &s.RSS, &s.Cost, &s.Turns, &s.Actions); scanErr == nil {
+							samples = append(samples, s)
+						}
+					}
+					sampleRows.Close()
+					for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
+						samples[i], samples[j] = samples[j], samples[i]
+					}
+					lt.RecentSamples = samples
+					if n := len(samples); n > 0 {
+						lt.CPUPct = samples[n-1].CPU
+						lt.RSSMB = samples[n-1].RSS
+					}
+				}
+			}
+
+			if lt.RecentSamples == nil {
+				lt.RecentSamples = []liveSample{}
+			}
+
+			out = append(out, lt)
+		}
+
+		writeJSON(w, out)
 	}
 }
 
@@ -592,6 +937,25 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			budgetExceeded = costToday >= dailyBudget
 		}
 
+		// Cumulative AI stats — one round-trip query against task_runs so
+		// the front-page AI Stats panel can show all-time figures
+		// alongside today's. Cheap on a few thousand rows; if/when the
+		// table grows we materialise this into a stats roll-up table.
+		var totalRuns, cumTurns, cumLines, cumErrors int
+		var cumCost float64
+		var cumInput, cumOutput, cumCacheRead, cumCacheCreate int64
+		_ = n.Tasks.DB().QueryRow(`SELECT
+			COUNT(*),
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(turns), 0),
+			COALESCE(SUM(lines), 0),
+			COALESCE(SUM(errors), 0),
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(cache_create_tokens), 0)
+		FROM task_runs WHERE status='completed'`).Scan(&totalRuns, &cumCost, &cumTurns, &cumLines, &cumErrors, &cumInput, &cumOutput, &cumCacheRead, &cumCacheCreate)
+
 		writeJSON(w, map[string]any{
 			"running":         runningCount,
 			"tasks_total":     len(tasks),
@@ -600,6 +964,16 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			"daily_budget":    dailyBudget,
 			"budget_pct":      budgetPct,
 			"budget_exceeded": budgetExceeded,
+			// Cumulative rollups across every completed run.
+			"runs_total":                totalRuns,
+			"cost_total":                math.Round(cumCost*100) / 100,
+			"turns_total":               cumTurns,
+			"lines_total":               cumLines,
+			"errors_total":              cumErrors,
+			"input_tokens_total":        cumInput,
+			"output_tokens_total":       cumOutput,
+			"cache_read_tokens_total":   cumCacheRead,
+			"cache_create_tokens_total": cumCacheCreate,
 		})
 	}
 }
@@ -1097,6 +1471,156 @@ func apiTaskApprove(n *node.Node) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, map[string]string{"status": "approved", "task_id": t.ID, "reviewer": reviewer})
+	}
+}
+
+// resolveTaskID accepts a 12-char marker or full UUID and returns the
+// full UUID via Tasks.Get. Returns "" + a non-empty error message when
+// missing — same shape as resolveManifestID for consistency.
+func resolveTaskID(n *node.Node, idOrMarker string) (string, string) {
+	t, _ := n.Tasks.Get(idOrMarker)
+	if t == nil {
+		return "", "task not found: " + idOrMarker
+	}
+	return t.ID, ""
+}
+
+// taskDepRow is the wire shape for /api/tasks/{id}/dependencies — same
+// {id, marker, title, status} contract products + manifests use.
+type taskDepRow struct {
+	ID     string `json:"id"`
+	Marker string `json:"marker"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// apiTaskDepList — GET /api/tasks/{id}/dependencies?direction=out|in|both.
+//
+// Mirrors apiManifestDepList. The task model carries a single
+// `depends_on` cached on tasks (one parent dep at most), so the "out"
+// direction returns 0 or 1 row. "in" walks the inverse — every task
+// whose `depends_on` is this task. Default direction is "out".
+func apiTaskDepList(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		direction := r.URL.Query().Get("direction")
+		if direction == "" {
+			direction = "out"
+		}
+		out := map[string]any{}
+		switch direction {
+		case "out", "both":
+			deps := []taskDepRow{}
+			t, _ := n.Tasks.Get(id)
+			if t != nil && t.DependsOn != "" {
+				dep, _ := n.Tasks.Get(t.DependsOn)
+				if dep != nil {
+					deps = append(deps, taskDepRow{
+						ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status,
+					})
+				}
+			}
+			out["deps"] = deps
+			if direction != "both" {
+				break
+			}
+			fallthrough
+		case "in":
+			dependents, err := n.Tasks.ListDependents(r.Context(), id)
+			if err != nil {
+				writeError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out["dependents"] = dependents
+		default:
+			writeError(w, "direction must be out, in, or both", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, out)
+	}
+}
+
+// apiTaskDepAdd — POST /api/tasks/{id}/dependencies with body
+// {depends_on_id}. Mirrors apiManifestDepAdd. Tasks have at most one
+// parent dep cached on tasks.depends_on; this endpoint is effectively
+// a SetDependency that goes through the same store path apiTaskSetDep
+// already exposes. 409 on cycle, 400 on self-loop, 404 if either task
+// is missing.
+func apiTaskDepAdd(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		var body struct {
+			DependsOnID string `json:"depends_on_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if body.DependsOnID == "" {
+			writeError(w, "depends_on_id is required", http.StatusBadRequest)
+			return
+		}
+		dstID, msg := resolveTaskID(n, body.DependsOnID)
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		if err := n.Tasks.SetDependency(srcID, dstID); err != nil {
+			switch {
+			case errors.Is(err, task.ErrTaskDepCycle):
+				writeError(w, err.Error(), http.StatusConflict)
+			case errors.Is(err, task.ErrTaskDepSelfLoop):
+				writeError(w, err.Error(), http.StatusBadRequest)
+			default:
+				writeError(w, err.Error(), http.StatusInternalServerError)
+			}
+			return
+		}
+		dep, _ := n.Tasks.Get(dstID)
+		if dep == nil {
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, map[string]string{"task_id": srcID, "depends_on_id": dstID})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, taskDepRow{ID: dep.ID, Marker: dep.Marker, Title: dep.Title, Status: dep.Status})
+	}
+}
+
+// apiTaskDepRemove — DELETE /api/tasks/{id}/dependencies/{depId}.
+// Idempotent: 204 whether or not the edge existed. Tasks carry at
+// most one dep, so this is "if my current dep is depId, clear it".
+func apiTaskDepRemove(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		srcID, msg := resolveTaskID(n, mux.Vars(r)["id"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		dstID, msg := resolveTaskID(n, mux.Vars(r)["depId"])
+		if msg != "" {
+			writeError(w, msg, http.StatusNotFound)
+			return
+		}
+		t, _ := n.Tasks.Get(srcID)
+		if t == nil || t.DependsOn != dstID {
+			// No-op: matches manifest dep-remove idempotency contract.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := n.Tasks.SetDependency(srcID, ""); err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

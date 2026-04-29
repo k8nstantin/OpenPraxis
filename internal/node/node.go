@@ -18,6 +18,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
+	"github.com/k8nstantin/OpenPraxis/internal/schedule"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
@@ -47,6 +48,11 @@ type Node struct {
 	// PR/M1). Lives alongside the existing dep tables during the M2
 	// dual-write phase; becomes the sole source after M3 cutover.
 	Relationships    *relationships.Store
+	// Schedules is the central SCD-2 store for entity firing schedules
+	// (PR/M-Schedule/M1). The runner currently still reads scheduling
+	// fields off the task row; a follow-up cuts it over to read here.
+	// This PR persists schedules so the dashboard surfaces them.
+	Schedules        *schedule.Store
 	runner           *task.Runner
 	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine
@@ -268,6 +274,40 @@ func New(cfg *config.Config) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init relationships store: %w", err)
 	}
+	// PR/M2 + PR/M3 — copy every row out of the three legacy dependency
+	// tables (product_dependencies / manifest_dependencies /
+	// task_dependency) into the unified relationships SCD-2 table.
+	// Idempotent — re-running on a migrated DB inserts zero rows. The
+	// legacy tables are NOT dropped; they sit dormant as historical
+	// safety. All read + write paths in product / manifest / task have
+	// been cut over to read from relationships.
+	if _, err := relationshipsStore.MigrateLegacyDeps(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate legacy deps to relationships: %w", err)
+	}
+	// Wire the relationships store into the legacy dep stores so their
+	// Add/Remove/List methods read + write the unified table while
+	// keeping their existing call signatures. Callers across web/mcp
+	// don't need to change.
+	productStore.SetRelationshipsBackend(relationshipsStore)
+	manifestStore.SetRelationshipsBackend(relationshipsStore)
+	taskStore.SetRelationshipsBackend(relationshipsStore)
+	// Re-fire the task SCD backfill now that the relationships backend
+	// is wired — task.NewStore ran the backfill before the wiring,
+	// which is a no-op when rels is nil. Pulls any tasks.depends_on
+	// cache rows that didn't make it into task_dependency (and thus
+	// into relationships via MigrateLegacyDeps) on prior boots.
+	if _, err := taskStore.BackfillTaskDepSCD(); err != nil {
+		return nil, fmt.Errorf("backfill task dep SCD: %w", err)
+	}
+
+	// Central SCD-2 schedules table. Migration is idempotent
+	// (CREATE TABLE / INDEX IF NOT EXISTS). Same DB handle as every
+	// other store so schedules live in memories.db alongside tasks /
+	// manifests / products.
+	scheduleStore, err := schedule.New(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init schedule store: %w", err)
+	}
 
 	n := &Node{
 		Config:           cfg,
@@ -288,6 +328,7 @@ func New(cfg *config.Config) (*Node, error) {
 		TemplatesResolv:  templatesResolver,
 		Comments:         commentsStore,
 		Relationships:    relationshipsStore,
+		Schedules:        scheduleStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
@@ -353,15 +394,74 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
-	// 5 seconds and attributes each sample to every currently-running
-	// task. Data lands on task_run_host_samples for the Run Stats
-	// card overlay + on task_runs rollup columns for list views.
-	// The sampler is a single shared instance on the node — starting
-	// multiple runners is not supported, so one-at-boot is fine.
-	n.hostSampler = task.NewHostSampler(5 * time.Second)
+	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
+	// attributes each sample to every currently-running task. Data lands
+	// on task_run_host_samples for the Run Stats card overlay + on
+	// task_runs rollup columns for list views. The sampler is a single
+	// shared instance on the node — one-at-boot is fine.
+	tick := resolveHostSamplerTick(n.SettingsStore)
+	n.hostSampler = task.NewHostSampler(tick)
 	n.hostSampler.Start(context.Background())
 	n.runner.SetHostSampler(n.hostSampler)
 	return n.runner
+}
+
+// HostSamplerTick returns the resolved host-sampler tick duration so
+// cmd/serve.go can construct the SystemSampler with the same cadence
+// as the per-run sampler. Reads `host_sampler_tick_seconds` at system
+// scope; falls back to catalog default on lookup failure.
+func (n *Node) HostSamplerTick() time.Duration {
+	return resolveHostSamplerTick(n.SettingsStore)
+}
+
+// resolveHostSamplerTick reads the host_sampler_tick_seconds knob at
+// system scope. Lookup failures fall back to the catalog default. The
+// floor is 1s (matches the catalog SliderMin); a 0 or negative value
+// would otherwise produce a runaway ticker.
+func resolveHostSamplerTick(store *settings.Store) time.Duration {
+	const fallback = 5 * time.Second
+	const floor = 1 * time.Second
+	if store == nil {
+		return fallback
+	}
+	entry, err := store.Get(context.Background(), settings.ScopeSystem, "", "host_sampler_tick_seconds")
+	var secs float64
+	if err == nil && entry.Value != "" {
+		// settings values are JSON-encoded numbers.
+		if perr := unmarshalNumber(entry.Value, &secs); perr != nil {
+			secs = 0
+		}
+	}
+	if secs <= 0 {
+		if def, ok := settings.SystemDefault("host_sampler_tick_seconds"); ok {
+			switch v := def.(type) {
+			case int:
+				secs = float64(v)
+			case int64:
+				secs = float64(v)
+			case float64:
+				secs = v
+			}
+		}
+	}
+	if secs <= 0 {
+		return fallback
+	}
+	d := time.Duration(secs) * time.Second
+	if d < floor {
+		return floor
+	}
+	return d
+}
+
+// unmarshalNumber decodes a JSON number value as a float64. Used to
+// resolve int + float knobs without taking a settings package import.
+func unmarshalNumber(raw string, out *float64) error {
+	// Local copy of encoding/json's behavior — the settings store always
+	// writes JSON-encoded numbers, so a simple Sscanf is sufficient and
+	// avoids pulling encoding/json into node.go's small import set.
+	_, err := fmt.Sscanf(raw, "%f", out)
+	return err
 }
 
 // GetRunner returns the task Runner, or nil if not yet initialized.

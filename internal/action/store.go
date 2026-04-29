@@ -150,6 +150,31 @@ func (s *Store) ListRecent(limit int) ([]Action, error) {
 	return scanActions(rows)
 }
 
+// ListRecentPaged is ListRecent + offset + total. Drives the
+// Actions Log "show every action ever, browse with pagination" feed
+// when no search query is set. Mirrors SearchPaged so the UI can hit
+// a single endpoint shape with optional q.
+func (s *Store) ListRecentPaged(limit, offset int) ([]Action, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	total, err := s.Count()
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+		FROM actions ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items, err := scanActions(rows)
+	return items, total, err
+}
+
 // GetByID returns a single action by ID.
 func (s *Store) GetByID(id string) (*Action, error) {
 	row := s.db.QueryRow(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at FROM actions WHERE id = ?`, id)

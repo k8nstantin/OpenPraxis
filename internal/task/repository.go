@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // ManifestReadinessChecker is the hook task.Store consults to decide
@@ -125,6 +127,44 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		return nil, err
 	}
 
+	// Ownership wiring: write the canonical EdgeOwns(manifest → task)
+	// row into the relationships SCD-2 table. The DAG endpoint walks
+	// relationships only — without this row the new task is invisible
+	// in the manifest's graph view. The legacy manifest_id column is
+	// also populated (above) for the readers still hitting it; column
+	// drop is a follow-up.
+	if manifestID != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindManifest,
+			SrcID:     manifestID,
+			DstKind:   relationships.KindTask,
+			DstID:     id,
+			Kind:      relationships.EdgeOwns,
+			CreatedBy: createdBy,
+			Reason:    "task created under manifest",
+		}); err != nil {
+			return nil, fmt.Errorf("task created but relationships row failed: %w", err)
+		}
+	}
+
+	// task-level depends_on edge (when set): write the EdgeDependsOn
+	// row at create time as well. SetDependency() handles updates after
+	// create; but a fresh task with depends_on still needs the edge to
+	// land so the activation walker sees the gate.
+	if dependsOn != "" && s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind:   relationships.KindTask,
+			SrcID:     id,
+			DstKind:   relationships.KindTask,
+			DstID:     dependsOn,
+			Kind:      relationships.EdgeDependsOn,
+			CreatedBy: createdBy,
+			Reason:    "initial depends_on at create",
+		}); err != nil {
+			return nil, fmt.Errorf("task created but depends_on edge failed: %w", err)
+		}
+	}
+
 	return &Task{
 		ID: id, Marker: id[:12], ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
@@ -185,8 +225,15 @@ func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
 }
 
 // List returns all tasks.
+//
+// limit semantics:
+//   - limit > 0  → cap at that many rows
+//   - limit == 0 → UNBOUNDED (return every matching row). Used by the
+//     v2 dashboard list pane which paginates client-side at
+//     PAGE_SIZE=10 with "Load more" — the backend MUST return all rows.
+//   - limit < 0  → defensively treated as 50 (likely a caller bug)
 func (s *Store) List(status string, limit int) ([]*Task, error) {
-	if limit <= 0 {
+	if limit < 0 {
 		limit = 50
 	}
 	query := `SELECT ` + taskColumns + ` FROM tasks WHERE deleted_at = ''`
@@ -195,8 +242,16 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 		query += ` AND status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'waiting' THEN 1 WHEN 'pending' THEN 2 WHEN 'completed' THEN 3 WHEN 'failed' THEN 4 WHEN 'cancelled' THEN 5 ELSE 6 END, updated_at DESC LIMIT ?`
-	args = append(args, limit)
+	// Sort: most-recently-executed first, tiebreak by created_at DESC.
+	// Running tasks naturally bubble to the top because their last_run_at
+	// is the most recent (set when the task fired). Never-run tasks have
+	// last_run_at='' which sorts last under DESC, then their created_at
+	// DESC ranks newest creations above older ones.
+	query += ` ORDER BY last_run_at DESC, created_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -440,22 +495,54 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 	return err
 }
 
-// writeSCDDepRow closes the currently-active row (if any) and inserts
-// a new active row. Uses two statements in sequence — SQLite
-// transactions would add correctness if the two statements could race
-// against concurrent writers for the same task_id, but SetDependency
-// is operator-initiated and per-task serialization is implicit.
+// writeSCDDepRow lands a new dependency revision in the unified
+// relationships SCD-2 store. Direction: src=task (depender),
+// dst=parent (dependee).
+//
+//   - dependsOn=="" represents "dep cleared" — the prior current edge
+//     (if any) is closed via Remove and no new edge is opened.
+//   - dependsOn!="" closes any prior current edge for this task and
+//     opens a fresh one via Create. relationships.Create runs the
+//     close + insert in one transaction so audit history is intact.
+//
+// The legacy task_dependency table is no longer written to. The
+// migration already copied historical rows into relationships, and
+// every new revision lands here directly.
 func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string) error {
-	if _, err := s.db.Exec(
-		`UPDATE task_dependency SET valid_to = ? WHERE task_id = ? AND valid_to = ''`,
-		now, taskID); err != nil {
-		return fmt.Errorf("close prior dep row: %w", err)
+	if s.rels == nil {
+		return fmt.Errorf("task_dependency: relationships backend not wired")
 	}
-	if _, err := s.db.Exec(
-		`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
-		 VALUES (?, ?, ?, '', ?, ?)`,
-		taskID, dependsOn, now, changedBy, reason); err != nil {
-		return fmt.Errorf("insert new dep row: %w", err)
+	ctx := context.Background()
+	// Close any prior current edge for this task. We have to enumerate
+	// because relationships keys edges on (src, dst, kind, valid_from)
+	// not just src — a task can have at most one current parent dep at
+	// a time but the prior dep could have been a different parent.
+	prior, err := s.rels.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
+	if err != nil {
+		return fmt.Errorf("read prior dep: %w", err)
+	}
+	for _, p := range prior {
+		if p.DstKind != relationships.KindTask {
+			continue
+		}
+		if err := s.rels.Remove(ctx, p.SrcID, p.DstID,
+			relationships.EdgeDependsOn, changedBy, "superseded by SetDependency"); err != nil {
+			return fmt.Errorf("close prior dep edge: %w", err)
+		}
+	}
+	if dependsOn == "" {
+		return nil // clear path — no new edge opened
+	}
+	if err := s.rels.Create(ctx, relationships.Edge{
+		SrcKind:   relationships.KindTask,
+		SrcID:     taskID,
+		DstKind:   relationships.KindTask,
+		DstID:     dependsOn,
+		Kind:      relationships.EdgeDependsOn,
+		CreatedBy: changedBy,
+		Reason:    reason,
+	}); err != nil {
+		return fmt.Errorf("insert new dep edge: %w", err)
 	}
 	return nil
 }
@@ -474,14 +561,28 @@ type DepHistoryEntry struct {
 }
 
 // ListDepHistory returns every dep revision for a task, newest
-// valid_from first. limit<=0 defaults to 50.
+// valid_from first. limit<=0 defaults to 50. Reads the unified
+// relationships table — all task→task EdgeDependsOn rows where
+// src_id = taskID, current + closed history together.
 func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	if s.rels == nil {
+		// Legacy tests that don't wire the relationships backend get an
+		// empty history rather than an error so the dep-related test
+		// suite that doesn't assert history still runs cleanly.
+		return nil, nil
+	}
+	// Pull every revision (current + closed) ordered by valid_from DESC
+	// directly from the relationships table. The unified store doesn't
+	// expose a "history for src=any dst" reader, so we issue a custom
+	// query against the same DB handle.
 	rows, err := s.db.Query(
-		`SELECT id, task_id, depends_on, valid_from, valid_to, changed_by, reason
-		 FROM task_dependency WHERE task_id = ? ORDER BY valid_from DESC, id DESC LIMIT ?`,
+		`SELECT src_id, dst_id, valid_from, valid_to, created_by, reason
+		 FROM relationships
+		 WHERE src_id = ? AND src_kind = 'task' AND kind = 'depends_on'
+		 ORDER BY valid_from DESC LIMIT ?`,
 		taskID, limit)
 	if err != nil {
 		return nil, err
@@ -490,7 +591,7 @@ func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, err
 	var out []DepHistoryEntry
 	for rows.Next() {
 		var e DepHistoryEntry
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.DependsOn,
+		if err := rows.Scan(&e.TaskID, &e.DependsOn,
 			&e.ValidFrom, &e.ValidTo, &e.ChangedBy, &e.Reason); err != nil {
 			return nil, err
 		}
@@ -499,18 +600,24 @@ func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, err
 	return out, rows.Err()
 }
 
-// BackfillTaskDepSCD seeds task_dependency for tasks that had a
-// non-empty tasks.depends_on cache but no SCD row yet. Runs on
-// startup; idempotent via the "already has an active row" check.
-// Legacy rows land with valid_from = the task's updated_at so the
-// history doesn't all collapse to "now".
+// BackfillTaskDepSCD seeds the unified relationships store from the
+// legacy tasks.depends_on cache column for tasks that have a parent
+// dep but no current relationships row yet. Idempotent — the Get
+// probe + composite PK keep re-runs at zero rows. Legacy rows land
+// with valid_from = the task's updated_at so the history doesn't all
+// collapse to "now".
+//
+// Called on store init; nil rels backend is treated as "skip" (test
+// stores that don't wire the relationships backend keep working).
 func (s *Store) BackfillTaskDepSCD() (int, error) {
-	rows, err := s.db.Query(`
+	if s.rels == nil {
+		return 0, nil
+	}
+	ctx := context.Background()
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.id, t.depends_on, t.updated_at
 		FROM tasks t
-		WHERE t.depends_on != '' AND t.deleted_at = ''
-		  AND NOT EXISTS (SELECT 1 FROM task_dependency d
-		                  WHERE d.task_id = t.id AND d.valid_to = '')`)
+		WHERE t.depends_on != '' AND t.deleted_at = ''`)
 	if err != nil {
 		return 0, err
 	}
@@ -529,10 +636,25 @@ func (s *Store) BackfillTaskDepSCD() (int, error) {
 	}
 	n := 0
 	for _, p := range pending {
-		if _, err := s.db.Exec(
-			`INSERT INTO task_dependency (task_id, depends_on, valid_from, valid_to, changed_by, reason)
-			 VALUES (?, ?, ?, '', 'scd-backfill', 'seeded from legacy tasks.depends_on')`,
-			p.id, p.dep, p.when); err == nil {
+		if p.id == p.dep {
+			continue
+		}
+		if _, found, err := s.rels.Get(ctx, p.id, p.dep, relationships.EdgeDependsOn); err != nil {
+			return n, err
+		} else if found {
+			continue
+		}
+		if err := s.rels.BackfillRow(ctx, relationships.Edge{
+			SrcKind:   relationships.KindTask,
+			SrcID:     p.id,
+			DstKind:   relationships.KindTask,
+			DstID:     p.dep,
+			Kind:      relationships.EdgeDependsOn,
+			ValidFrom: p.when,
+			ValidTo:   "",
+			CreatedBy: "scd-backfill",
+			Reason:    "seeded from legacy tasks.depends_on column",
+		}); err == nil {
 			n++
 		}
 	}
@@ -619,6 +741,42 @@ func (s *Store) ActivateDependents(completedTaskID string) (int, error) {
 	return int(n), nil
 }
 
+// TaskDep is the denormalised row the dashboard renders for both
+// directions of /api/tasks/{id}/dependencies. Same {id, marker, title,
+// status} contract products + manifests use.
+type TaskDep struct {
+	ID     string `json:"id"`
+	Marker string `json:"marker"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// ListDependents returns every task whose `depends_on` is taskID.
+// Mirrors manifest.Store.ListDependents — used by the portal-v2
+// Dependencies tab when the operator clicks "in" direction. Marker is
+// the 12-char ID prefix per project convention.
+func (s *Store) ListDependents(ctx context.Context, taskID string) ([]TaskDep, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, title, status FROM tasks WHERE depends_on = ? AND deleted_at = ''
+		 ORDER BY created_at ASC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []TaskDep{}
+	for rows.Next() {
+		var d TaskDep
+		if err := rows.Scan(&d.ID, &d.Title, &d.Status); err != nil {
+			return nil, err
+		}
+		if len(d.ID) >= 12 {
+			d.Marker = d.ID[:12]
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 // RequestAction writes a cross-process action signal on the task row.
 // The runner that owns the task's process (serve) polls this column and acts.
 // action must be one of: "pause", "resume", "cancel".
@@ -691,13 +849,27 @@ func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD
 		slog.Warn("query run_count failed", "task_id", id, "error", err)
 	}
 
+	// Resolve the task's agent so the run row carries an agent_runtime
+	// stamp (used by the Stats tab summary card). Best-effort — empty
+	// string is fine if the task was deleted between RecordRun args
+	// being prepared and this query.
+	var agentRuntime string
+	_ = s.db.QueryRow(`SELECT agent FROM tasks WHERE id = ?`, id).Scan(&agentRuntime)
+
+	durationMS := time.Since(startedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
+
 	// Insert into task_runs history with full denorm (tokens + model + pricing version).
 	res, err := s.db.Exec(`INSERT INTO task_runs
 		(task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
-		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version,
+		 duration_ms, agent_runtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now,
-		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion)
+		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion,
+		durationMS, agentRuntime)
 	if err != nil {
 		return 0, err
 	}
@@ -717,8 +889,8 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 		return nil
 	}
 	if _, err := s.db.Exec(
-		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ? WHERE id = ?`,
-		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, runID,
+		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ?, avg_rss_mb = ? WHERE id = ?`,
+		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, metrics.AvgRSSMB, runID,
 	); err != nil {
 		return fmt.Errorf("update task_runs host summary: %w", err)
 	}
@@ -731,15 +903,16 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples
-		(run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		(run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare host-samples insert: %w", err)
 	}
 	defer stmt.Close()
 	for _, smp := range samples {
 		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano),
-			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions); err != nil {
+			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions,
+			smp.DiskUsedGB, smp.DiskTotalGB); err != nil {
 			return fmt.Errorf("insert host sample: %w", err)
 		}
 	}
@@ -753,7 +926,7 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 // Run Stats card can overlay all 5 sparklines aligned.
 func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	rows, err := s.db.Query(
-		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
+		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb
 		 FROM task_run_host_samples
 		 WHERE run_id = ? ORDER BY ts ASC`,
 		runID,
@@ -766,7 +939,8 @@ func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	for rows.Next() {
 		var tsStr string
 		var smp HostMetricsSample
-		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB, &smp.CostUSD, &smp.Turns, &smp.Actions); err != nil {
+		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB, &smp.CostUSD, &smp.Turns, &smp.Actions,
+			&smp.DiskUsedGB, &smp.DiskTotalGB); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
@@ -782,8 +956,7 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
-		FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -793,20 +966,19 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 
 // GetRun returns a single task run by ID.
 func (s *Store) GetRun(runID int) (*TaskRun, error) {
-	var r TaskRun
-	var startedStr, completedStr string
-	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb FROM task_runs WHERE id = ?`, runID).
-		Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
-			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion,
-			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE id = ?`, runID)
 	if err != nil {
 		return nil, err
 	}
-	r.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
-	r.CompletedAt, _ = time.Parse(time.RFC3339, completedStr)
+	defer rows.Close()
+	runs, err := scanRuns(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, nil
+	}
+	r := runs[0]
 	return &r, nil
 }
 
@@ -815,8 +987,7 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
-		FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
 		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {
 		return nil, err

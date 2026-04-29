@@ -25,11 +25,9 @@ const STATUS_COLOR: Record<string, string> = {
   archived: 'bg-zinc-500/10 text-zinc-500',
 }
 
-// Two-tab modal used by the DAG designer's add-buttons. "Link
-// existing" reuses the same picker the textual Dependencies editor
-// uses; "Create new" takes a title and fires the create-and-link
-// mutation. Operators see one consistent flow whether they're
-// pulling existing entities into the structure or starting fresh.
+// Two-tab modal used by the DAG designer's add-buttons. "Link existing"
+// reuses the same picker the textual Dependencies editor uses; "Create
+// new" takes a title and fires the create-and-link mutation.
 export function LinkOrCreateModal({
   open,
   onOpenChange,

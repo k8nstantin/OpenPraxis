@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import { toast } from 'sonner'
-import { useChangeProductStatus } from '@/lib/queries/products'
+import {
+  useChangeEntityStatus,
+  type EntityKind,
+} from '@/lib/queries/entity'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,20 +50,21 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-rose-500/15 text-rose-500',
 }
 
-// Status pill that doubles as a dropdown — click to pick a target
-// state, get a confirmation prompt with the consequence spelled out,
-// then commit. Toast on success/failure. Same pattern as the
-// dependency editor's destructive actions.
-export function ProductStatusControl({
-  productId,
+// Status pill that doubles as a dropdown — same lifecycle for products
+// and manifests. Confirmation dialog spells out the consequence; toast
+// on success/failure.
+export function EntityStatusControl({
+  kind,
+  entityId,
   status,
-  productTitle,
+  entityTitle,
 }: {
-  productId: string
+  kind: EntityKind
+  entityId: string
   status: string
-  productTitle: string
+  entityTitle: string
 }) {
-  const update = useChangeProductStatus(productId)
+  const update = useChangeEntityStatus(kind, entityId)
   const [target, setTarget] = useState<StatusId | null>(null)
 
   const onConfirm = async () => {
@@ -68,7 +72,7 @@ export function ProductStatusControl({
     try {
       await update.mutateAsync({ status: target })
       toast.success(
-        `Status of "${productTitle}" → ${STATUSES.find((s) => s.id === target)?.label}`
+        `Status of "${entityTitle}" → ${STATUSES.find((s) => s.id === target)?.label}`
       )
     } catch (e) {
       toast.error(`Status change failed: ${String(e)}`)
@@ -77,6 +81,8 @@ export function ProductStatusControl({
   }
 
   const targetMeta = target ? STATUSES.find((s) => s.id === target) : null
+  const noun =
+    kind === 'product' ? 'product' : kind === 'task' ? 'task' : 'manifest'
 
   return (
     <div className='shrink-0'>
@@ -135,15 +141,15 @@ export function ProductStatusControl({
               Change status to {targetMeta?.label}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              "{productTitle}" will move from{' '}
+              "{entityTitle}" will move from{' '}
               <span className='font-medium'>{status}</span> →{' '}
               <span className='font-medium'>{targetMeta?.label}</span>.{' '}
               {targetMeta?.help}
               {target === 'archived' ? (
                 <>
                   {' '}
-                  Sub-products and manifests stay attached but the
-                  product won't show in default product lists.
+                  Children stay attached but the {noun} won't show in
+                  default {noun} lists.
                 </>
               ) : null}
             </AlertDialogDescription>

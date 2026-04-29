@@ -348,6 +348,14 @@ var serveCmd = &cobra.Command{
 		// written by other binaries (MCP) to tasks this runner owns.
 		runner.StartActionWatcher(2 * time.Second)
 
+		// Continuous SystemSampler — writes one row per tick into
+		// system_host_samples, independent of any task. Same cadence as
+		// the per-run HostSampler (host_sampler_tick_seconds knob, default
+		// 5s). Powers the Stats tab System Capacity panel.
+		systemSampler := task.NewSystemSampler(n.Tasks.DB(), n.HostSamplerTick())
+		systemSampler.Start(ctx)
+		defer systemSampler.Stop()
+
 		// --- Startup State Log ---
 		fmt.Println("\n  === OpenPraxis State ===")
 		fmt.Printf("  Peer:      %s\n", cfg.Node.UUID)

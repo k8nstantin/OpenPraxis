@@ -28,6 +28,8 @@ export interface Product {
   total_manifests?: number
   total_tasks?: number
   total_turns?: number
+  total_actions?: number
+  total_tokens?: number
 }
 
 export interface Manifest {
@@ -41,6 +43,33 @@ export interface Manifest {
   source_node?: string
   created_at: string
   updated_at: string
+  total_tasks?: number
+  total_turns?: number
+  total_cost?: number
+  total_actions?: number
+  total_tokens?: number
+}
+
+export interface Task {
+  id: string
+  marker: string
+  manifest_id?: string
+  title: string
+  description?: string
+  description_html?: string
+  status: EntityStatus
+  agent?: string
+  schedule?: string
+  depends_on?: string
+  block_reason?: string
+  source_node?: string
+  tags?: string[]
+  created_at: string
+  updated_at: string
+  total_cost?: number
+  total_turns?: number
+  total_actions?: number
+  total_tokens?: number
 }
 
 export interface Idea {

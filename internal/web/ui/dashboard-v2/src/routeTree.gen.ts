@@ -11,13 +11,15 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
 import { Route as AuthenticatedRecallRouteImport } from './routes/_authenticated/recall'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductivityRouteImport } from './routes/_authenticated/productivity'
+import { Route as AuthenticatedManifestsRouteImport } from './routes/_authenticated/manifests'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
-import { Route as AuthenticatedActiveRouteImport } from './routes/_authenticated/active'
+import { Route as AuthenticatedActionsRouteImport } from './routes/_authenticated/actions'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors404RouteImport } from './routes/(errors)/404'
@@ -39,6 +41,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedRecallRoute = AuthenticatedRecallRouteImport.update({
   id: '/recall',
   path: '/recall',
@@ -55,6 +62,11 @@ const AuthenticatedProductivityRoute =
     path: '/productivity',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManifestsRoute = AuthenticatedManifestsRouteImport.update({
+  id: '/manifests',
+  path: '/manifests',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -70,9 +82,9 @@ const AuthenticatedActivityRoute = AuthenticatedActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedActiveRoute = AuthenticatedActiveRouteImport.update({
-  id: '/active',
-  path: '/active',
+const AuthenticatedActionsRoute = AuthenticatedActionsRouteImport.update({
+  id: '/actions',
+  path: '/actions',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const errors503Route = errors503RouteImport.update({
@@ -145,13 +157,15 @@ export interface FileRoutesByFullPath {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/active': typeof AuthenticatedActiveRoute
+  '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
+  '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/tasks': typeof AuthenticatedTasksRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
@@ -164,13 +178,15 @@ export interface FileRoutesByTo {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/active': typeof AuthenticatedActiveRoute
+  '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
+  '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -187,13 +203,15 @@ export interface FileRoutesById {
   '/(errors)/404': typeof errors404Route
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
-  '/_authenticated/active': typeof AuthenticatedActiveRoute
+  '/_authenticated/actions': typeof AuthenticatedActionsRoute
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
+  '/_authenticated/manifests': typeof AuthenticatedManifestsRoute
   '/_authenticated/productivity': typeof AuthenticatedProductivityRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/recall': typeof AuthenticatedRecallRoute
+  '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -211,13 +229,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
-    | '/active'
+    | '/actions'
     | '/activity'
     | '/audit'
     | '/inbox'
+    | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/tasks'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
@@ -230,13 +250,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
-    | '/active'
+    | '/actions'
     | '/activity'
     | '/audit'
     | '/inbox'
+    | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/tasks'
     | '/'
     | '/settings/account'
     | '/settings/appearance'
@@ -252,13 +274,15 @@ export interface FileRouteTypes {
     | '/(errors)/404'
     | '/(errors)/500'
     | '/(errors)/503'
-    | '/_authenticated/active'
+    | '/_authenticated/actions'
     | '/_authenticated/activity'
     | '/_authenticated/audit'
     | '/_authenticated/inbox'
+    | '/_authenticated/manifests'
     | '/_authenticated/productivity'
     | '/_authenticated/products'
     | '/_authenticated/recall'
+    | '/_authenticated/tasks'
     | '/_authenticated/'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
@@ -292,6 +316,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tasks': {
+      id: '/_authenticated/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof AuthenticatedTasksRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/recall': {
       id: '/_authenticated/recall'
       path: '/recall'
@@ -311,6 +342,13 @@ declare module '@tanstack/react-router' {
       path: '/productivity'
       fullPath: '/productivity'
       preLoaderRoute: typeof AuthenticatedProductivityRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manifests': {
+      id: '/_authenticated/manifests'
+      path: '/manifests'
+      fullPath: '/manifests'
+      preLoaderRoute: typeof AuthenticatedManifestsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/inbox': {
@@ -334,11 +372,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedActivityRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/active': {
-      id: '/_authenticated/active'
-      path: '/active'
-      fullPath: '/active'
-      preLoaderRoute: typeof AuthenticatedActiveRouteImport
+    '/_authenticated/actions': {
+      id: '/_authenticated/actions'
+      path: '/actions'
+      fullPath: '/actions'
+      preLoaderRoute: typeof AuthenticatedActionsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/(errors)/503': {
@@ -446,25 +484,29 @@ const AuthenticatedSettingsRouteRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
-  AuthenticatedActiveRoute: typeof AuthenticatedActiveRoute
+  AuthenticatedActionsRoute: typeof AuthenticatedActionsRoute
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
+  AuthenticatedManifestsRoute: typeof AuthenticatedManifestsRoute
   AuthenticatedProductivityRoute: typeof AuthenticatedProductivityRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedRecallRoute: typeof AuthenticatedRecallRoute
+  AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
-  AuthenticatedActiveRoute: AuthenticatedActiveRoute,
+  AuthenticatedActionsRoute: AuthenticatedActionsRoute,
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
+  AuthenticatedManifestsRoute: AuthenticatedManifestsRoute,
   AuthenticatedProductivityRoute: AuthenticatedProductivityRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedRecallRoute: AuthenticatedRecallRoute,
+  AuthenticatedTasksRoute: AuthenticatedTasksRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }
 

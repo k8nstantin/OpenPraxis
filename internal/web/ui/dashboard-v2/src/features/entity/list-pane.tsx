@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
-import { productKeys, useProducts } from '@/lib/queries/products'
-import type { HierarchyNode, Product } from '@/lib/types'
+import {
+  entityKeys,
+  useEntityList,
+  type EntityKind,
+} from '@/lib/queries/entity'
+import type { HierarchyNode, Product, Manifest, Task } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -18,39 +22,59 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-rose-500/15 text-rose-500',
 }
 
-// Tree-style products navigator. All products listed at root; each
-// expandable via chevron to reveal sub-products N levels deep. Click
-// a row → SELECT (right pane updates). Click the chevron → EXPAND /
-// COLLAPSE without selecting. Same UX as Finder / VS Code's file tree.
-export function ProductsListPane({
+interface ListRow {
+  id: string
+  marker: string
+  title: string
+  status: string
+  tags?: string[]
+}
+
+// Generic master list pane.
+//
+// Products mode: tree-style navigator. Each row is expandable via the
+// chevron (lazy-loads /api/products/{id}/hierarchy) to drill into
+// sub-products N levels deep. Click row → SELECT.
+//
+// Manifests mode: flat list. Manifests don't have sub-manifests;
+// hierarchy is product → manifest → task. The chevron is omitted.
+export function EntityListPane({
+  kind,
   selectedId,
   onSelect,
 }: {
+  kind: EntityKind
   selectedId?: string
   onSelect: (id: string) => void
 }) {
-  const top = useProducts()
+  const list = useEntityList(kind)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  const filtered = useMemo<Product[]>(() => {
-    if (!top.data) return []
+  const rows: ListRow[] = useMemo(() => {
+    const data = (list.data ?? []) as (Product | Manifest | Task)[]
+    return data.map((d) => ({
+      id: d.id,
+      marker: d.marker,
+      title: d.title,
+      status: d.status,
+      tags: d.tags,
+    }))
+  }, [list.data])
+
+  const filtered = useMemo<ListRow[]>(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return top.data
-    return top.data.filter(
+    if (!q) return rows
+    return rows.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
         p.marker.toLowerCase().includes(q) ||
         (p.tags ?? []).some((t) => t.toLowerCase().includes(q))
     )
-  }, [top.data, query])
+  }, [rows, query])
 
-  // Pagination — show 10 rows initially; a scroll-event handler on
-  // the Radix viewport adds 10 more when the operator scrolls within
-  // 60px of the bottom. Scroll-driven (not IntersectionObserver) so
-  // it only fires when the operator actually scrolls — IO fires on
-  // mount when the sentinel is already in view, which cascaded to
-  // load every page in a row and defeated the whole point.
+  // Page size + scroll-driven loadmore. See the products list-pane
+  // history for why this is scroll-event and not IntersectionObserver.
   const PAGE_SIZE = 10
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   useEffect(() => {
@@ -88,13 +112,22 @@ export function ProductsListPane({
     })
   }
 
+  const heading =
+    kind === 'product' ? 'Products' : kind === 'task' ? 'Tasks' : 'Manifests'
+  const emptyNoun =
+    kind === 'product'
+      ? 'products'
+      : kind === 'task'
+        ? 'tasks'
+        : 'manifests'
+
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <div className='border-b p-3'>
         <div className='text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wider'>
-          Products
+          {heading}
           <span className='ml-1.5 font-normal opacity-60'>
-            {top.isLoading ? '…' : filtered.length}
+            {list.isLoading ? '…' : filtered.length}
           </span>
         </div>
         <div className='relative'>
@@ -108,27 +141,27 @@ export function ProductsListPane({
         </div>
       </div>
       <ScrollArea className='min-h-0 flex-1'>
-        {top.isLoading ? (
+        {list.isLoading ? (
           <div className='space-y-1.5 p-2'>
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className='h-10 w-full' />
             ))}
           </div>
-        ) : top.isError ? (
+        ) : list.isError ? (
           <div className='p-3 text-xs text-rose-400'>
-            Failed: {String(top.error)}
+            Failed: {String(list.error)}
           </div>
         ) : filtered.length === 0 ? (
           <div className='text-muted-foreground p-3 text-xs'>
-            {query ? 'No matches.' : 'No products yet.'}
+            {query ? 'No matches.' : `No ${emptyNoun} yet.`}
           </div>
         ) : (
           <div className='py-1'>
             {visible.map((p) => (
-              <TreeRow
+              <Row
                 key={p.id}
+                kind={kind}
                 id={p.id}
-                marker={p.id}
                 title={p.title}
                 status={p.status}
                 depth={0}
@@ -139,10 +172,6 @@ export function ProductsListPane({
               />
             ))}
             {hasMore ? (
-              // Sentinel is also a button — when content fits in the
-              // viewport (no scroll possible), the scroll-event load
-              // path can never fire. Click is the always-available
-              // fallback. Auto-loads on scroll near bottom too.
               <button
                 ref={sentinelRef as unknown as React.Ref<HTMLButtonElement>}
                 type='button'
@@ -167,11 +196,11 @@ export function ProductsListPane({
   )
 }
 
-// Recursive tree row. Lazy-fetches children when first expanded; stays
-// cached after collapse so re-expanding is instant.
-function TreeRow({
+// Tree row. For products, lazy-fetches sub-products on first expand.
+// For manifests, the chevron is omitted (flat list).
+function Row({
+  kind,
   id,
-  marker,
   title,
   status,
   depth,
@@ -180,8 +209,8 @@ function TreeRow({
   onToggle,
   onSelect,
 }: {
+  kind: EntityKind
   id: string
-  marker: string
   title: string
   status: string
   depth: number
@@ -190,15 +219,16 @@ function TreeRow({
   onToggle: (id: string) => void
   onSelect: (id: string) => void
 }) {
+  const isProduct = kind === 'product'
   const isExpanded = expanded.has(id)
   const hierarchy = useQuery({
-    queryKey: productKeys.hierarchy(id),
+    queryKey: entityKeys.hierarchy('product', id),
     queryFn: async () => {
       const res = await fetch(`/api/products/${id}/hierarchy`)
       if (!res.ok) throw new Error(`hierarchy → ${res.status}`)
       return (await res.json()) as HierarchyNode
     },
-    enabled: isExpanded,
+    enabled: isProduct && isExpanded,
     staleTime: 60 * 1000,
   })
   const subs: HierarchyNode[] = hierarchy.data?.sub_products ?? []
@@ -212,18 +242,22 @@ function TreeRow({
         )}
         style={{ paddingInlineStart: `${depth * 14 + 4}px` }}
       >
-        <button
-          type='button'
-          onClick={() => onToggle(id)}
-          className='text-muted-foreground hover:text-foreground flex h-7 w-5 shrink-0 items-center justify-center'
-          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-        >
-          {isExpanded ? (
-            <ChevronDown className='h-3.5 w-3.5' />
-          ) : (
-            <ChevronRight className='h-3.5 w-3.5' />
-          )}
-        </button>
+        {isProduct ? (
+          <button
+            type='button'
+            onClick={() => onToggle(id)}
+            className='text-muted-foreground hover:text-foreground flex h-7 w-5 shrink-0 items-center justify-center'
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+          >
+            {isExpanded ? (
+              <ChevronDown className='h-3.5 w-3.5' />
+            ) : (
+              <ChevronRight className='h-3.5 w-3.5' />
+            )}
+          </button>
+        ) : (
+          <span className='w-5 shrink-0' />
+        )}
         <button
           type='button'
           onClick={() => onSelect(id)}
@@ -246,7 +280,7 @@ function TreeRow({
           </Badge>
         </button>
       </div>
-      {isExpanded ? (
+      {isProduct && isExpanded ? (
         hierarchy.isLoading ? (
           <div
             className='text-muted-foreground py-1 text-xs italic'
@@ -256,10 +290,10 @@ function TreeRow({
           </div>
         ) : subs.length > 0 ? (
           subs.map((s) => (
-            <TreeRow
+            <Row
               key={s.id}
+              kind='product'
               id={s.id}
-              marker={s.marker}
               title={s.title}
               status={s.status}
               depth={depth + 1}

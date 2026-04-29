@@ -667,7 +667,9 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/manifests/{id}", apiManifestDelete(n)).Methods("DELETE")
 	api.HandleFunc("/tasks/by-peer", apiTasksByPeer(n)).Methods("GET")
 	api.HandleFunc("/tasks/running", apiRunningTasks(n)).Methods("GET")
+	api.HandleFunc("/tasks/running/live", apiRunningTasksLive(n)).Methods("GET")
 	api.HandleFunc("/tasks/stats", apiTaskStats(n)).Methods("GET")
+	api.HandleFunc("/stats/cumulative-trend", apiCumulativeTrend(n)).Methods("GET")
 	// Heavy panels split off the polled stats endpoint — loaded on view-show
 	// only, not on every 10s tick. See handlers_task.go for context.
 	api.HandleFunc("/tasks/today-top", apiTodayTopTasks(n)).Methods("GET")
@@ -689,6 +691,18 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/task_runs/{runId}/host_samples", apiTaskRunHostSamples(n)).Methods("GET")
 	// Live host CPU/RSS — feeds the node stats chip on the overview.
 	api.HandleFunc("/host/stats", apiHostStats()).Methods("GET")
+	// Stats tab — entity-scoped run aggregation + continuous host stream.
+	// run-stats dispatches per entity_kind (product walks descendants,
+	// manifest joins on tasks.manifest_id, task by task_id). system-stats
+	// reads system_host_samples between [from, to], optionally bounded
+	// by as_of.
+	api.HandleFunc("/run-stats", apiRunStats(n)).Methods("GET")
+	api.HandleFunc("/system-stats", apiSystemStats(n)).Methods("GET")
+	// /api/relationships/graph?root_id=&root_kind=&depth=&edge_kinds=
+	// returns a flat (nodes, edges) shape for the DAG tab. Source of
+	// truth: the relationships SCD-2 table; Walk traversal handles the
+	// recursive descent.
+	api.HandleFunc("/relationships/graph", apiRelationshipsGraph(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
 	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")
@@ -704,6 +718,11 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/tasks/{id}/set-manifest", apiTaskSetManifest(n)).Methods("PUT")
 	api.HandleFunc("/tasks/{id}/manifests", apiTaskManifests(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/dependency", apiTaskSetDependency(n)).Methods("PUT")
+	// Manifest-style REST surface — same body-style POST + path-style
+	// DELETE the dashboard's generic queries layer dispatches to.
+	api.HandleFunc("/tasks/{id}/dependencies", apiTaskDepList(n)).Methods("GET")
+	api.HandleFunc("/tasks/{id}/dependencies", apiTaskDepAdd(n)).Methods("POST")
+	api.HandleFunc("/tasks/{id}/dependencies/{depId}", apiTaskDepRemove(n)).Methods("DELETE")
 	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
 	api.HandleFunc("/visceral", apiVisceralList(n)).Methods("GET")
 	api.HandleFunc("/visceral/confirmations", apiVisceralConfirmations(n)).Methods("GET")
@@ -730,6 +749,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	registerCommentsRoutesFromNode(api, n)
 	registerDescriptionRoutes(api, n)
 	registerTemplateRoutes(api, n)
+	registerScheduleRoutes(api, n)
 
 	api.HandleFunc("/settings/profile", apiProfileGet(n)).Methods("GET")
 	api.HandleFunc("/settings/profile", apiProfileUpdate(n)).Methods("PUT")

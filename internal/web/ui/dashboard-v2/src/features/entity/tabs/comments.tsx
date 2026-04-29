@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  useCreateProductComment,
-  useProductComments,
-} from '@/lib/queries/products'
+  useCreateEntityComment,
+  useEntityComments,
+  type EntityKind,
+} from '@/lib/queries/entity'
 import type { Comment } from '@/lib/types'
+import { Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,10 +29,6 @@ const TYPE_LABEL: Record<string, string> = {
   link: 'Link',
 }
 
-// Compose-time type allowlist. The full read filter shows every type
-// the API has ever produced (including agent-only ones like
-// description_revision, watcher_finding); the compose dropdown is
-// narrower so operators only pick types meant for human authoring.
 const COMPOSE_TYPES: Array<keyof typeof TYPE_LABEL> = [
   'user_note',
   'decision',
@@ -43,22 +41,62 @@ function fmtTime(ts: number | string): string {
   return new Date(t).toLocaleString()
 }
 
+type Mode = 'markup' | 'rendered'
+function readMode(): Mode {
+  try {
+    const v = localStorage.getItem('descMode')
+    return v === 'rendered' ? 'rendered' : 'markup'
+  } catch {
+    return 'markup'
+  }
+}
+function useDescMode(): [Mode, (m: Mode) => void] {
+  const [mode, setMode] = useState<Mode>(readMode)
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const next = (e as CustomEvent<Mode>).detail
+      if (next === 'markup' || next === 'rendered') setMode(next)
+    }
+    window.addEventListener('desc-mode-change', onChange as EventListener)
+    return () =>
+      window.removeEventListener(
+        'desc-mode-change',
+        onChange as EventListener
+      )
+  }, [])
+  const broadcast = (m: Mode) => {
+    setMode(m)
+    try {
+      localStorage.setItem('descMode', m)
+    } catch {
+      /* ignore */
+    }
+    window.dispatchEvent(new CustomEvent('desc-mode-change', { detail: m }))
+  }
+  return [mode, broadcast]
+}
+
 // Comments tab — full thread + compose. Same MarkdownEditor used
-// across description-edit and any future markdown surface (manifests,
-// tasks). Cmd-Enter posts; Escape clears.
-export function CommentsTab({ productId }: { productId: string }) {
-  const comments = useProductComments(productId)
-  const create = useCreateProductComment(productId)
+// across description-edit. Cmd-Enter posts; Escape clears. Generic
+// over /api/products/{id}/comments and /api/manifests/{id}/comments —
+// same response shape, same compose payload.
+export function CommentsTab({
+  kind,
+  entityId,
+}: {
+  kind: EntityKind
+  entityId: string
+}) {
+  const comments = useEntityComments(kind, entityId)
+  const create = useCreateEntityComment(kind, entityId)
   const [filter, setFilter] = useState<string>('all')
   const [composeBody, setComposeBody] = useState('')
   const [composeType, setComposeType] =
     useState<keyof typeof TYPE_LABEL>('user_note')
 
   // Hide internal change-log records that the Dependencies tab posts
-  // (agent_notes wrapped in <dependency_revision>). They live in
-  // the Dependencies > Revision history surface — they're operational
-  // events, not real comments. Filter at the source so type counts +
-  // the filter dropdown don't reflect them either.
+  // (agent_notes wrapped in <dependency_revision>) — they live in the
+  // Dependencies > Revision history surface.
   const real = useMemo<Comment[]>(() => {
     if (!comments.data) return []
     return comments.data.filter(
@@ -80,6 +118,13 @@ export function CommentsTab({ productId }: { productId: string }) {
     })
   }, [real, filter])
 
+  const [composing, setComposing] = useState(false)
+  const [mode, setMode] = useDescMode()
+  const open = () => setComposing(true)
+  const close = () => {
+    setComposing(false)
+    setComposeBody('')
+  }
   const post = async () => {
     const body = composeBody.trim()
     if (!body) return
@@ -89,28 +134,80 @@ export function CommentsTab({ productId }: { productId: string }) {
         type: composeType,
         body,
       })
-      setComposeBody('')
+      close()
     } catch (e) {
       console.error(e)
     }
   }
-  const cancel = () => setComposeBody('')
 
   return (
-    <div className='space-y-3'>
-      <Card>
-        <CardHeader className='py-3'>
-          <CardTitle className='text-sm font-medium'>Add comment</CardTitle>
-        </CardHeader>
-        <CardContent className='pt-0 pb-3'>
-          <div className='space-y-2'>
+    <div className='space-y-2'>
+      <div className='flex items-center justify-between gap-3'>
+        <div className='text-muted-foreground text-sm'>
+          {comments.isLoading
+            ? 'Loading…'
+            : `${visible.length} of ${real.length}`}
+        </div>
+        <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-1'>
+            <Button
+              type='button'
+              variant={mode === 'markup' ? 'secondary' : 'ghost'}
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => setMode('markup')}
+            >
+              Markup
+            </Button>
+            <Button
+              type='button'
+              variant={mode === 'rendered' ? 'secondary' : 'ghost'}
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => setMode('rendered')}
+            >
+              Rendered
+            </Button>
+          </div>
+          <Select value={filter} onValueChange={setFilter}>
+            <SelectTrigger className='h-8 w-48 text-xs'>
+              <SelectValue placeholder='Filter by type' />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All types</SelectItem>
+              {types.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TYPE_LABEL[t] ?? t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!composing ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={open}
+              className='h-8 text-xs'
+            >
+              <Plus className='mr-1 h-3 w-3' />
+              Add comment
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {composing ? (
+        <Card className='gap-0 py-0'>
+          <CardContent className='space-y-2 px-3 py-2'>
             <MarkdownEditor
               value={composeBody}
               onChange={setComposeBody}
               onSave={post}
-              onCancel={cancel}
+              onCancel={close}
               compact
-              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to clear)'
+              autoFocus
+              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to cancel)'
             />
             <div className='flex items-center justify-end gap-2'>
               {create.isError ? (
@@ -139,10 +236,10 @@ export function CommentsTab({ productId }: { productId: string }) {
                 type='button'
                 variant='ghost'
                 size='sm'
-                onClick={cancel}
-                disabled={create.isPending || !composeBody}
+                onClick={close}
+                disabled={create.isPending}
               >
-                Clear
+                Cancel
               </Button>
               <Button
                 type='button'
@@ -153,32 +250,11 @@ export function CommentsTab({ productId }: { productId: string }) {
                 {create.isPending ? 'Posting…' : 'Post'}
               </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <div className='flex items-center justify-between gap-3'>
-        <div className='text-muted-foreground text-sm'>
-          {comments.isLoading
-            ? 'Loading…'
-            : `${visible.length} of ${real.length}`}
-        </div>
-        <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className='w-56'>
-            <SelectValue placeholder='Filter by type' />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='all'>All types</SelectItem>
-            {types.map((t) => (
-              <SelectItem key={t} value={t}>
-                {TYPE_LABEL[t] ?? t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <Card>
+      <Card className='gap-0 py-0'>
         <CardContent className='p-0'>
           {comments.isLoading ? (
             <div className='space-y-2 p-3'>
@@ -210,9 +286,20 @@ export function CommentsTab({ productId }: { productId: string }) {
                       {fmtTime(c.created_at)}
                     </span>
                   </div>
-                  <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
-                    {c.body}
-                  </pre>
+                  {mode === 'rendered' &&
+                  (c as { body_html?: string }).body_html ? (
+                    <div
+                      className='md-body text-sm'
+                      dangerouslySetInnerHTML={{
+                        __html:
+                          (c as { body_html?: string }).body_html ?? '',
+                      }}
+                    />
+                  ) : (
+                    <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
+                      {c.body}
+                    </pre>
+                  )}
                 </div>
               ))}
             </div>

@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // productBlockPrefix is the literal prefix Store.Create writes into
@@ -60,6 +63,68 @@ func (s *Store) FlipProductBlockedTasks(ctx context.Context, productID string, n
 	if newStatus == StatusScheduled {
 		nextRunAt = now
 	}
+	// Resolve manifest → task chain via the relationships store. Falls
+	// back to the legacy m.project_id / t.manifest_id JOIN when rels
+	// isn't wired OR when rels is empty for this product (test
+	// bootstrap path that writes only to legacy columns).
+	if s.rels != nil {
+		manifestEdges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeOwns)
+		if err != nil {
+			return 0, fmt.Errorf("flip product-blocked tasks: list manifests: %w", err)
+		}
+		manifestIDs := make([]string, 0, len(manifestEdges))
+		for _, e := range manifestEdges {
+			if e.DstKind == relationships.KindManifest {
+				manifestIDs = append(manifestIDs, e.DstID)
+			}
+		}
+		if len(manifestIDs) == 0 {
+			goto legacyFallback
+		}
+		taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
+		if err != nil {
+			return 0, fmt.Errorf("flip product-blocked tasks: list tasks: %w", err)
+		}
+		taskIDs := []string{}
+		for _, edges := range taskEdgesByManifest {
+			for _, e := range edges {
+				if e.DstKind == relationships.KindTask {
+					taskIDs = append(taskIDs, e.DstID)
+				}
+			}
+		}
+		if len(taskIDs) == 0 {
+			goto legacyFallback
+		}
+		ph := strings.Repeat("?,", len(taskIDs))
+		ph = ph[:len(ph)-1]
+		args := make([]any, 0, len(taskIDs)+4)
+		args = append(args, string(newStatus), nextRunAt, now)
+		for _, id := range taskIDs {
+			args = append(args, id)
+		}
+		args = append(args, productBlockPrefix+"%")
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE tasks
+			 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
+			 WHERE id IN (`+ph+`)
+			   AND status = 'waiting'
+			   AND block_reason LIKE ?
+			   AND deleted_at = ''`,
+			args...)
+		if err != nil {
+			return 0, fmt.Errorf("flip product-blocked tasks: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n > 0 {
+			slog.Info("flipped product-blocked tasks",
+				"component", "task", "product_id", productID,
+				"new_status", newStatus, "count", n)
+		}
+		return int(n), nil
+	}
+legacyFallback:
+	// Legacy fallback path.
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE tasks
 		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?

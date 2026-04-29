@@ -62,7 +62,8 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 func apiManifestList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		manifests, err := n.Manifests.List(status, 50)
+		// limit=0 → unbounded. v2 list pane paginates client-side.
+		manifests, err := n.Manifests.List(status, 0)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -118,6 +119,11 @@ func apiManifestGet(n *node.Node) http.HandlerFunc {
 			writeError(w, "not found", 404)
 			return
 		}
+		// Pull turns + cost + actions + tokens from this manifest's
+		// task_runs. Mirrors the apiProductGet enrichment so the Main
+		// tab gauges have something to render. List endpoints stay lean
+		// (cheaper batched EnrichWithCosts only).
+		n.Manifests.EnrichRecursiveCosts(m)
 		// Single GET enriches with rendered HTML for the body fields so
 		// the dashboard renders formatted markdown. List endpoints stay
 		// lean (no HTML render per row).

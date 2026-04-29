@@ -15,6 +15,12 @@ function Tabs({
   )
 }
 
+// Folder-tab visuals (vs. the default pill-row): each trigger has top
+// corners rounded, border on top + sides, and the active tab merges
+// with the content surface below by overlapping the list's bottom edge
+// and dropping its own bottom border. TabsList is just the shelf —
+// `border-b` becomes the line every inactive tab sits on, the active
+// tab sticks up through it.
 function TabsList({
   className,
   ...props
@@ -23,7 +29,7 @@ function TabsList({
     <TabsPrimitive.List
       data-slot='tabs-list'
       className={cn(
-        'inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-0.75 text-muted-foreground',
+        'flex w-full items-end gap-2 border-b px-2 text-muted-foreground',
         className
       )}
       {...props}
@@ -39,7 +45,24 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot='tabs-trigger'
       className={cn(
-        "inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // Base — folder shape: top-rounded only, sides + top border,
+        // small lift on hover. The `-mb-px` pulls the tab down by a
+        // pixel so its bottom edge sits ON the TabsList's border-b.
+        // `flex-1` so the strip distributes evenly across the row
+        // instead of cramming labels on the left.
+        'relative -mb-px inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-t-md border border-transparent px-3 py-1.5 text-sm font-medium transition-colors',
+        // Inactive — muted bg, subtle border, hover lifts color.
+        'bg-muted/40 hover:bg-muted/70 hover:text-foreground',
+        // Active — match the content surface, draw top + sides, hide
+        // the bottom border so the tab "merges" into the content area
+        // below. Slightly bolder text + subtle inset shadow on top.
+        'data-[state=active]:bg-card data-[state=active]:text-foreground',
+        'data-[state=active]:border-border data-[state=active]:border-b-card',
+        'data-[state=active]:font-semibold',
+        // Focus + disabled.
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        'disabled:pointer-events-none disabled:opacity-50',
+        "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}

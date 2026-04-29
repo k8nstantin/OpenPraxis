@@ -3,10 +3,12 @@ import {
   AlertTriangle,
   Boxes,
   Brain,
+  CheckSquare,
   Command,
+  FileText,
   Inbox,
   LayoutDashboard,
-  PlayCircle,
+  ScrollText,
   Settings,
   TrendingUp,
 } from 'lucide-react'
@@ -39,14 +41,24 @@ export const sidebarData: SidebarData = {
           icon: LayoutDashboard,
         },
         {
-          title: 'Active',
-          url: '/active',
-          icon: PlayCircle,
+          title: 'Actions Log',
+          url: '/actions',
+          icon: ScrollText,
         },
         {
           title: 'Products',
           url: '/products',
           icon: Boxes,
+        },
+        {
+          title: 'Manifests',
+          url: '/manifests',
+          icon: FileText,
+        },
+        {
+          title: 'Tasks',
+          url: '/tasks',
+          icon: CheckSquare,
         },
         {
           title: 'Inbox',
