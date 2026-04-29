@@ -264,7 +264,11 @@ func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) 
 			}
 		}
 		if len(ids) == 0 {
-			return nil, nil
+			// Fall through to legacy JOIN — could be a test fixture
+			// that writes only to manifests.project_id without the
+			// EdgeOwns row. Production has both populated post-backfill,
+			// so legacy returns identical 0-row result there.
+			goto legacyFallback
 		}
 		placeholders := strings.Repeat("?,", len(ids))
 		placeholders = placeholders[:len(placeholders)-1]
@@ -289,6 +293,7 @@ func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) 
 		}
 		return results, rows.Err()
 	}
+legacyFallback:
 	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE project_id = ? AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, projectID, limit)
 	if err != nil {
