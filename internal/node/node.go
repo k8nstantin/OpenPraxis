@@ -369,15 +369,74 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
-	// 5 seconds and attributes each sample to every currently-running
-	// task. Data lands on task_run_host_samples for the Run Stats
-	// card overlay + on task_runs rollup columns for list views.
-	// The sampler is a single shared instance on the node — starting
-	// multiple runners is not supported, so one-at-boot is fine.
-	n.hostSampler = task.NewHostSampler(5 * time.Second)
+	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
+	// attributes each sample to every currently-running task. Data lands
+	// on task_run_host_samples for the Run Stats card overlay + on
+	// task_runs rollup columns for list views. The sampler is a single
+	// shared instance on the node — one-at-boot is fine.
+	tick := resolveHostSamplerTick(n.SettingsStore)
+	n.hostSampler = task.NewHostSampler(tick)
 	n.hostSampler.Start(context.Background())
 	n.runner.SetHostSampler(n.hostSampler)
 	return n.runner
+}
+
+// HostSamplerTick returns the resolved host-sampler tick duration so
+// cmd/serve.go can construct the SystemSampler with the same cadence
+// as the per-run sampler. Reads `host_sampler_tick_seconds` at system
+// scope; falls back to catalog default on lookup failure.
+func (n *Node) HostSamplerTick() time.Duration {
+	return resolveHostSamplerTick(n.SettingsStore)
+}
+
+// resolveHostSamplerTick reads the host_sampler_tick_seconds knob at
+// system scope. Lookup failures fall back to the catalog default. The
+// floor is 1s (matches the catalog SliderMin); a 0 or negative value
+// would otherwise produce a runaway ticker.
+func resolveHostSamplerTick(store *settings.Store) time.Duration {
+	const fallback = 5 * time.Second
+	const floor = 1 * time.Second
+	if store == nil {
+		return fallback
+	}
+	entry, err := store.Get(context.Background(), settings.ScopeSystem, "", "host_sampler_tick_seconds")
+	var secs float64
+	if err == nil && entry.Value != "" {
+		// settings values are JSON-encoded numbers.
+		if perr := unmarshalNumber(entry.Value, &secs); perr != nil {
+			secs = 0
+		}
+	}
+	if secs <= 0 {
+		if def, ok := settings.SystemDefault("host_sampler_tick_seconds"); ok {
+			switch v := def.(type) {
+			case int:
+				secs = float64(v)
+			case int64:
+				secs = float64(v)
+			case float64:
+				secs = v
+			}
+		}
+	}
+	if secs <= 0 {
+		return fallback
+	}
+	d := time.Duration(secs) * time.Second
+	if d < floor {
+		return floor
+	}
+	return d
+}
+
+// unmarshalNumber decodes a JSON number value as a float64. Used to
+// resolve int + float knobs without taking a settings package import.
+func unmarshalNumber(raw string, out *float64) error {
+	// Local copy of encoding/json's behavior — the settings store always
+	// writes JSON-encoded numbers, so a simple Sscanf is sufficient and
+	// avoids pulling encoding/json into node.go's small import set.
+	_, err := fmt.Sscanf(raw, "%f", out)
+	return err
 }
 
 // GetRunner returns the task Runner, or nil if not yet initialized.

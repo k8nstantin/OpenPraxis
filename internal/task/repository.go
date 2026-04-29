@@ -727,13 +727,27 @@ func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD
 		slog.Warn("query run_count failed", "task_id", id, "error", err)
 	}
 
+	// Resolve the task's agent so the run row carries an agent_runtime
+	// stamp (used by the Stats tab summary card). Best-effort — empty
+	// string is fine if the task was deleted between RecordRun args
+	// being prepared and this query.
+	var agentRuntime string
+	_ = s.db.QueryRow(`SELECT agent FROM tasks WHERE id = ?`, id).Scan(&agentRuntime)
+
+	durationMS := time.Since(startedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
+
 	// Insert into task_runs history with full denorm (tokens + model + pricing version).
 	res, err := s.db.Exec(`INSERT INTO task_runs
 		(task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
-		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version,
+		 duration_ms, agent_runtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now,
-		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion)
+		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion,
+		durationMS, agentRuntime)
 	if err != nil {
 		return 0, err
 	}
@@ -753,8 +767,8 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 		return nil
 	}
 	if _, err := s.db.Exec(
-		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ? WHERE id = ?`,
-		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, runID,
+		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ?, avg_rss_mb = ? WHERE id = ?`,
+		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, metrics.AvgRSSMB, runID,
 	); err != nil {
 		return fmt.Errorf("update task_runs host summary: %w", err)
 	}
@@ -767,15 +781,16 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples
-		(run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		(run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare host-samples insert: %w", err)
 	}
 	defer stmt.Close()
 	for _, smp := range samples {
 		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano),
-			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions); err != nil {
+			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions,
+			smp.DiskUsedGB, smp.DiskTotalGB); err != nil {
 			return fmt.Errorf("insert host sample: %w", err)
 		}
 	}
@@ -789,7 +804,7 @@ func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metr
 // Run Stats card can overlay all 5 sparklines aligned.
 func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	rows, err := s.db.Query(
-		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
+		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb
 		 FROM task_run_host_samples
 		 WHERE run_id = ? ORDER BY ts ASC`,
 		runID,
@@ -802,7 +817,8 @@ func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	for rows.Next() {
 		var tsStr string
 		var smp HostMetricsSample
-		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB, &smp.CostUSD, &smp.Turns, &smp.Actions); err != nil {
+		if err := rows.Scan(&tsStr, &smp.CPUPct, &smp.RSSMB, &smp.CostUSD, &smp.Turns, &smp.Actions,
+			&smp.DiskUsedGB, &smp.DiskTotalGB); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
@@ -818,8 +834,7 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
-		FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE task_id = ? ORDER BY run_number DESC LIMIT ?`, taskID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -829,20 +844,19 @@ func (s *Store) ListRuns(taskID string, limit int) ([]TaskRun, error) {
 
 // GetRun returns a single task run by ID.
 func (s *Store) GetRun(runID int) (*TaskRun, error) {
-	var r TaskRun
-	var startedStr, completedStr string
-	err := s.db.QueryRow(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb FROM task_runs WHERE id = ?`, runID).
-		Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
-			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion,
-			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE id = ?`, runID)
 	if err != nil {
 		return nil, err
 	}
-	r.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
-	r.CompletedAt, _ = time.Parse(time.RFC3339, completedStr)
+	defer rows.Close()
+	runs, err := scanRuns(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, nil
+	}
+	r := runs[0]
 	return &r, nil
 }
 
@@ -851,8 +865,7 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.Query(`SELECT id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version, peak_cpu_pct, avg_cpu_pct, peak_rss_mb
-		FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
+	rows, err := s.db.Query(`SELECT `+taskRunsColumns+` FROM task_runs WHERE started_at >= ? ORDER BY started_at DESC LIMIT ?`,
 		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {
 		return nil, err

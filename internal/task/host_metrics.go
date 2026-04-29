@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +11,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	gpcpu "github.com/shirou/gopsutil/v3/cpu"
+	gpdisk "github.com/shirou/gopsutil/v3/disk"
+	gpload "github.com/shirou/gopsutil/v3/load"
+	gpmem "github.com/shirou/gopsutil/v3/mem"
+	gpnet "github.com/shirou/gopsutil/v3/net"
 )
 
 // HostMetricsSample is one CPU/RSS reading of the serve process. The
@@ -20,6 +27,10 @@ type HostMetricsSample struct {
 	TS      time.Time `json:"ts"`
 	CPUPct  float64   `json:"cpu_pct"`
 	RSSMB   float64   `json:"rss_mb"`
+	// Disk capacity captured at the same tick — surfaces an agent
+	// ballooning the worktree on the per-run timeline.
+	DiskUsedGB  float64 `json:"disk_used_gb"`
+	DiskTotalGB float64 `json:"disk_total_gb"`
 	// Live task counters captured at the same tick as host CPU/RSS.
 	// Feeds the Run Stats card's 5-aligned-sparkline layout — same X-axis
 	// as CPU/RSS. Populated by a runner-supplied TaskStatFn closure.
@@ -40,6 +51,7 @@ type HostMetrics struct {
 	PeakCPUPct float64
 	AvgCPUPct  float64
 	PeakRSSMB  float64
+	AvgRSSMB   float64
 }
 
 // HostSampler polls the serve process for CPU% + RSS every Interval and
@@ -176,9 +188,10 @@ func rollupSamples(samples []HostMetricsSample) HostMetrics {
 	if len(samples) == 0 {
 		return m
 	}
-	var cpuSum float64
+	var cpuSum, rssSum float64
 	for _, s := range samples {
 		cpuSum += s.CPUPct
+		rssSum += s.RSSMB
 		if s.CPUPct > m.PeakCPUPct {
 			m.PeakCPUPct = s.CPUPct
 		}
@@ -187,6 +200,7 @@ func rollupSamples(samples []HostMetricsSample) HostMetrics {
 		}
 	}
 	m.AvgCPUPct = cpuSum / float64(len(samples))
+	m.AvgRSSMB = rssSum / float64(len(samples))
 	return m
 }
 
@@ -220,9 +234,173 @@ func readProcMetrics(pid int) (HostMetricsSample, error) {
 	if err != nil {
 		return HostMetricsSample{}, fmt.Errorf("parse rss: %w", err)
 	}
-	return HostMetricsSample{
+	smp := HostMetricsSample{
 		TS:     time.Now().UTC(),
 		CPUPct: cpu,
 		RSSMB:  rssKB / 1024.0,
-	}, nil
+	}
+	if d, err := gpdisk.Usage("/"); err == nil && d != nil {
+		smp.DiskUsedGB = float64(d.Used) / (1024 * 1024 * 1024)
+		smp.DiskTotalGB = float64(d.Total) / (1024 * 1024 * 1024)
+	}
+	return smp, nil
+}
+
+// SystemHostSample is one capacity reading of the host (independent of
+// any task). Persisted to system_host_samples; powers the Stats tab's
+// System Capacity panel. Captured by SystemSampler at every tick.
+type SystemHostSample struct {
+	TS          time.Time `json:"ts"`
+	CPUPct      float64   `json:"cpu_pct"`
+	Load1m      float64   `json:"load_1m"`
+	Load5m      float64   `json:"load_5m"`
+	Load15m     float64   `json:"load_15m"`
+	MemUsedMB   float64   `json:"mem_used_mb"`
+	MemTotalMB  float64   `json:"mem_total_mb"`
+	SwapUsedMB  float64   `json:"swap_used_mb"`
+	DiskUsedGB  float64   `json:"disk_used_gb"`
+	DiskTotalGB float64   `json:"disk_total_gb"`
+	NetRxMbps   float64   `json:"net_rx_mbps"`
+	NetTxMbps   float64   `json:"net_tx_mbps"`
+}
+
+// readSystemMetrics returns a single fresh capacity sample for the
+// whole host. Cheap (no shell-out — gopsutil reads sysctl / /proc
+// directly). Network throughput is computed as a delta against
+// previous-sample byte totals; the first call after start records the
+// baseline and reports zeros so a misleading "all bytes since boot"
+// spike doesn't land on the chart.
+func readSystemMetrics(prev systemNetBaseline) (SystemHostSample, systemNetBaseline) {
+	smp := SystemHostSample{TS: time.Now().UTC()}
+
+	// CPU% — single 0-interval call returns avg-since-last-call. If
+	// percent is unavailable we leave 0 rather than blocking the tick.
+	if pcts, err := gpcpu.Percent(0, false); err == nil && len(pcts) > 0 {
+		smp.CPUPct = pcts[0]
+	}
+
+	if l, err := gpload.Avg(); err == nil && l != nil {
+		smp.Load1m, smp.Load5m, smp.Load15m = l.Load1, l.Load5, l.Load15
+	}
+
+	if v, err := gpmem.VirtualMemory(); err == nil && v != nil {
+		smp.MemUsedMB = float64(v.Used) / (1024 * 1024)
+		smp.MemTotalMB = float64(v.Total) / (1024 * 1024)
+	}
+	if sw, err := gpmem.SwapMemory(); err == nil && sw != nil {
+		smp.SwapUsedMB = float64(sw.Used) / (1024 * 1024)
+	}
+
+	if d, err := gpdisk.Usage("/"); err == nil && d != nil {
+		smp.DiskUsedGB = float64(d.Used) / (1024 * 1024 * 1024)
+		smp.DiskTotalGB = float64(d.Total) / (1024 * 1024 * 1024)
+	}
+
+	next := prev
+	if io, err := gpnet.IOCounters(false); err == nil && len(io) > 0 {
+		now := time.Now()
+		rx, tx := io[0].BytesRecv, io[0].BytesSent
+		if !prev.At.IsZero() {
+			dt := now.Sub(prev.At).Seconds()
+			if dt > 0 {
+				smp.NetRxMbps = float64(rx-prev.RxBytes) * 8 / 1e6 / dt
+				smp.NetTxMbps = float64(tx-prev.TxBytes) * 8 / 1e6 / dt
+				if smp.NetRxMbps < 0 {
+					smp.NetRxMbps = 0
+				}
+				if smp.NetTxMbps < 0 {
+					smp.NetTxMbps = 0
+				}
+			}
+		}
+		next = systemNetBaseline{At: now, RxBytes: rx, TxBytes: tx}
+	}
+
+	return smp, next
+}
+
+// systemNetBaseline holds the previous-tick network byte totals so the
+// next tick can compute a per-second delta. Embedded in SystemSampler.
+type systemNetBaseline struct {
+	At      time.Time
+	RxBytes uint64
+	TxBytes uint64
+}
+
+// SystemSampler runs continuously from server start, capturing one host
+// capacity sample per tick to system_host_samples. Independent of any
+// task — keeps a baseline visible even when no tasks are running.
+//
+// Tick rate is read from the `host_sampler_tick_seconds` knob at
+// construction. Reload on knob change is out of scope; restarting serve
+// applies a new value.
+type SystemSampler struct {
+	db       *sql.DB
+	interval time.Duration
+	stopCh   chan struct{}
+	started  bool
+	mu       sync.Mutex
+}
+
+// NewSystemSampler returns a sampler ticking every interval. interval
+// <= 0 → 5s default. Call Start to begin writing rows.
+func NewSystemSampler(db *sql.DB, interval time.Duration) *SystemSampler {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	return &SystemSampler{
+		db:       db,
+		interval: interval,
+		stopCh:   make(chan struct{}),
+	}
+}
+
+// Start launches the poll loop. Idempotent — second call is a no-op.
+func (s *SystemSampler) Start(ctx context.Context) {
+	s.mu.Lock()
+	if s.started {
+		s.mu.Unlock()
+		return
+	}
+	s.started = true
+	s.mu.Unlock()
+	go s.loop(ctx)
+}
+
+// Stop halts the poll loop.
+func (s *SystemSampler) Stop() {
+	select {
+	case <-s.stopCh:
+	default:
+		close(s.stopCh)
+	}
+}
+
+func (s *SystemSampler) loop(ctx context.Context) {
+	t := time.NewTicker(s.interval)
+	defer t.Stop()
+	var baseline systemNetBaseline
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-t.C:
+			var smp SystemHostSample
+			smp, baseline = readSystemMetrics(baseline)
+			if _, err := s.db.Exec(
+				`INSERT INTO system_host_samples
+				(ts, cpu_pct, load_1m, load_5m, load_15m, mem_used_mb, mem_total_mb, swap_used_mb, disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				smp.TS.UTC().Format(time.RFC3339Nano),
+				smp.CPUPct, smp.Load1m, smp.Load5m, smp.Load15m,
+				smp.MemUsedMB, smp.MemTotalMB, smp.SwapUsedMB,
+				smp.DiskUsedGB, smp.DiskTotalGB,
+				smp.NetRxMbps, smp.NetTxMbps,
+			); err != nil {
+				slog.Warn("system sample insert failed", "error", err)
+			}
+		}
+	}
 }

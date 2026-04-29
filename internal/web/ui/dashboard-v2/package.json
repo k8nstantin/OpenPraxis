@@ -40,6 +40,8 @@
     "cytoscape": "^3.33.2",
     "cytoscape-dagre": "^2.5.0",
     "date-fns": "^4.1.0",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.6",
     "input-otp": "^1.4.2",
     "lucide-react": "^1.8.0",
     "react": "^19.2.5",

@@ -6,7 +6,6 @@ import {
   useCreateSchedule,
   useScheduleHistory,
   useSchedules,
-  useScheduleTemplates,
   type Schedule,
 } from '@/lib/queries/schedules'
 import type { EntityKind } from '@/lib/queries/entity'
@@ -302,11 +301,12 @@ function NewScheduleForm({
   onCancel: () => void
   onSaved: () => void
 }) {
-  const templates = useScheduleTemplates()
   const create = useCreateSchedule(kind, entityId)
 
-  const [templateKey, setTemplateKey] = useState<string>('once')
-  const [customCron, setCustomCron] = useState<string>('')
+  const [intervalValue, setIntervalValue] = useState<string>('1')
+  const [intervalUnit, setIntervalUnit] = useState<
+    'minute' | 'hour' | 'day' | 'week'
+  >('hour')
   const [date, setDate] = useState<Date | undefined>(() => {
     const tomorrow = new Date()
     tomorrow.setDate(tomorrow.getDate() + 1)
@@ -321,8 +321,6 @@ function NewScheduleForm({
   const [calOpen, setCalOpen] = useState(false)
   const [stopCalOpen, setStopCalOpen] = useState(false)
 
-  const selectedTemplate = templates.data?.find((t) => t.key === templateKey)
-
   const onSave = async () => {
     if (!date) {
       toast.error('Please pick a start date.')
@@ -333,12 +331,16 @@ function NewScheduleForm({
       toast.error('Invalid time — use HH:MM (24h).')
       return
     }
-    let cronExpr = ''
-    if (templateKey === 'custom') {
-      cronExpr = customCron.trim()
-    } else if (selectedTemplate) {
-      cronExpr = selectedTemplate.cron
+    const ivl = Number.parseInt(intervalValue, 10)
+    if (!Number.isFinite(ivl) || ivl <= 0) {
+      toast.error('Interval must be a positive integer.')
+      return
     }
+    // Build a friendly recurrence label that the backend stores in
+    // cron_expr (legacy column, no actual cron parsing). The runner
+    // cutover (follow-up PR) will read interval_value + interval_unit
+    // directly via new schedules columns.
+    const reccLabel = `every ${ivl} ${intervalUnit}${ivl === 1 ? '' : 's'}`
 
     let max = 0
     let stopAt = ''
@@ -362,7 +364,7 @@ function NewScheduleForm({
         entity_kind: kind,
         entity_id: entityId,
         run_at: runAt,
-        cron_expr: cronExpr,
+        cron_expr: reccLabel,
         timezone: tz || 'UTC',
         max_runs: max,
         stop_at: stopAt,
@@ -380,26 +382,32 @@ function NewScheduleForm({
     <Card data-testid='new-schedule-form'>
       <CardContent className='space-y-4 p-4'>
         <div className='space-y-2'>
-          <Label htmlFor='sched-template'>How frequent</Label>
-          <Select value={templateKey} onValueChange={setTemplateKey}>
-            <SelectTrigger id='sched-template' className='w-full'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(templates.data ?? []).map((t) => (
-                <SelectItem key={t.key} value={t.key}>
-                  {t.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {templateKey === 'custom' ? (
+          <Label>Run every</Label>
+          <div className='flex items-center gap-2'>
             <Input
-              placeholder='cron expression — e.g. "*/30 * * * *"'
-              value={customCron}
-              onChange={(e) => setCustomCron(e.target.value)}
+              type='number'
+              min={1}
+              value={intervalValue}
+              onChange={(e) => setIntervalValue(e.target.value)}
+              className='w-24'
             />
-          ) : null}
+            <Select
+              value={intervalUnit}
+              onValueChange={(v) =>
+                setIntervalUnit(v as 'minute' | 'hour' | 'day' | 'week')
+              }
+            >
+              <SelectTrigger className='w-40'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='minute'>Minutes</SelectItem>
+                <SelectItem value='hour'>Hours</SelectItem>
+                <SelectItem value='day'>Days</SelectItem>
+                <SelectItem value='week'>Weeks</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className='grid grid-cols-2 gap-3'>
@@ -545,20 +553,22 @@ function NewScheduleForm({
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-// describeRecurrence renders a friendly label for a cron expression by
-// matching against the seed templates first; falls back to "cron: <expr>"
-// for custom strings. One-shot ('') renders "One-shot".
-function describeRecurrence(cron: string): string {
-  if (cron === '') return 'One-shot'
-  const known: Record<string, string> = {
-    '*/15 * * * *': 'Every 15 minutes',
-    '0 * * * *': 'Hourly',
-    '0 */4 * * *': 'Every 4 hours',
-    '0 9 * * *': 'Daily at 9am',
-    '0 9 * * 1': 'Weekly (Mon 9am)',
-    '0 9 1 * *': 'Monthly (1st 9am)',
+// describeRecurrence renders a friendly label for the recurrence
+// stored on a schedule row. New rows write the friendly label
+// directly (e.g. "every 4 hours"). Legacy/backfilled rows may carry
+// a cron expression — translate the common ones to a human label.
+function describeRecurrence(label: string): string {
+  if (label === '') return '—'
+  const cronMap: Record<string, string> = {
+    '*/15 * * * *': 'every 15 minutes',
+    '0 * * * *': 'every hour',
+    '0 */4 * * *': 'every 4 hours',
+    '0 9 * * *': 'daily',
+    '0 9 * * 1': 'weekly',
+    '0 9 1 * *': 'monthly',
+    once: 'one-shot (legacy)',
   }
-  return known[cron] ?? `cron: ${cron}`
+  return cronMap[label] ?? label
 }
 
 // combineDateTime merges a date (from <Calendar>) with HH:MM 24h text

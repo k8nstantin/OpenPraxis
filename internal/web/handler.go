@@ -689,6 +689,13 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/task_runs/{runId}/host_samples", apiTaskRunHostSamples(n)).Methods("GET")
 	// Live host CPU/RSS — feeds the node stats chip on the overview.
 	api.HandleFunc("/host/stats", apiHostStats()).Methods("GET")
+	// Stats tab — entity-scoped run aggregation + continuous host stream.
+	// run-stats dispatches per entity_kind (product walks descendants,
+	// manifest joins on tasks.manifest_id, task by task_id). system-stats
+	// reads system_host_samples between [from, to], optionally bounded
+	// by as_of.
+	api.HandleFunc("/run-stats", apiRunStats(n)).Methods("GET")
+	api.HandleFunc("/system-stats", apiSystemStats(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
 	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")

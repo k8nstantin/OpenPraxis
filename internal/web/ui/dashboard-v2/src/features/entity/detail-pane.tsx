@@ -11,6 +11,7 @@ import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
 import { MainTab } from './tabs/main'
 import { ScheduleTab } from './tabs/schedule'
+import { StatsTab } from './tabs/stats'
 
 // Seven tabs in operator-priority order — same set across product /
 // manifest / task. Schedule + Stats are placeholders pending the
@@ -128,28 +129,11 @@ export function EntityDetailPane({
               <ScheduleTab kind={kind} entityId={entityId} />
             </TabsContent>
             <TabsContent value='stats'>
-              <StatsPlaceholder />
+              <StatsTab kind={kind} entityId={entityId} />
             </TabsContent>
           </Tabs>
         </div>
       </ScrollArea>
-    </div>
-  )
-}
-
-// Placeholder until the central `run_stats` table + per-entity
-// rollup queries land. ECharts visuals lock in here once data is wired.
-function StatsPlaceholder() {
-  return (
-    <div className='text-muted-foreground rounded-md border bg-card p-6 text-sm'>
-      <div className='mb-2 font-medium text-foreground'>Stats</div>
-      <p>
-        Per-run charts (cost, turns, actions, tokens, cpu%, rss) for this
-        entity. Backed by <code className='font-mono text-xs'>task_runs</code>
-        {' + '}<code className='font-mono text-xs'>task_run_host_samples</code>
-        ; aggregated across descendants on products / manifests, individual
-        runs on tasks. ECharts. Pending the backend-decoupling PR.
-      </p>
     </div>
   )
 }

@@ -67,6 +67,34 @@ type TaskRun struct {
 	PeakRSSMB  float64   `json:"peak_rss_mb"`
 	StartedAt  time.Time `json:"started_at"`
 	CompletedAt time.Time `json:"completed_at"`
+
+	// Stats-tab columns. Powers the per-entity Stats panel without
+	// re-parsing output blobs at read time. Populated by RecordRun
+	// + post-completion fillers (errors / compactions / files /
+	// commits / pr_number / branch / commit_sha).
+	Errors        int     `json:"errors"`
+	Compactions   int     `json:"compactions"`
+	FilesChanged  int     `json:"files_changed"`
+	ExitCode      int     `json:"exit_code"`
+	CancelledAt   string  `json:"cancelled_at"`
+	CancelledBy   string  `json:"cancelled_by"`
+	DurationMS    int64   `json:"duration_ms"`
+	AvgRSSMB      float64 `json:"avg_rss_mb"`
+	Branch        string  `json:"branch"`
+	CommitSHA     string  `json:"commit_sha"`
+	Commits       int     `json:"commits"`
+	PRNumber      int     `json:"pr_number"`
+	WorktreePath  string  `json:"worktree_path"`
+	AgentRuntime  string  `json:"agent_runtime"`
+	AgentVersion  string  `json:"agent_version"`
+
+	// Per-run code-churn split. Backfill is impossible for legacy rows
+	// (data wasn't captured) — they stay 0; new runs populate going
+	// forward when the runner extracts these from the agent's git diff
+	// stat. The pre-existing `Lines` column above stays as the total
+	// (= LinesAdded + LinesRemoved for new runs).
+	LinesAdded   int `json:"lines_added"`
+	LinesRemoved int `json:"lines_removed"`
 }
 
 // Store manages task persistence.
@@ -182,6 +210,41 @@ func (s *Store) init() error {
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN avg_cpu_pct REAL NOT NULL DEFAULT 0`)
 	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN peak_rss_mb REAL NOT NULL DEFAULT 0`)
 
+	// Stats-tab denorm columns (PR/M-Stats). Each ALTER is wrapped in a
+	// best-effort Exec because SQLite's ADD COLUMN is idempotent only via
+	// "duplicate column" failure — same pattern as the columns above.
+	// Powers /api/run-stats Cumulative + Per-run panels without re-parsing
+	// the raw output blob on every read.
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN errors INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN compactions INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0`)
+	// Per-run code-churn split. Existing `lines` column stays as the total
+	// (= lines_added + lines_removed for new runs). Backfill is impossible
+	// for legacy rows — they keep 0; new runs populate going forward when
+	// the runner extracts these from the agent's git diff stat. Powers the
+	// Stats tab Per-run "Git + output" card (+added / −removed next to
+	// files_changed) and the Cumulative panel's "Code churn per run" chart.
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN lines_added INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN lines_removed INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN exit_code INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cancelled_at TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN cancelled_by TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN avg_rss_mb REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN branch TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN commits INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN worktree_path TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN agent_runtime TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE task_runs ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_runs_started ON task_runs(started_at DESC)`)
+
+	// Backfill duration_ms for legacy completed rows so the Stats tab
+	// has values to plot for runs written before this migration. Idempotent —
+	// the WHERE clause skips rows already populated.
+	s.db.Exec(`UPDATE task_runs SET duration_ms = CAST((julianday(completed_at) - julianday(started_at)) * 86400000 AS INTEGER) WHERE duration_ms = 0 AND completed_at != '' AND started_at != ''`)
+
 	// Per-run host-metrics time-series. One row per sample (default 5s
 	// cadence). Feeds the CPU/RSS sparklines overlaid on the Run Stats
 	// card — same timeline as turn/actions/cost.
@@ -196,6 +259,36 @@ func (s *Store) init() error {
 		return fmt.Errorf("create task_run_host_samples table: %w", err)
 	}
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_run_host_samples_run ON task_run_host_samples(run_id)`)
+
+	// Stats-tab additions: per-run disk capture. The HostSampler now reads
+	// disk usage at each tick alongside CPU/RSS so the per-run timeline can
+	// plot disk-pressure overlays (e.g. an agent ballooning the worktree).
+	s.db.Exec(`ALTER TABLE task_run_host_samples ADD COLUMN disk_used_gb REAL NOT NULL DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE task_run_host_samples ADD COLUMN disk_total_gb REAL NOT NULL DEFAULT 0`)
+
+	// system_host_samples — continuous capacity stream from the
+	// SystemSampler started in cmd/serve.go. One row per tick (default
+	// host_sampler_tick_seconds=5s). Independent of any task; powers the
+	// System Capacity panel on the Stats tab.
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS system_host_samples (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		ts            TEXT NOT NULL,
+		cpu_pct       REAL NOT NULL DEFAULT 0,
+		load_1m       REAL NOT NULL DEFAULT 0,
+		load_5m       REAL NOT NULL DEFAULT 0,
+		load_15m      REAL NOT NULL DEFAULT 0,
+		mem_used_mb   REAL NOT NULL DEFAULT 0,
+		mem_total_mb REAL NOT NULL DEFAULT 0,
+		swap_used_mb REAL NOT NULL DEFAULT 0,
+		disk_used_gb  REAL NOT NULL DEFAULT 0,
+		disk_total_gb REAL NOT NULL DEFAULT 0,
+		net_rx_mbps   REAL NOT NULL DEFAULT 0,
+		net_tx_mbps   REAL NOT NULL DEFAULT 0
+	)`)
+	if err != nil {
+		return fmt.Errorf("create system_host_samples table: %w", err)
+	}
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sys_samples_ts ON system_host_samples(ts DESC)`)
 
 	// Running task runtime state — persists in-memory RunningTask data to survive restarts
 	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS task_runtime_state (
@@ -340,6 +433,18 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 	return tasks, rows.Err()
 }
 
+// taskRunsColumns is the canonical column list for task_runs SELECTs.
+// Kept in one place so adding a denormalised column doesn't need a sweep
+// across ListRuns / GetRun / ListAllRuns; scanRuns / scanRun read in
+// the same order.
+const taskRunsColumns = `id, task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
+	input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version,
+	peak_cpu_pct, avg_cpu_pct, peak_rss_mb,
+	errors, compactions, files_changed, exit_code, cancelled_at, cancelled_by,
+	duration_ms, avg_rss_mb, branch, commit_sha, commits, pr_number,
+	worktree_path, agent_runtime, agent_version,
+	lines_added, lines_removed`
+
 func scanRuns(rows *sql.Rows) ([]TaskRun, error) {
 	var runs []TaskRun
 	for rows.Next() {
@@ -347,7 +452,11 @@ func scanRuns(rows *sql.Rows) ([]TaskRun, error) {
 		var startedStr, completedStr string
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.RunNumber, &r.Output, &r.Status, &r.Actions, &r.Lines, &r.CostUSD, &r.Turns, &startedStr, &completedStr,
 			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreateTokens, &r.Model, &r.PricingVersion,
-			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB); err != nil {
+			&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB,
+			&r.Errors, &r.Compactions, &r.FilesChanged, &r.ExitCode, &r.CancelledAt, &r.CancelledBy,
+			&r.DurationMS, &r.AvgRSSMB, &r.Branch, &r.CommitSHA, &r.Commits, &r.PRNumber,
+			&r.WorktreePath, &r.AgentRuntime, &r.AgentVersion,
+			&r.LinesAdded, &r.LinesRemoved); err != nil {
 			return nil, err
 		}
 		r.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
