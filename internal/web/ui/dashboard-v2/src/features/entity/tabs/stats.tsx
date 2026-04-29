@@ -179,44 +179,314 @@ function CumulativePanel({
       ? 0
       : Math.round((latestMix.cache_read / latestTotalTokens) * 100)
 
+  // Common axisPointer/dataZoom config for every cumulative line chart
+  // — crosshair tooltips + brush-zoom slider so every chart feels rich
+  // and explorable, not just a static line.
+  const axisPointerCross = {
+    axisPointer: { type: 'cross' as const, label: { backgroundColor: '#1f2937' } },
+  }
+  const dataZoomBrush = [
+    { type: 'inside' as const },
+    { type: 'slider' as const, height: 18, bottom: 0 },
+  ]
+  // Linear gradient helper — top of band is the series color, bottom
+  // fades to transparent. Reads as a soft "fill below the line" everyone
+  // recognizes from monitoring dashboards.
+  const grad = (hex: string) => ({
+    type: 'linear' as const,
+    x: 0,
+    y: 0,
+    x2: 0,
+    y2: 1,
+    colorStops: [
+      { offset: 0, color: hex + 'cc' },
+      { offset: 1, color: hex + '00' },
+    ],
+  })
+
   return (
-    <div className='border-border bg-card space-y-3 rounded-md border p-4'>
-      {/* Header */}
+    <div className='space-y-4'>
       <div className='flex items-baseline gap-3'>
-        <div className='font-semibold text-sm'>
-          Run Stats — {totalRuns} run{totalRuns === 1 ? '' : 's'} (cumulative)
+        <div className='text-sm font-semibold'>
+          Cumulative — {totalRuns} run{totalRuns === 1 ? '' : 's'}
         </div>
         {latest ? (
           <div className='text-muted-foreground text-xs'>
-            latest run #{latest.run_number} · {fmtRelTime(latest.started_at)} ·{' '}
-            {fmtDuration(latest.duration_ms)}
+            latest #{latest.run_number} · {fmtRelTime(latest.started_at)} ·{' '}
+            {fmtDuration(latest.duration_ms)} · cumulative cost $
+            {totalCost.toFixed(2)} · cache-hit {latestCacheHitPct}%
           </div>
         ) : null}
       </div>
 
-      {/* Token mix horizontal stacked bar (latest run) */}
-      {latestTotalTokens > 0 ? (
-        <div className='space-y-1'>
-          <div className='text-muted-foreground text-[10px] uppercase tracking-wider'>
-            Token mix (run #{latest!.run_number})
-          </div>
-          <TokenMixBar mix={latestMix} />
-        </div>
-      ) : null}
+      <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+        <ChartCell label='Cost per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 50, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: {
+                type: 'value',
+                name: 'USD',
+                axisLabel: { formatter: '${value}' },
+              },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: costs,
+                  color: '#10b981',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#10b981') },
+                  markPoint: {
+                    symbol: 'pin',
+                    symbolSize: 36,
+                    data: [
+                      { type: 'max', name: 'peak', label: { color: '#fff' } },
+                    ],
+                  },
+                  markLine: {
+                    data: [{ type: 'average', name: 'avg' }],
+                    label: { formatter: 'avg ${c|0}' },
+                    lineStyle: { color: '#10b981', type: 'dashed' },
+                  },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
 
-      {/* Cache-hit ring + sparkline rows side-by-side */}
-      <div className='flex items-stretch gap-4'>
-        <CacheHitRing pct={latestCacheHitPct} />
-        <div className='min-w-0 flex-1 space-y-1'>
-          <SparkRow label='cost' values={costs} latest={`$${totalCost.toFixed(2)}`} color='#10b981' />
-          <SparkRow label='turns' values={ordered.map((r) => r.turns)} latest={fmtCount(totalTurns)} color='#3b82f6' />
-          <SparkRow label='actions' values={ordered.map((r) => r.actions)} latest={fmtCount(totalActions)} color='#f59e0b' />
-          <SparkRow label='cpu%' values={cpuPcts} latest={`${Math.round(latest?.avg_cpu_pct ?? 0)}%`} color='#fb923c' />
-          <SparkRow label='rss mb' values={rssMbs} latest={fmtCount(latest?.peak_rss_mb ?? 0)} color='#a855f7' />
-        </div>
+        <ChartCell label='Cumulative cost'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 50, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: {
+                type: 'value',
+                name: 'USD',
+                axisLabel: { formatter: '${value}' },
+              },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: cumulative,
+                  color: '#3b82f6',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#3b82f6') },
+                  emphasis: { focus: 'series' },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Token mix per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              legend: { data: ['input', 'output', 'cache_read', 'cache_create'], top: 0 },
+              grid: { left: 60, right: 24, top: 30, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
+              dataZoom: dataZoomBrush,
+              series: [
+                { name: 'input', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#fbbf24') }, data: inputs, color: '#fbbf24', symbol: 'none' },
+                { name: 'output', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#3b82f6') }, data: outputs, color: '#3b82f6', symbol: 'none' },
+                { name: 'cache_read', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#10b981') }, data: cacheRead, color: '#10b981', symbol: 'none' },
+                { name: 'cache_create', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#dc2626') }, data: cacheCreate, color: '#dc2626', symbol: 'none' },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Cache-hit %'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 50, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: {
+                type: 'value',
+                max: 100,
+                axisLabel: { formatter: '{value}%' },
+              },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: cacheHitPct,
+                  color: '#8b5cf6',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#8b5cf6') },
+                  markLine: {
+                    data: [
+                      { yAxis: 80, name: 'good' },
+                      { type: 'average', name: 'avg' },
+                    ],
+                    lineStyle: { type: 'dashed' },
+                  },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Duration per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 50, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: {
+                type: 'value',
+                name: 'sec',
+                axisLabel: { formatter: '{value}s' },
+              },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: durations,
+                  color: '#f59e0b',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#f59e0b') },
+                  markPoint: {
+                    symbol: 'pin',
+                    symbolSize: 36,
+                    data: [{ type: 'max', name: 'longest' }],
+                  },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Errors + Compactions per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              legend: { data: ['errors', 'compactions'], top: 0 },
+              grid: { left: 50, right: 24, top: 30, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: { type: 'value' },
+              dataZoom: dataZoomBrush,
+              series: [
+                { name: 'errors', type: 'bar', data: errors, color: '#ef4444', barWidth: '40%' },
+                { name: 'compactions', type: 'bar', data: compactions, color: '#0ea5e9', barWidth: '40%' },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        {Object.keys(statusCounts).length > 0 ? (
+          <ChartCell label='Status breakdown'>
+            <EChart
+              option={{
+                tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                legend: { bottom: 0 },
+                series: [
+                  {
+                    type: 'pie',
+                    radius: ['45%', '72%'],
+                    avoidLabelOverlap: true,
+                    data: Object.entries(statusCounts).map(([name, value]) => ({
+                      name,
+                      value,
+                      itemStyle: {
+                        color:
+                          name === 'success'
+                            ? '#10b981'
+                            : name === 'failed'
+                              ? '#ef4444'
+                              : name === 'cancelled'
+                                ? '#f59e0b'
+                                : '#71717a',
+                      },
+                    })),
+                    label: { formatter: '{b}\n{c}' },
+                  },
+                ],
+              }}
+            />
+          </ChartCell>
+        ) : null}
+
+        {topTasks && topTasks.length > 0 ? (
+          <ChartCell label='Top 10 tasks by cost'>
+            <EChart
+              option={{
+                tooltip: { trigger: 'axis', ...axisPointerCross },
+                grid: { left: 100, right: 60, top: 12, bottom: 30 },
+                xAxis: {
+                  type: 'value',
+                  name: 'USD',
+                  axisLabel: { formatter: '${value}' },
+                },
+                yAxis: {
+                  type: 'category',
+                  data: topTasks.map((t) => t.id.slice(0, 12)),
+                  inverse: true,
+                },
+                series: [
+                  {
+                    type: 'bar',
+                    data: topTasks.map((t) => t.cost),
+                    color: '#22c55e',
+                    label: {
+                      show: true,
+                      position: 'right',
+                      formatter: (p: { value: number }) => '$' + p.value.toFixed(2),
+                    },
+                  },
+                ],
+              }}
+            />
+          </ChartCell>
+        ) : null}
       </div>
 
-      {/* Footer summary */}
+      {/* Footer */}
       <div className='border-border text-muted-foreground border-t pt-2 text-[11px]'>
         Turns {fmtCount(totalTurns)} · Actions {fmtCount(totalActions)} · Lines{' '}
         {fmtCount(totalLines)} · Peak CPU {Math.round(peakCpu)}% · Peak RSS{' '}
@@ -224,58 +494,6 @@ function CumulativePanel({
         {latest?.model ? ` · ${latest.model}` : ''}
         {latest?.pricing_version ? ` · pricing ${latest.pricing_version}` : ''}
       </div>
-
-      {/* Status donut + Top 10 (only when there's something to show) */}
-      {(Object.keys(statusCounts).length > 1 || (topTasks && topTasks.length > 0)) ? (
-        <div className='grid grid-cols-1 gap-3 pt-2 lg:grid-cols-2'>
-          {Object.keys(statusCounts).length > 1 ? (
-            <ChartCell label='Status breakdown'>
-              <EChart
-                option={{
-                  tooltip: { trigger: 'item' },
-                  legend: { bottom: 0 },
-                  series: [
-                    {
-                      type: 'pie',
-                      radius: ['40%', '70%'],
-                      data: Object.entries(statusCounts).map(([name, value]) => ({
-                        name,
-                        value,
-                      })),
-                      label: { color: 'inherit' },
-                    },
-                  ],
-                }}
-                height={200}
-              />
-            </ChartCell>
-          ) : null}
-
-          {topTasks && topTasks.length > 0 ? (
-            <ChartCell label='Top 10 tasks by cost'>
-              <EChart
-                option={{
-                  xAxis: { type: 'value', name: 'USD', axisLabel: { formatter: '${value}' } },
-                  yAxis: {
-                    type: 'category',
-                    data: topTasks.map((t) => t.id.slice(0, 12)),
-                    inverse: true,
-                  },
-                  series: [
-                    {
-                      type: 'bar',
-                      data: topTasks.map((t) => t.cost),
-                      color: '#22c55e',
-                      label: { show: true, position: 'right', formatter: (p: { value: number }) => '$' + p.value.toFixed(2) },
-                    },
-                  ],
-                }}
-                height={200}
-              />
-            </ChartCell>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
 }
