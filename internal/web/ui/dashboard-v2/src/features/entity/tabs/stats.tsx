@@ -137,6 +137,51 @@ function CumulativePanel({
   const errors = ordered.map((r) => r.errors)
   const compactions = ordered.map((r) => r.compactions)
 
+  // Senior-dev derived metrics — what you actually want to watch when
+  // iterating on agent runs:
+  //   - cost efficiency ($/turn, $/action) — am I getting cheaper per
+  //     unit of useful work over time?
+  //   - tokens-per-turn — verbosity trend; is the agent tighter or
+  //     getting chattier?
+  //   - code churn — lines_added vs lines_removed per run; how much
+  //     real code is moving vs spinning?
+  //   - files touched + commits per run — breadth of impact.
+  //   - compaction rate (compactions / turns) — context-window
+  //     pressure signal; if this climbs the agent is hitting limits.
+  const costPerTurn = ordered.map((r) =>
+    r.turns > 0 ? round2(r.cost_usd / r.turns) : 0
+  )
+  const costPerAction = ordered.map((r) =>
+    r.actions > 0 ? round2(r.cost_usd / r.actions) : 0
+  )
+  const tokensPerTurn = ordered.map((r) => {
+    const total =
+      r.input_tokens +
+      r.output_tokens +
+      r.cache_read_tokens +
+      r.cache_create_tokens
+    return r.turns > 0 ? Math.round(total / r.turns) : 0
+  })
+  const linesAdded = ordered.map((r) => (r as { lines_added?: number }).lines_added ?? 0)
+  const linesRemoved = ordered.map(
+    (r) => -((r as { lines_removed?: number }).lines_removed ?? 0)
+  )
+  const filesChanged = ordered.map((r) => r.files_changed ?? 0)
+  const commitsPerRun = ordered.map((r) => (r as { commits?: number }).commits ?? 0)
+  const compactionRate = ordered.map((r) =>
+    r.turns > 0 ? round2((r.compactions / r.turns) * 100) : 0
+  )
+
+  // Cost-by-model — group runs by model and sum cost. Stacked bar per
+  // run gives a "what model handled this run" + total at-a-glance read.
+  const modelKeys = Array.from(new Set(ordered.map((r) => r.model || '—')))
+  const costByModel: Record<string, number[]> = {}
+  for (const k of modelKeys) {
+    costByModel[k] = ordered.map((r) =>
+      (r.model || '—') === k ? round2(r.cost_usd) : 0
+    )
+  }
+
   // Top-10 tasks by cost (product / manifest scope only). Skipped on
   // task scope where every run shares one task_id.
   const topTasks = useMemo(() => {
@@ -418,6 +463,214 @@ function CumulativePanel({
             }}
           />
         </ChartCell>
+
+        <ChartCell label='Cost efficiency ($ per turn / per action)'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              legend: { data: ['$/turn', '$/action'], top: 0 },
+              grid: { left: 60, right: 24, top: 30, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: { type: 'value', axisLabel: { formatter: '${value}' } },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  name: '$/turn',
+                  type: 'line',
+                  smooth: true,
+                  data: costPerTurn,
+                  color: '#22d3ee',
+                  symbol: 'circle',
+                  symbolSize: 5,
+                  areaStyle: { color: grad('#22d3ee') },
+                  markLine: { data: [{ type: 'average', name: 'avg' }], lineStyle: { type: 'dashed', color: '#22d3ee' } },
+                },
+                {
+                  name: '$/action',
+                  type: 'line',
+                  smooth: true,
+                  data: costPerAction,
+                  color: '#a78bfa',
+                  symbol: 'circle',
+                  symbolSize: 5,
+                  markLine: { data: [{ type: 'average', name: 'avg' }], lineStyle: { type: 'dashed', color: '#a78bfa' } },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Tokens per turn (verbosity)'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 60, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: tokensPerTurn,
+                  color: '#f472b6',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#f472b6') },
+                  markPoint: {
+                    symbol: 'pin',
+                    symbolSize: 36,
+                    data: [{ type: 'max', name: 'chattiest' }],
+                  },
+                  markLine: {
+                    data: [{ type: 'average', name: 'avg' }],
+                    lineStyle: { type: 'dashed' },
+                  },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Code churn — lines added / removed per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              legend: { data: ['added', 'removed'], top: 0 },
+              grid: { left: 50, right: 24, top: 30, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: { type: 'value' },
+              dataZoom: dataZoomBrush,
+              series: [
+                { name: 'added', type: 'bar', stack: 'churn', data: linesAdded, color: '#10b981', barWidth: '50%' },
+                { name: 'removed', type: 'bar', stack: 'churn', data: linesRemoved, color: '#ef4444', barWidth: '50%' },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Files changed + commits per run'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              legend: { data: ['files', 'commits'], top: 0 },
+              grid: { left: 40, right: 40, top: 30, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: [
+                { type: 'value', name: 'files' },
+                { type: 'value', name: 'commits' },
+              ],
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  name: 'files',
+                  type: 'bar',
+                  data: filesChanged,
+                  color: '#0ea5e9',
+                  barWidth: '40%',
+                },
+                {
+                  name: 'commits',
+                  type: 'line',
+                  yAxisIndex: 1,
+                  data: commitsPerRun,
+                  color: '#22c55e',
+                  smooth: true,
+                  symbol: 'diamond',
+                  symbolSize: 8,
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        <ChartCell label='Context pressure — compactions / turn (%)'>
+          <EChart
+            option={{
+              tooltip: { trigger: 'axis', ...axisPointerCross },
+              grid: { left: 50, right: 24, top: 24, bottom: 36 },
+              xAxis: {
+                type: 'category',
+                data: xs,
+                boundaryGap: false,
+                axisLabel: { interval: 0 },
+              },
+              yAxis: {
+                type: 'value',
+                axisLabel: { formatter: '{value}%' },
+              },
+              dataZoom: dataZoomBrush,
+              series: [
+                {
+                  type: 'line',
+                  smooth: true,
+                  data: compactionRate,
+                  color: '#fb7185',
+                  symbol: 'circle',
+                  symbolSize: 6,
+                  areaStyle: { color: grad('#fb7185') },
+                  markLine: {
+                    data: [
+                      { yAxis: 5, name: 'caution' },
+                      { yAxis: 10, name: 'high' },
+                    ],
+                    lineStyle: { type: 'dashed' },
+                  },
+                },
+              ],
+            }}
+          />
+        </ChartCell>
+
+        {modelKeys.length > 1 ? (
+          <ChartCell label='Cost by model'>
+            <EChart
+              option={{
+                tooltip: { trigger: 'axis', ...axisPointerCross },
+                legend: { top: 0 },
+                grid: { left: 50, right: 24, top: 30, bottom: 36 },
+                xAxis: {
+                  type: 'category',
+                  data: xs,
+                  boundaryGap: false,
+                  axisLabel: { interval: 0 },
+                },
+                yAxis: { type: 'value', axisLabel: { formatter: '${value}' } },
+                dataZoom: dataZoomBrush,
+                series: modelKeys.map((m, i) => ({
+                  name: m,
+                  type: 'bar',
+                  stack: 'cost',
+                  data: costByModel[m],
+                  barWidth: '60%',
+                  color: ['#10b981', '#3b82f6', '#a78bfa', '#f59e0b', '#ef4444'][
+                    i % 5
+                  ],
+                })),
+              }}
+            />
+          </ChartCell>
+        ) : null}
 
         {Object.keys(statusCounts).length > 0 ? (
           <ChartCell label='Status breakdown'>
