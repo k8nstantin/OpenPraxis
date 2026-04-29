@@ -125,6 +125,9 @@ function useRunningTasksLive() {
       if (!r.ok) throw new Error(`tasks/running/live → ${r.status}`)
       return ((await r.json()) as LiveTask[] | null) ?? []
     },
+    // Poll fast — host sampler ticks every ~5s and the runner updates
+    // its in-memory counters per stream-json event. 1.5s gives the UI
+    // perceived live-ness without hammering the endpoint.
     refetchInterval: 1500,
     staleTime: 0,
   })
@@ -267,7 +270,15 @@ function TasksPanel() {
       }
     >
       {running.length > 0 && (
-        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+        // Single task → full panel width. Two-or-more → 2-col grid only
+        // on very wide screens. No more half-empty row when one task is
+        // running.
+        <div
+          className={cn(
+            'grid gap-3',
+            running.length === 1 ? 'grid-cols-1' : 'grid-cols-1 2xl:grid-cols-2'
+          )}
+        >
           {running.map((t) => (
             <RunningTaskTile key={t.task_id} t={t} />
           ))}
@@ -277,67 +288,205 @@ function TasksPanel() {
   )
 }
 
-// RunningTaskTile — one card per in-flight task. Renders:
-//   - title + elapsed clock
-//   - 4-up stat grid: turns / actions / cost / lines (live)
-//   - three small sparklines: CPU%, RSS MB, cost trajectory
-//   - token totals as small text
+// RunningTaskTile — one card per in-flight task. Every metric is a
+// sparkline (live trend captured over the last ~5 minutes of polling).
+//
+// Why poll-based history instead of host_samples:
+//   The host sampler writes task_run_host_samples rows tagged by
+//   run_id, but the run_id row in task_runs isn't created until the
+//   run completes. Result: zero samples available mid-run. Until
+//   that's fixed at the runner level, we build trend lines from the
+//   1.5s poll of /api/tasks/running/live. Each poll lands a new
+//   sample, so after ~10s of run time the lines start drawing.
+//
+// Layout: 3x2 grid, full panel width. Each sparkline ~70px tall with
+// the current value overlaid top-right.
+interface TilePollSample {
+  ts: number
+  turns: number
+  actions: number
+  cost: number
+  lines: number
+  cpu: number
+  rss: number
+}
+
 function RunningTaskTile({ t }: { t: LiveTask }) {
   const elapsed = formatElapsed(t.elapsed_sec)
-  const samples = t.recent_samples ?? []
+
+  // Per-tile poll history. Each LiveTask object reference change (every
+  // 1.5s via the parent's TanStack Query refetch) triggers a sample.
+  const [history, setHistory] = useState<TilePollSample[]>([])
+  useEffect(() => {
+    setHistory((prev) => {
+      const sample: TilePollSample = {
+        ts: Date.now(),
+        turns: t.turns,
+        actions: t.actions_count,
+        cost: t.cost_usd,
+        lines: t.lines,
+        cpu: t.cpu_pct,
+        rss: t.rss_mb,
+      }
+      const next = [...prev, sample]
+      return next.length > 200 ? next.slice(-200) : next
+    })
+  }, [t])
+
+  // Reset history when the run_id changes (new run started for this
+  // task). Otherwise we'd carry stale points across runs.
+  useEffect(() => {
+    setHistory([])
+  }, [t.run_id, t.task_id])
+
+  const series = (key: keyof TilePollSample): [number, number][] =>
+    history.map((h) => [h.ts, h[key] as number])
   return (
-    <div className='rounded-md border bg-background/40 p-3'>
-      <div className='mb-2 flex items-baseline justify-between gap-2'>
+    <div className='rounded-md border bg-background/40 p-4'>
+      <div className='mb-3 flex items-baseline justify-between gap-2'>
         <div className='min-w-0 flex-1'>
-          <div className='truncate text-sm font-semibold' title={t.title}>
+          <div className='truncate text-base font-semibold' title={t.title}>
             {t.title}
           </div>
-          <code className='text-muted-foreground font-mono text-[10px]'>
+          <code className='text-muted-foreground font-mono text-[11px]'>
             {t.task_id.slice(0, 8)}…  ·  run #{t.run_number}  ·  {elapsed}
           </code>
         </div>
-        <span className='inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.8)]' />
+        <span className='inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.8)]' />
       </div>
 
-      <div className='mb-2 grid grid-cols-4 gap-2 text-xs'>
-        <Tile label='turns' value={String(t.turns)} accent='emerald' />
-        <Tile label='actions' value={String(t.actions_count)} accent='violet' />
-        <Tile label='cost' value={`$${t.cost_usd.toFixed(4)}`} accent='violet' />
-        <Tile label='lines' value={String(t.lines)} />
-      </div>
-
-      <div className='grid grid-cols-3 gap-2'>
-        <MiniSpark
+      <div className='grid grid-cols-2 gap-3 md:grid-cols-3'>
+        <BigSpark
+          label='turns'
+          unit=''
+          color='#10b981'
+          data={series('turns')}
+          current={t.turns}
+        />
+        <BigSpark
+          label='actions'
+          unit=''
+          color='#a78bfa'
+          data={series('actions')}
+          current={t.actions_count}
+        />
+        <BigSpark
+          label='cost'
+          unit=''
+          prefix='$'
+          color='#f59e0b'
+          data={series('cost')}
+          current={t.cost_usd}
+          decimals={4}
+        />
+        <BigSpark
+          label='lines'
+          unit=''
+          color='#0ea5e9'
+          data={series('lines')}
+          current={t.lines}
+        />
+        <BigSpark
           label='CPU'
           unit='%'
           color='#34d399'
-          data={samples.map((s) => [s.ts, s.cpu_pct] as [string, number])}
+          data={series('cpu')}
           current={t.cpu_pct}
         />
-        <MiniSpark
+        <BigSpark
           label='RSS'
           unit='M'
-          color='#a78bfa'
-          data={samples.map((s) => [s.ts, s.rss_mb] as [string, number])}
+          color='#c084fc'
+          data={series('rss')}
           current={t.rss_mb}
-        />
-        <MiniSpark
-          label='cost'
-          unit=''
-          color='#f59e0b'
-          data={samples.map((s) => [s.ts, s.cost_usd] as [string, number])}
-          current={t.cost_usd}
-          prefix='$'
         />
       </div>
 
-      <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]'>
+      <div className='text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px]'>
         <span>in {t.input_tokens.toLocaleString()}</span>
         <span>out {t.output_tokens.toLocaleString()}</span>
         <span>cache_r {t.cache_read_tokens.toLocaleString()}</span>
         <span>cache_w {t.cache_create_tokens.toLocaleString()}</span>
         {t.lines_added > 0 && <span className='text-emerald-400'>+{t.lines_added}</span>}
         {t.lines_removed > 0 && <span className='text-rose-400'>-{t.lines_removed}</span>}
+      </div>
+    </div>
+  )
+}
+
+// BigSpark — taller sparkline with prominent label + current value
+// overlay. Replaces the row of 4 plain numeric tiles per the user's
+// "fucking charts fucking charts" directive: every metric on the
+// running-task tile is now a chart.
+function BigSpark({
+  label,
+  unit,
+  prefix = '',
+  color,
+  data,
+  current,
+  decimals,
+}: {
+  label: string
+  unit: string
+  prefix?: string
+  color: string
+  data: [number | string, number][]
+  current: number
+  decimals?: number
+}) {
+  const fmt = (v: number) => {
+    if (decimals !== undefined) return v.toFixed(decimals)
+    if (unit === '%') return v.toFixed(0)
+    if (unit === 'M') return v.toFixed(0)
+    return v.toLocaleString()
+  }
+  return (
+    <div className='rounded-md bg-zinc-900/40 p-2'>
+      <div className='flex items-baseline justify-between'>
+        <span className='text-muted-foreground text-[10px] uppercase tracking-wider font-medium'>
+          {label}
+        </span>
+        <span
+          className='font-mono text-base font-semibold tabular-nums'
+          style={{ color }}
+        >
+          {prefix}
+          {fmt(current)}
+          {unit}
+        </span>
+      </div>
+      <div className='h-[56px]'>
+        <EChart
+          height='100%'
+          option={{
+            grid: { left: 0, right: 0, top: 4, bottom: 0 },
+            xAxis: { type: 'time', show: false },
+            yAxis: { type: 'value', show: false, scale: true },
+            series: [
+              {
+                type: 'line',
+                data,
+                smooth: true,
+                showSymbol: false,
+                lineStyle: { color, width: 1.8 },
+                areaStyle: {
+                  color: {
+                    type: 'linear' as const,
+                    x: 0,
+                    y: 0,
+                    x2: 0,
+                    y2: 1,
+                    colorStops: [
+                      { offset: 0, color: color + 'aa' },
+                      { offset: 1, color: color + '00' },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+        />
       </div>
     </div>
   )

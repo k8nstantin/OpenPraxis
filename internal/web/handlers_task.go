@@ -537,77 +537,118 @@ func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
 			RecentSamples  []liveSample `json:"recent_samples"`
 		}
 
-		// Pull the running task list. With at most a handful of
-		// concurrent runs in the typical OpenPraxis deployment, the
-		// per-task lookups below are cheap.
-		runningRows, err := n.Tasks.List("running", 50)
-		if err != nil {
-			writeError(w, err.Error(), 500)
-			return
-		}
-
-		out := make([]liveTask, 0, len(runningRows))
+		// Source of truth for an IN-FLIGHT task is the Runner's
+		// in-memory state — task_runs is only written at completion.
+		// Fall back to the running-status DB rows when the runner is
+		// nil (e.g. orphan recovery during boot).
 		now := time.Now().UTC()
 		db := n.Tasks.DB()
 
-		for _, t := range runningRows {
+		type running struct {
+			id         string
+			title      string
+			manifestID string
+			startedAt  time.Time
+			actions    int
+			lines      int
+			cost       float64
+			model      string
+		}
+		var runningSet []running
+
+		if runner := n.GetRunner(); runner != nil {
+			for _, rt := range runner.ListRunning() {
+				runningSet = append(runningSet, running{
+					id:         rt.TaskID,
+					title:      rt.Title,
+					manifestID: "", // filled below from tasks row if needed
+					startedAt:  rt.StartedAt,
+					actions:    rt.Actions,
+					lines:      rt.Lines,
+					cost:       rt.CumulativeCostUSD,
+					model:      rt.Model,
+				})
+			}
+		} else {
+			rows, err := n.Tasks.List("running", 50)
+			if err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
+			for _, t := range rows {
+				runningSet = append(runningSet, running{
+					id: t.ID, title: t.Title, manifestID: t.ManifestID,
+				})
+			}
+		}
+
+		out := make([]liveTask, 0, len(runningSet))
+		for _, r := range runningSet {
 			lt := liveTask{
-				TaskID:     t.ID,
-				Title:      t.Title,
-				ManifestID: t.ManifestID,
+				TaskID:       r.id,
+				Title:        r.title,
+				ManifestID:   r.manifestID,
+				CostUSD:      r.cost,
+				Lines:        r.lines,
+				ActionsCount: r.actions,
+			}
+			if !r.startedAt.IsZero() {
+				lt.StartedAt = r.startedAt.UTC().Format(time.RFC3339)
+				lt.ElapsedSec = int(now.Sub(r.startedAt).Seconds())
+			}
+			if lt.ManifestID == "" {
+				_ = db.QueryRow(`SELECT manifest_id FROM tasks WHERE id = ?`, r.id).Scan(&lt.ManifestID)
 			}
 
-			// Latest run row for this task (status='running' or the
-			// most recent open run with completed_at='').
+			// task_runs row for the live run (one is created at run start
+			// in the modern path; if not yet present we fall back to
+			// runner state captured above).
 			var runID int64
-			var runNum, turns, lines, linesAdded, linesRemoved int
+			var runNum, turns, linesAdded, linesRemoved int
 			var inputTok, outputTok, cacheR, cacheC int
-			var cost float64
-			var startedAt string
-			err := db.QueryRow(`SELECT id, run_number, turns, lines, lines_added, lines_removed,
-				cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+			var dbStartedAt string
+			err := db.QueryRow(`SELECT id, run_number, turns, lines_added, lines_removed,
+				input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
 				started_at
 			FROM task_runs
 			WHERE task_id = ? AND (completed_at = '' OR status = 'running')
-			ORDER BY id DESC LIMIT 1`, t.ID).Scan(
-				&runID, &runNum, &turns, &lines, &linesAdded, &linesRemoved,
-				&cost, &inputTok, &outputTok, &cacheR, &cacheC, &startedAt,
+			ORDER BY id DESC LIMIT 1`, r.id).Scan(
+				&runID, &runNum, &turns, &linesAdded, &linesRemoved,
+				&inputTok, &outputTok, &cacheR, &cacheC, &dbStartedAt,
 			)
 			if err == nil {
 				lt.RunID = runID
 				lt.RunNumber = runNum
 				lt.Turns = turns
-				lt.Lines = lines
 				lt.LinesAdded = linesAdded
 				lt.LinesRemoved = linesRemoved
-				lt.CostUSD = cost
 				lt.InputTokens = inputTok
 				lt.OutputTokens = outputTok
 				lt.CacheRead = cacheR
 				lt.CacheCreate = cacheC
-				lt.StartedAt = startedAt
-				if startedAt != "" {
-					if ts, perr := time.Parse(time.RFC3339, startedAt); perr == nil {
-						lt.ElapsedSec = int(now.Sub(ts).Seconds())
-					}
+				if lt.StartedAt == "" {
+					lt.StartedAt = dbStartedAt
 				}
 			}
 
-			// Latest host_sample for live CPU + RSS + recent series.
+			// task_run_host_samples — the host sampler tags samples with
+			// the in-flight run_id. If the run_id isn't in task_runs yet
+			// (very early in the run) the sampler may already have been
+			// writing under a different anchor; the sparklines just stay
+			// empty until the row lands.
 			if runID > 0 {
-				rows, qerr := db.Query(`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
+				sampleRows, qerr := db.Query(`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions
 				FROM task_run_host_samples WHERE run_id = ?
 				ORDER BY id DESC LIMIT 30`, runID)
 				if qerr == nil {
 					var samples []liveSample
-					for rows.Next() {
+					for sampleRows.Next() {
 						var s liveSample
-						if scanErr := rows.Scan(&s.TS, &s.CPU, &s.RSS, &s.Cost, &s.Turns, &s.Actions); scanErr == nil {
+						if scanErr := sampleRows.Scan(&s.TS, &s.CPU, &s.RSS, &s.Cost, &s.Turns, &s.Actions); scanErr == nil {
 							samples = append(samples, s)
 						}
 					}
-					rows.Close()
-					// Reverse to chronological (oldest first) for chart consumption.
+					sampleRows.Close()
 					for i, j := 0, len(samples)-1; i < j; i, j = i+1, j-1 {
 						samples[i], samples[j] = samples[j], samples[i]
 					}
@@ -617,14 +658,6 @@ func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
 						lt.RSSMB = samples[n-1].RSS
 					}
 				}
-			}
-
-			// Action count for this task — for the in-flight run only,
-			// scope to actions recorded since started_at.
-			if startedAt != "" {
-				_ = db.QueryRow(`SELECT COUNT(*) FROM actions
-				WHERE task_id = ? AND created_at >= ?`,
-					t.ID, startedAt).Scan(&lt.ActionsCount)
 			}
 
 			if lt.RecentSamples == nil {

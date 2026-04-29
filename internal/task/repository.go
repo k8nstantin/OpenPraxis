@@ -242,7 +242,12 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 		query += ` AND status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'waiting' THEN 1 WHEN 'pending' THEN 2 WHEN 'completed' THEN 3 WHEN 'failed' THEN 4 WHEN 'cancelled' THEN 5 ELSE 6 END, updated_at DESC`
+	// Sort: most-recently-executed first, tiebreak by created_at DESC.
+	// Running tasks naturally bubble to the top because their last_run_at
+	// is the most recent (set when the task fired). Never-run tasks have
+	// last_run_at='' which sorts last under DESC, then their created_at
+	// DESC ranks newest creations above older ones.
+	query += ` ORDER BY last_run_at DESC, created_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
