@@ -45,12 +45,9 @@ type PromptData struct {
 	// BranchPrefix is the resolved branch_prefix knob value (e.g.
 	// "openpraxis", or "qa" when overridden at product scope). The
 	// default <git_workflow> template composes the full branch name
-	// as "{{.BranchPrefix}}/{{.Marker}}".
+	// as "{{.BranchPrefix}}/{{.Task.ID}}".
 	BranchPrefix string
-	// Marker is the short task identifier (first 12 chars of the task
-	// ID) used as the trailing segment of the agent's branch name.
-	Marker string
-	Now    time.Time
+	Now          time.Time
 }
 
 // Render parses `body` as a text/template and executes it against data.

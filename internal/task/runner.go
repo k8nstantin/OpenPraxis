@@ -20,7 +20,6 @@ import (
 // RunningTask tracks an actively executing task.
 type RunningTask struct {
 	TaskID    string    `json:"task_id"`
-	Marker    string    `json:"marker"`
 	Title     string    `json:"title"`
 	Manifest  string    `json:"manifest"`
 	// ProductID is the resolved product scope for the task — empty for
@@ -133,7 +132,7 @@ func (r *Runner) SetSourceNode(id string) { r.sourceNode = id }
 // enforceExecutionReview runs the M4-T10 post-completion gate. Only fires
 // for status=completed/reason=success; skips entirely when the checker is
 // not wired. Extracted from Execute so it can be tested directly.
-func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, marker, status, reason string) {
+func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, reason string) {
 	if r.execReview == nil {
 		return
 	}
@@ -146,10 +145,10 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, marker, s
 	switch {
 	case checkErr != nil:
 		slog.Warn("execution review lookup failed",
-			"component", "runner", "marker", marker, "task_id", taskID, "error", checkErr)
+			"component", "runner", "task_id", taskID, "error", checkErr)
 	case !has:
 		slog.Warn("task completed but no execution_review comment — agent forgot the closing call",
-			"component", "runner", "marker", marker, "task_id", taskID)
+			"component", "runner", "task_id", taskID)
 		if r.actions != nil {
 			if amnErr := r.actions.RecordAmnesia(
 				"",            // sessionID
@@ -166,7 +165,7 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, marker, s
 				"missing_execution_review",
 			); amnErr != nil {
 				slog.Warn("record exec-review amnesia failed",
-					"component", "runner", "marker", marker, "error", amnErr)
+					"component", "runner", "task_id", taskID, "error", amnErr)
 			}
 		}
 	}
@@ -219,17 +218,13 @@ func (r *Runner) RecoverInFlight(ctx context.Context) error {
 	seen := make(map[string]bool, len(states))
 	for _, rs := range states {
 		seen[rs.TaskID] = true
-		r.recoverOneOrphan(ctx, rs.TaskID, rs.Marker, rs.PID, rs.Actions, rs.Lines, rs.StartedAt.Format(time.RFC3339))
+		r.recoverOneOrphan(ctx, rs.TaskID, rs.PID, rs.Actions, rs.Lines, rs.StartedAt.Format(time.RFC3339))
 	}
 	for _, t := range orphans {
 		if seen[t.ID] {
 			continue
 		}
-		marker := t.Marker
-		if marker == "" {
-			marker = taskMarker(t.ID)
-		}
-		r.recoverOneOrphan(ctx, t.ID, marker, 0, 0, 0, "")
+		r.recoverOneOrphan(ctx, t.ID, 0, 0, 0, "")
 	}
 
 	// Clear runtime_state wholesale — we've made a decision on every row.
@@ -244,18 +239,18 @@ func (r *Runner) RecoverInFlight(ctx context.Context) error {
 // recoverOneOrphan resolves on_restart_behavior at the orphan's scope and
 // applies it. Errors are logged (not returned) so one corrupt row does not
 // block recovery for the rest.
-func (r *Runner) recoverOneOrphan(ctx context.Context, taskID, marker string, pid, actions, lines int, startedAt string) {
+func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actions, lines int, startedAt string) {
 	behavior := "stop"
 	if r.resolver != nil {
 		scope, err := r.resolver.NormalizeScope(ctx, settings.Scope{TaskID: taskID})
 		if err != nil {
 			slog.Warn("recover: normalize scope failed, defaulting to stop",
-				"component", "runner", "marker", marker, "error", err)
+				"component", "runner", "task_id", taskID, "error", err)
 		} else {
 			resolved, err := r.resolver.Resolve(ctx, scope, "on_restart_behavior")
 			if err != nil {
 				slog.Warn("recover: resolve on_restart_behavior failed, defaulting to stop",
-					"component", "runner", "marker", marker, "error", err)
+					"component", "runner", "task_id", taskID, "error", err)
 			} else if s, ok := resolved.Value.(string); ok && s != "" {
 				// The resolver does not consult system-scope rows — it
 				// falls through from product to the catalog default. If
@@ -279,21 +274,21 @@ func (r *Runner) recoverOneOrphan(ctx context.Context, taskID, marker string, pi
 		reason := "serve restart, re-firing per on_restart_behavior=restart"
 		if err := r.store.RecoverAsScheduled(taskID, reason); err != nil {
 			slog.Error("recover restart failed",
-				"component", "runner", "marker", marker, "error", err)
+				"component", "runner", "task_id", taskID, "error", err)
 			return
 		}
 		slog.Info("recovered orphan task as scheduled",
-			"component", "runner", "marker", marker, "prior_pid", pid,
+			"component", "runner", "task_id", taskID, "prior_pid", pid,
 			"prior_actions", actions, "prior_lines", lines)
 	case "fail":
 		reason := "serve restart, prior process killed (on_restart_behavior=fail — no auto-recovery)"
 		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
 			slog.Error("recover fail failed",
-				"component", "runner", "marker", marker, "error", err)
+				"component", "runner", "task_id", taskID, "error", err)
 			return
 		}
 		slog.Info("recovered orphan task as failed (no auto-recovery)",
-			"component", "runner", "marker", marker, "prior_pid", pid)
+			"component", "runner", "task_id", taskID, "prior_pid", pid)
 	default: // "stop"
 		reason := "serve restart, prior process killed"
 		if pid > 0 {
@@ -302,11 +297,11 @@ func (r *Runner) recoverOneOrphan(ctx context.Context, taskID, marker string, pi
 		}
 		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
 			slog.Error("recover stop failed",
-				"component", "runner", "marker", marker, "error", err)
+				"component", "runner", "task_id", taskID, "error", err)
 			return
 		}
 		slog.Info("recovered orphan task as failed",
-			"component", "runner", "marker", marker, "prior_pid", pid)
+			"component", "runner", "task_id", taskID, "prior_pid", pid)
 	}
 }
 
@@ -810,7 +805,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		return fmt.Errorf("prepare task workspace: %w", err)
 	}
 	slog.Info("task workspace ready",
-		"component", "runner", "marker", t.ID[:min(12, len(t.ID))],
+		"component", "runner", "task_id", t.ID,
 		"workdir", workDir, "base_sha", baseSHA)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
@@ -828,14 +823,8 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		return fmt.Errorf("start agent: %w", err)
 	}
 
-	marker := t.ID
-	if len(marker) >= 12 {
-		marker = marker[:12]
-	}
-
 	rt := &RunningTask{
 		TaskID:         t.ID,
-		Marker:         marker,
 		Title:          t.Title,
 		Manifest:       manifestTitle,
 		ProductID:      scope.ProductID,
@@ -853,12 +842,12 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	r.mu.Unlock()
 
 	if err := r.store.UpdateStatus(t.ID, "running"); err != nil {
-		slog.Error("update status to running failed", "component", "runner", "marker", marker, "error", err)
+		slog.Error("update status to running failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
 
 	// Persist runtime state to SQLite — survives restarts
-	if err := r.store.SaveRuntimeState(t.ID, marker, t.Title, manifestTitle, t.Agent, cmd.Process.Pid, false, 0, 0, "", rt.StartedAt); err != nil {
-		slog.Error("save runtime state failed", "component", "runner", "marker", marker, "error", err)
+	if err := r.store.SaveRuntimeState(t.ID, t.Title, manifestTitle, t.Agent, cmd.Process.Pid, false, 0, 0, "", rt.StartedAt); err != nil {
+		slog.Error("save runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
 
 	if r.onEvent != nil {
@@ -867,7 +856,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		})
 	}
 
-	slog.Info("task started", "component", "runner", "marker", marker, "title", t.Title, "pid", cmd.Process.Pid)
+	slog.Info("task started", "component", "runner", "task_id", t.ID, "title", t.Title, "pid", cmd.Process.Pid)
 
 	// Begin host CPU/RSS sampling for this task. Samples accumulate in
 	// the sampler's per-task buffer until the completion path calls
@@ -894,7 +883,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			cancel()
 			// Clean up persisted runtime state — task is done
 			if err := r.store.DeleteRuntimeState(t.ID); err != nil {
-				slog.Error("delete runtime state failed", "component", "runner", "marker", marker, "error", err)
+				slog.Error("delete runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 			}
 			// Remove the per-task worktree directory. The agent's branch
 			// stays intact in the shared .git, so the PR keeps working.
@@ -949,7 +938,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 											var recErr error
 											actionID, recErr = r.actions.RecordForTask(t.ID, t.SourceNode, toolName, toolInput, "", "")
 											if recErr != nil {
-												slog.Error("record action failed", "component", "runner", "marker", marker, "error", recErr)
+												slog.Error("record action failed", "component", "runner", "task_id", t.ID, "error", recErr)
 											}
 										}
 
@@ -984,7 +973,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 										if pending, exists := pendingTools[toolUseID]; exists {
 											if r.actions != nil && pending.actionID > 0 {
 												if err := r.actions.UpdateResponseByID(pending.actionID, resultContent); err != nil {
-													slog.Error("update action response failed", "component", "runner", "marker", marker, "error", err)
+													slog.Error("update action response failed", "component", "runner", "task_id", t.ID, "error", err)
 												}
 											}
 											delete(pendingTools, toolUseID)
@@ -1045,7 +1034,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			if maxCostCap > 0 && rt.CumulativeCostUSD > maxCostCap && !costCapExceeded {
 				costCapExceeded = true
 				slog.Warn("killing task: cost cap exceeded",
-					"component", "runner", "marker", marker,
+					"component", "runner", "task_id", t.ID,
 					"cap_usd", maxCostCap, "cost_usd", rt.CumulativeCostUSD)
 				if cmd.Process != nil {
 					_ = cmd.Process.Signal(syscall.SIGTERM)
@@ -1062,7 +1051,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			// Persist runtime state every 10 lines
 			if rt.Lines%10 == 0 {
 				if err := r.store.UpdateRuntimeState(t.ID, rt.Actions, rt.Lines, rt.LastLine, rt.Paused); err != nil {
-					slog.Error("update runtime state failed", "component", "runner", "marker", marker, "error", err)
+					slog.Error("update runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 				}
 			}
 		}
@@ -1082,26 +1071,26 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		case costCapExceeded:
 			status = "failed"
 			reason = "cost_cap"
-			slog.Warn("task stopped by cost cap", "component", "runner", "marker", marker,
+			slog.Warn("task stopped by cost cap", "component", "runner", "task_id", t.ID,
 				"actions", rt.Actions, "lines", rt.Lines, "cost_usd", rt.CumulativeCostUSD)
 		case detectMaxTurns(output):
 			status = "completed"
 			reason = "max_turns"
-			slog.Info("task hit max turns limit", "component", "runner", "marker", marker,
+			slog.Info("task hit max turns limit", "component", "runner", "task_id", t.ID,
 				"actions", rt.Actions, "lines", rt.Lines)
 		case ctx.Err() == context.DeadlineExceeded:
 			status = "failed"
 			reason = "timeout"
-			slog.Error("task timed out", "component", "runner", "marker", marker,
+			slog.Error("task timed out", "component", "runner", "task_id", t.ID,
 				"actions", rt.Actions, "lines", rt.Lines)
 		case waitErr != nil:
 			status = "failed"
 			reason = "process_error"
-			slog.Error("task failed", "component", "runner", "marker", marker, "error", waitErr)
+			slog.Error("task failed", "component", "runner", "task_id", t.ID, "error", waitErr)
 		default:
 			status = "completed"
 			reason = "success"
-			slog.Info("task completed", "component", "runner", "marker", marker,
+			slog.Info("task completed", "component", "runner", "task_id", t.ID,
 				"actions", rt.Actions, "lines", rt.Lines)
 		}
 
@@ -1133,21 +1122,21 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		if costUSD > 0 {
 			if err := r.store.CalibrateModelPricing(rt.Model, costUSD, finalUsage); err != nil {
 				slog.Warn("calibrate model pricing failed", "component", "runner",
-					"marker", marker, "model", rt.Model, "error", err)
+					"task_id", t.ID, "model", rt.Model, "error", err)
 			}
 		}
 
 		// Record the run with history — always use real status, not "scheduled"
 		runID, err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model)
 		if err != nil {
-			slog.Error("record run failed", "component", "runner", "marker", marker, "error", err)
+			slog.Error("record run failed", "component", "runner", "task_id", t.ID, "error", err)
 		} else if r.hostSampler != nil {
 			// Host CPU/RSS samples accumulated during the run → persist them
 			// alongside the run row. Failure here is not fatal — loss of
 			// host metrics must not fail task completion.
 			samples, metrics := r.hostSampler.Detach(t.ID)
 			if err := r.store.RecordHostMetrics(runID, samples, metrics); err != nil {
-				slog.Warn("record host metrics failed", "component", "runner", "marker", marker, "error", err)
+				slog.Warn("record host metrics failed", "component", "runner", "task_id", t.ID, "error", err)
 			}
 		}
 
@@ -1156,7 +1145,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// task. When missing, log and record an amnesia flag so the gap
 		// surfaces on the dashboard. Non-blocking — the watcher still has
 		// final say on the completion status.
-		r.enforceExecutionReview(bgCtx, t.ID, marker, status, reason)
+		r.enforceExecutionReview(bgCtx, t.ID, status, reason)
 
 		// Retry on transient failure. Counter persists across restarts via
 		// the settings table so a crash mid-retry does not reset progress.
@@ -1174,16 +1163,16 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			// perspective; the retry is a runner-internal decision.
 			nextRun := time.Now().UTC()
 			if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
-				slog.Error("retry requeue failed", "component", "runner", "marker", marker, "error", err)
+				slog.Error("retry requeue failed", "component", "runner", "task_id", t.ID, "error", err)
 			} else {
 				slog.Info("retrying task after transient failure",
-					"component", "runner", "marker", marker,
+					"component", "runner", "task_id", t.ID,
 					"reason", reason, "attempt", attempts+1, "cap", retryCap)
 				retried = true
 			}
 		} else if status == "failed" && retryCap > 0 {
 			slog.Info("retry skipped",
-				"component", "runner", "marker", marker,
+				"component", "runner", "task_id", t.ID,
 				"reason", reason, "attempts", attempts, "cap", retryCap)
 		}
 
@@ -1193,7 +1182,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			nextRun := ComputeNextRun(t.Schedule)
 			if !nextRun.IsZero() {
 				if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
-					slog.Error("set next run failed", "component", "runner", "marker", marker, "error", err)
+					slog.Error("set next run failed", "component", "runner", "task_id", t.ID, "error", err)
 				}
 			}
 		}
@@ -1275,15 +1264,15 @@ func (r *Runner) Kill(taskID string) error {
 		return fmt.Errorf("task not running")
 	}
 
-	slog.Info("killing task", "component", "runner", "marker", rt.Marker)
+	slog.Info("killing task", "component", "runner", "task_id", rt.TaskID)
 	rt.cancel()
 	if rt.cmd != nil && rt.cmd.Process != nil {
 		if err := rt.cmd.Process.Kill(); err != nil {
-			slog.Error("kill process failed", "component", "runner", "marker", rt.Marker, "error", err)
+			slog.Error("kill process failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 		}
 	}
 	if err := r.store.UpdateStatus(taskID, "cancelled"); err != nil {
-		slog.Error("update status to cancelled failed", "component", "runner", "marker", rt.Marker, "error", err)
+		slog.Error("update status to cancelled failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 	}
 
 	r.mu.Lock()
@@ -1311,17 +1300,17 @@ func (r *Runner) Pause(taskID string) error {
 		return fmt.Errorf("no process to pause")
 	}
 
-	slog.Info("pausing task", "component", "runner", "marker", rt.Marker, "pid", rt.PID)
+	slog.Info("pausing task", "component", "runner", "task_id", rt.TaskID, "pid", rt.PID)
 	if err := rt.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return fmt.Errorf("SIGSTOP failed: %w", err)
 	}
 
 	rt.Paused = true
 	if err := r.store.UpdateStatus(taskID, "paused"); err != nil {
-		slog.Error("update status to paused failed", "component", "runner", "marker", rt.Marker, "error", err)
+		slog.Error("update status to paused failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 	}
 	if err := r.store.UpdateRuntimeState(taskID, rt.Actions, rt.Lines, rt.LastLine, true); err != nil {
-		slog.Error("update runtime state failed", "component", "runner", "marker", rt.Marker, "state", "paused", "error", err)
+		slog.Error("update runtime state failed", "component", "runner", "task_id", rt.TaskID, "state", "paused", "error", err)
 	}
 
 	if r.onEvent != nil {
@@ -1338,12 +1327,12 @@ func (r *Runner) Cancel(taskID string) error {
 	rt, ok := r.running[taskID]
 	r.mu.RUnlock()
 	if ok && rt.cmd != nil && rt.cmd.Process != nil {
-		slog.Info("cancelling task — killing process", "component", "runner", "marker", rt.Marker, "pid", rt.PID)
+		slog.Info("cancelling task — killing process", "component", "runner", "task_id", rt.TaskID, "pid", rt.PID)
 		if rt.Paused {
 			_ = rt.cmd.Process.Signal(syscall.SIGCONT)
 		}
 		if err := rt.cmd.Process.Kill(); err != nil {
-			slog.Error("kill process failed", "component", "runner", "marker", rt.Marker, "error", err)
+			slog.Error("kill process failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 		}
 		if rt.cancel != nil {
 			rt.cancel()
@@ -1414,17 +1403,17 @@ func (r *Runner) Resume(taskID string) error {
 		return fmt.Errorf("no process to resume")
 	}
 
-	slog.Info("resuming task", "component", "runner", "marker", rt.Marker, "pid", rt.PID)
+	slog.Info("resuming task", "component", "runner", "task_id", rt.TaskID, "pid", rt.PID)
 	if err := rt.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		return fmt.Errorf("SIGCONT failed: %w", err)
 	}
 
 	rt.Paused = false
 	if err := r.store.UpdateStatus(taskID, "running"); err != nil {
-		slog.Error("update status to running failed", "component", "runner", "marker", rt.Marker, "error", err)
+		slog.Error("update status to running failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 	}
 	if err := r.store.UpdateRuntimeState(taskID, rt.Actions, rt.Lines, rt.LastLine, false); err != nil {
-		slog.Error("update runtime state failed", "component", "runner", "marker", rt.Marker, "state", "resumed", "error", err)
+		slog.Error("update runtime state failed", "component", "runner", "task_id", rt.TaskID, "state", "resumed", "error", err)
 	}
 
 	if r.onEvent != nil {
@@ -1471,7 +1460,6 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules, branchP
 		},
 		VisceralRules: visceralRules,
 		BranchPrefix:  branchPfx,
-		Marker:        taskMarker(t.ID),
 		Now:           time.Now(),
 	}
 
@@ -1503,13 +1491,3 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules, branchP
 	return b.String(), nil
 }
 
-// taskMarker returns the short identifier used as the trailing segment
-// of the agent's branch name (first 12 chars of the task id when long
-// enough, otherwise the id verbatim). Kept as a helper so the template
-// default and the runner both derive the marker the same way.
-func taskMarker(taskID string) string {
-	if len(taskID) >= 12 {
-		return taskID[:12]
-	}
-	return taskID
-}

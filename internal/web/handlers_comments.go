@@ -220,8 +220,9 @@ func passthroughResolver(_ comments.TargetType, raw string) (string, error) {
 	return raw, nil
 }
 
-// nodeTargetResolver builds a TargetResolver backed by the node's entity
-// stores. Each store's Get accepts marker or full UUID via `id = ? OR id LIKE ?`.
+// nodeTargetResolver builds a TargetResolver backed by the node's
+// entity stores. Each store's Get expects the full 36-char UUID (post
+// marker rip-out — `id = ?` exact match only).
 func nodeTargetResolver(n *node.Node) TargetResolver {
 	return func(target comments.TargetType, raw string) (string, error) {
 		switch target {
@@ -320,8 +321,8 @@ func listComments(store *comments.Store, target comments.TargetType, resolve Tar
 // addComment is the shared handler body for
 // POST /api/{products|manifests|tasks}/{id}/comments.
 //
-// Resolves the URL {id} to full UUID before insert so comments posted via
-// HTTP never orphan on a short-marker target_id.
+// Validates the URL {id} (must be full UUID) before insert so comments
+// posted via HTTP can never land on a target row that doesn't exist.
 func addComment(store *comments.Store, target comments.TargetType, resolve TargetResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawID := mux.Vars(r)["id"]

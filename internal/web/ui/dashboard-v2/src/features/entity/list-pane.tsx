@@ -68,7 +68,7 @@ export function EntityListPane({
     return rows.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
-        p.marker.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q) ||
         (p.tags ?? []).some((t) => t.toLowerCase().includes(q))
     )
   }, [rows, query])

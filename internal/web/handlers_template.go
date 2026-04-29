@@ -247,7 +247,6 @@ func apiTemplatePreview(n *node.Node) http.HandlerFunc {
 
 		data := templates.PromptData{
 			BranchPrefix: "openpraxis",
-			Marker:       "preview",
 			Now:          time.Now(),
 		}
 		if taskID != "" && n.Tasks != nil {

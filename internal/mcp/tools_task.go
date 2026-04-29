@@ -17,7 +17,7 @@ func (s *Server) registerTaskTools() {
 			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Task title")),
 			mcplib.WithString("description", mcplib.Description("Task description")),
 			mcplib.WithString("schedule", mcplib.Description("Schedule: 'once', '5m', '1h', 'at:ISO8601'. Default: once")),
-			mcplib.WithString("manifest_id", mcplib.Description("Manifest ID or marker to link task to (optional — omit for standalone task)")),
+			mcplib.WithString("manifest_id", mcplib.Description("Manifest ID to link task to (optional — omit for standalone task)")),
 			mcplib.WithString("agent", mcplib.Description("Agent type: claude-code, cursor, etc. Default: claude-code")),
 			mcplib.WithNumber("max_turns", mcplib.Description("DEPRECATED (M4-T14): silently ignored with warn log. Set per-task max_turns via settings_set at task scope instead. Retained for backwards compatibility.")),
 			mcplib.WithString("depends_on", mcplib.Description("Task ID that must complete before this runs")),
@@ -29,7 +29,7 @@ func (s *Server) registerTaskTools() {
 		mcplib.NewTool("task_list",
 			mcplib.WithDescription("List tasks with optional filters. Returns most recent first."),
 			mcplib.WithString("status", mcplib.Description("Filter by status: running, scheduled, waiting, pending, completed, failed, cancelled")),
-			mcplib.WithString("manifest_id", mcplib.Description("Filter by manifest ID or marker")),
+			mcplib.WithString("manifest_id", mcplib.Description("Filter by manifest ID")),
 			mcplib.WithNumber("limit", mcplib.Description("Max results. Default: 20")),
 		),
 		s.handleTaskList,
@@ -38,7 +38,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_get",
 			mcplib.WithDescription("Get full task detail: metadata, linked manifests, run history, actions, amnesia flags, and delusion flags."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or 8-char marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task full UUID")),
 		),
 		s.handleTaskGet,
 	)
@@ -46,7 +46,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_start",
 			mcplib.WithDescription("Schedule and start a task. Optionally override the schedule."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID")),
 			mcplib.WithString("schedule", mcplib.Description("Override schedule (e.g. 'once', '5m', 'at:2026-04-12T15:00:00Z')")),
 		),
 		s.handleTaskStart,
@@ -55,7 +55,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_cancel",
 			mcplib.WithDescription("Cancel a scheduled or running task."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID")),
 		),
 		s.handleTaskCancel,
 	)
@@ -63,7 +63,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_reject",
 			mcplib.WithDescription("Reject a completed task after review. Flips the task from completed back to scheduled for another execution pass. Attaches a review_rejection comment carrying the reason so the history is preserved and the agent picking up the rerun can see what needs fixing."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker (must currently be status=completed)")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID (must currently be status=completed)")),
 			mcplib.WithString("reason", mcplib.Required(), mcplib.Description("Why the task is being rejected — what needs to change on the next pass")),
 			mcplib.WithString("reviewer", mcplib.Description("Reviewer identifier (operator name / session id). Default: 'reviewer'")),
 		),
@@ -73,7 +73,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_approve",
 			mcplib.WithDescription("Approve a completed task after review. Does NOT change the task status — approval is a durable signal attached via a review_approval comment. The manifest-closure warning counter reads the approval state."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker (must currently be status=completed)")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID (must currently be status=completed)")),
 			mcplib.WithString("reviewer", mcplib.Description("Reviewer identifier. Default: 'reviewer'")),
 		),
 		s.handleTaskApprove,
@@ -82,8 +82,8 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_link_manifest",
 			mcplib.WithDescription("Link a task to an additional manifest (many-to-many). The task can already have a primary manifest — this adds a secondary link."),
-			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID or marker")),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID")),
 		),
 		s.handleTaskLinkManifest,
 	)
@@ -91,8 +91,8 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_unlink_manifest",
 			mcplib.WithDescription("Remove a link between a task and a manifest."),
-			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID or marker")),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID")),
 		),
 		s.handleTaskUnlinkManifest,
 	)
@@ -100,8 +100,8 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_set_manifest",
 			mcplib.WithDescription("Swap a task's PRIMARY manifest_id (the column on tasks.manifest_id, NOT the many-to-many task_manifests link table that task_link_manifest writes). Used to re-home a task when manifests are split / merged / restructured."),
-			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID or marker")),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("New primary manifest ID or marker")),
+			mcplib.WithString("task_id", mcplib.Required(), mcplib.Description("Task ID")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("New primary manifest ID")),
 		),
 		s.handleTaskSetManifest,
 	)
@@ -109,7 +109,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_pause",
 			mcplib.WithDescription("Pause a running task. Sends SIGSTOP to the agent process, freezing it in place. The task can be resumed later."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID")),
 		),
 		s.handleTaskPause,
 	)
@@ -117,7 +117,7 @@ func (s *Server) registerTaskTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("task_resume",
 			mcplib.WithDescription("Resume a paused task. Sends SIGCONT to the agent process, continuing from where it was frozen."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Task ID")),
 		),
 		s.handleTaskResume,
 	)
@@ -147,7 +147,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 			"retired_in", "M4-T14")
 	}
 
-	// Resolve manifest marker to full ID if provided
+	// Validate the manifest UUID if provided.
 	if manifestID != "" {
 		m, err := s.node.Manifests.Get(manifestID)
 		if err != nil || m == nil {
@@ -156,7 +156,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 		manifestID = m.ID
 	}
 
-	// Resolve depends_on marker to full ID if provided
+	// Validate the depends_on UUID if provided.
 	if dependsOn != "" {
 		dep, err := s.node.Tasks.Get(dependsOn)
 		if err != nil || dep == nil {
@@ -183,7 +183,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcplib.CallToolReques
 	}
 
 	return textResult(fmt.Sprintf("Task created [%s]: %s\nManifest: %s | Schedule: %s | Agent: %s",
-		t.Marker, t.Title, manifestLabel, t.Schedule, t.Agent)), nil
+		t.ID, t.Title, manifestLabel, t.Schedule, t.Agent)), nil
 }
 
 func (s *Server) handleTaskList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -199,7 +199,7 @@ func (s *Server) handleTaskList(ctx context.Context, req mcplib.CallToolRequest)
 	var err error
 
 	if manifestID != "" {
-		// Resolve marker
+		// Validate the manifest UUID exists.
 		m, merr := s.node.Manifests.Get(manifestID)
 		if merr != nil || m == nil {
 			return errResult("manifest not found: %s", manifestID), nil
@@ -238,7 +238,7 @@ func (s *Server) handleTaskList(ctx context.Context, req mcplib.CallToolRequest)
 			manifest = t.ManifestID[:min(8, len(t.ManifestID))]
 		}
 		output += fmt.Sprintf("%d. [%s] %s — %s (manifest: %s, schedule: %s, runs: %d)\n",
-			i+1, t.Marker, t.Title, t.Status, manifest, t.Schedule, t.RunCount)
+			i+1, t.ID, t.Title, t.Status, manifest, t.Schedule, t.RunCount)
 	}
 
 	return textResult(output), nil
@@ -266,11 +266,11 @@ func (s *Server) handleTaskGet(ctx context.Context, req mcplib.CallToolRequest) 
 		manifest = t.ManifestID[:min(8, len(t.ManifestID))]
 		m, _ := s.node.Manifests.Get(t.ManifestID)
 		if m != nil {
-			manifest = fmt.Sprintf("[%s] %s", m.Marker, m.Title)
+			manifest = fmt.Sprintf("[%s] %s", m.ID, m.Title)
 		}
 	}
 
-	output += fmt.Sprintf("Task [%s]: %s\n", t.Marker, t.Title)
+	output += fmt.Sprintf("Task [%s]: %s\n", t.ID, t.Title)
 	output += fmt.Sprintf("Status: %s | Agent: %s | Schedule: %s\n", t.Status, t.Agent, t.Schedule)
 	output += fmt.Sprintf("Manifest: %s\n", manifest)
 	if t.Description != "" {
@@ -300,7 +300,7 @@ func (s *Server) handleTaskGet(ctx context.Context, req mcplib.CallToolRequest) 
 			label := mid[:min(8, len(mid))]
 			m, _ := s.node.Manifests.Get(mid)
 			if m != nil {
-				label = fmt.Sprintf("[%s] %s", m.Marker, m.Title)
+				label = fmt.Sprintf("[%s] %s", m.ID, m.Title)
 			}
 			output += fmt.Sprintf("  - %s\n", label)
 		}
@@ -353,7 +353,7 @@ func (s *Server) handleTaskStart(ctx context.Context, req mcplib.CallToolRequest
 		return errResult("schedule task: %v", err), nil
 	}
 
-	return textResult(fmt.Sprintf("Task [%s] scheduled: %s (schedule: %s)", t.Marker, t.Title, schedule)), nil
+	return textResult(fmt.Sprintf("Task [%s] scheduled: %s (schedule: %s)", t.ID, t.Title, schedule)), nil
 }
 
 func (s *Server) handleTaskCancel(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -374,19 +374,19 @@ func (s *Server) handleTaskCancel(ctx context.Context, req mcplib.CallToolReques
 			if err := r.Cancel(t.ID); err != nil {
 				return errResult("cancel task: %v", err), nil
 			}
-			return textResult(fmt.Sprintf("Task [%s] cancelled and process killed: %s", t.Marker, t.Title)), nil
+			return textResult(fmt.Sprintf("Task [%s] cancelled and process killed: %s", t.ID, t.Title)), nil
 		}
 		if err := s.node.Tasks.RequestAction(t.ID, "cancel"); err != nil {
 			return errResult("request cancel: %v", err), nil
 		}
-		return textResult(fmt.Sprintf("Task [%s] cancel requested: %s (serve runner will kill process within 2s)", t.Marker, t.Title)), nil
+		return textResult(fmt.Sprintf("Task [%s] cancel requested: %s (serve runner will kill process within 2s)", t.ID, t.Title)), nil
 	}
 
 	// Not running — just flip status.
 	if err := s.node.Tasks.UpdateStatus(t.ID, "cancelled"); err != nil {
 		return errResult("cancel task: %v", err), nil
 	}
-	return textResult(fmt.Sprintf("Task [%s] cancelled: %s", t.Marker, t.Title)), nil
+	return textResult(fmt.Sprintf("Task [%s] cancelled: %s", t.ID, t.Title)), nil
 }
 
 func (s *Server) handleTaskLinkManifest(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -409,7 +409,7 @@ func (s *Server) handleTaskLinkManifest(ctx context.Context, req mcplib.CallTool
 	}
 
 	return textResult(fmt.Sprintf("Linked: task [%s] %s → manifest [%s] %s",
-		t.Marker, t.Title, m.Marker, m.Title)), nil
+		t.ID, t.Title, m.ID, m.Title)), nil
 }
 
 func (s *Server) handleTaskSetManifest(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -432,7 +432,7 @@ func (s *Server) handleTaskSetManifest(ctx context.Context, req mcplib.CallToolR
 	}
 
 	return textResult(fmt.Sprintf("Task [%s] %s primary manifest set → [%s] %s",
-		t.Marker, t.Title, m.Marker, m.Title)), nil
+		t.ID, t.Title, m.ID, m.Title)), nil
 }
 
 func (s *Server) handleTaskUnlinkManifest(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -454,7 +454,7 @@ func (s *Server) handleTaskUnlinkManifest(ctx context.Context, req mcplib.CallTo
 		return errResult("unlink failed: %v", err), nil
 	}
 
-	return textResult(fmt.Sprintf("Unlinked: task [%s] from manifest [%s]", t.Marker, m.Marker)), nil
+	return textResult(fmt.Sprintf("Unlinked: task [%s] from manifest [%s]", t.ID, m.ID)), nil
 }
 
 func (s *Server) handleTaskPause(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -474,12 +474,12 @@ func (s *Server) handleTaskPause(ctx context.Context, req mcplib.CallToolRequest
 		if err := r.Pause(t.ID); err != nil {
 			return errResult("pause task: %v", err), nil
 		}
-		return textResult(fmt.Sprintf("Task [%s] paused: %s (SIGSTOP sent to agent process)", t.Marker, t.Title)), nil
+		return textResult(fmt.Sprintf("Task [%s] paused: %s (SIGSTOP sent to agent process)", t.ID, t.Title)), nil
 	}
 	if err := s.node.Tasks.RequestAction(t.ID, "pause"); err != nil {
 		return errResult("request pause: %v", err), nil
 	}
-	return textResult(fmt.Sprintf("Task [%s] pause requested: %s (serve runner will apply within 2s)", t.Marker, t.Title)), nil
+	return textResult(fmt.Sprintf("Task [%s] pause requested: %s (serve runner will apply within 2s)", t.ID, t.Title)), nil
 }
 
 func (s *Server) handleTaskResume(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -498,12 +498,12 @@ func (s *Server) handleTaskResume(ctx context.Context, req mcplib.CallToolReques
 		if err := r.Resume(t.ID); err != nil {
 			return errResult("resume task: %v", err), nil
 		}
-		return textResult(fmt.Sprintf("Task [%s] resumed: %s (SIGCONT sent to agent process)", t.Marker, t.Title)), nil
+		return textResult(fmt.Sprintf("Task [%s] resumed: %s (SIGCONT sent to agent process)", t.ID, t.Title)), nil
 	}
 	if err := s.node.Tasks.RequestAction(t.ID, "resume"); err != nil {
 		return errResult("request resume: %v", err), nil
 	}
-	return textResult(fmt.Sprintf("Task [%s] resume requested: %s (serve runner will apply within 2s)", t.Marker, t.Title)), nil
+	return textResult(fmt.Sprintf("Task [%s] resume requested: %s (serve runner will apply within 2s)", t.ID, t.Title)), nil
 }
 
 func (s *Server) handleTaskReject(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -524,7 +524,7 @@ func (s *Server) handleTaskReject(ctx context.Context, req mcplib.CallToolReques
 		return errResult("%v", err), nil
 	}
 	return textResult(fmt.Sprintf("Task [%s] rejected by %s. Flipped to scheduled for re-run. Reason: %s",
-		t.Marker, reviewer, reason)), nil
+		t.ID, reviewer, reason)), nil
 }
 
 func (s *Server) handleTaskApprove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -540,5 +540,5 @@ func (s *Server) handleTaskApprove(ctx context.Context, req mcplib.CallToolReque
 	if err := s.node.Tasks.ApproveCompletedTask(ctx, t.ID, reviewer); err != nil {
 		return errResult("%v", err), nil
 	}
-	return textResult(fmt.Sprintf("Task [%s] approved by %s.", t.Marker, reviewer)), nil
+	return textResult(fmt.Sprintf("Task [%s] approved by %s.", t.ID, reviewer)), nil
 }

@@ -181,9 +181,9 @@ func apiScopeSettingsPut(n *node.Node, scopeType string) http.HandlerFunc {
 	loader := httpVisceralRuleLoader(n)
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
-		// Canonicalise the scope_id from short marker → full UUID up front so
-		// the row lands where the resolver can find it (visceral rule #14,
-		// issue #207).
+		// Validate the scope_id UUID up front. Post marker rip-out
+		// (eb49bef) ResolveScopeID rejects non-UUIDs with 404 instead
+		// of attempting prefix-match.
 		fullID, err := n.ResolveScopeID(scopeType, id)
 		if err != nil {
 			writeError(w, err.Error(), http.StatusNotFound)

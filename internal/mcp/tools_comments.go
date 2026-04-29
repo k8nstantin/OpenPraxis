@@ -13,12 +13,10 @@ import (
 // Matches the HTTP addComment handler in internal/web/handlers_comments.go:246
 // so MCP and HTTP paths stay behaviorally identical.
 //
-// target_id is accepted as either the full UUID or a short marker (first
-// 8-12 chars). The handler resolves to the full UUID before insert so the
-// dashboard — which queries by full UUID — always finds the comment. Agents
-// that interpolate the short marker from the runner prompt stop orphaning
-// rows. Non-existent target_ids return a clean error rather than silently
-// writing a dangling row.
+// target_id must be the full 36-char UUID (post marker rip-out — prefixes
+// return a "not found" error). The handler validates the target exists
+// before insert so non-existent target_ids return a clean error rather
+// than silently writing a dangling row.
 func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	a := args(req)
 	targetType := argStr(a, "target_type")
@@ -51,10 +49,10 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 		c.ID, c.TargetType, c.TargetID, c.Author, c.Type)), nil
 }
 
-// resolveCommentTarget canonicalizes a short-marker or full-UUID target_id
-// into the full 36-char UUID by looking it up in the respective entity store.
-// Returns an error if the target does not exist. Safe to pass a full UUID —
-// each entity's Get method accepts either form via id = ? OR id LIKE ?.
+// resolveCommentTarget validates a full-UUID target_id by looking it up
+// in the respective entity store. Returns an error if the target does
+// not exist. Post marker rip-out (eb49bef) each entity's Get method
+// only accepts the full 36-char UUID — prefixes return nil.
 //
 // When a store is not wired (e.g. tests with a minimal Node), the raw id is
 // returned unchanged so tool registration still works.

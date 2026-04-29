@@ -65,7 +65,7 @@ func TestSearch_IDPrefix(t *testing.T) {
 	a, _ := s.Create("A", "", "open", "medium", "author", "node", "", nil)
 	_, _ = s.Create("B", "", "open", "medium", "author", "node", "", nil)
 
-	res, err := s.Search(a.Marker, 10)
+	res, err := s.Search(a.ID[:8], 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

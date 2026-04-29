@@ -17,7 +17,6 @@ import (
 // Product is a top-level organizational entity: Peer → Product → Manifest → Task.
 type Product struct {
 	ID          string    `json:"id"`
-	Marker      string    `json:"marker"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Status      string    `json:"status"`      // draft, open, closed, archive
@@ -72,6 +71,13 @@ func (s *Store) SetDepRemovedHandler(fn func(ctx context.Context, productID stri
 	s.onDepRemoved = fn
 }
 
+// SetRelationshipsBackend wires the unified relationships SCD-2 store
+// for product dependency / ownership edges. Call once at startup before
+// any mutation runs.
+func (s *Store) SetRelationshipsBackend(r *relationships.Store) {
+	s.rels = r
+}
+
 // NewStore creates a product store. The dependency layer auto-wires a
 // default relationships backend against the same DB handle so tests
 // (and any caller that doesn't explicitly call SetRelationshipsBackend)
@@ -89,7 +95,7 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init relationships backend: %w", err)
 	}
-	s.SetRelationshipsBackend(rels)
+	s.rels = rels
 	s.logSchemaReady()
 	return s, nil
 }
@@ -145,16 +151,16 @@ func (s *Store) Create(title, description, status, sourceNode string, tags []str
 	}
 
 	return &Product{
-		ID: id, Marker: id[:12], Title: title, Description: description,
+		ID: id, Title: title, Description: description,
 		Status: status, SourceNode: sourceNode, Tags: tags,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
-// Get retrieves a product by ID or prefix.
+// Get retrieves a product by full UUID.
 func (s *Store) Get(id string) (*Product, error) {
 	row := s.db.QueryRow(`SELECT id, title, description, status, source_node, tags, created_at, updated_at
-		FROM products WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
+		FROM products WHERE id = ? AND deleted_at = ''`, id)
 	p, err := scanProduct(row)
 	if err == nil && p != nil {
 		s.EnrichWithCosts([]*Product{p})
@@ -221,14 +227,14 @@ func (s *Store) Update(id, title, description, status string, tags []string) err
 	// non-terminal → terminal edge. Missing row falls through; the
 	// UPDATE will either be a no-op or surface the real error.
 	var priorStatus, fullID string
-	_ = s.db.QueryRow(`SELECT id, status FROM products WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		id, id+"%").Scan(&fullID, &priorStatus)
+	_ = s.db.QueryRow(`SELECT id, status FROM products WHERE id = ? AND deleted_at = ''`,
+		id).Scan(&fullID, &priorStatus)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	tagsJSON, _ := json.Marshal(tags)
 	_, err := s.db.Exec(`UPDATE products SET title = ?, description = ?, status = ?, tags = ?, updated_at = ?
-		WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		title, description, status, string(tagsJSON), now, id, id+"%")
+		WHERE id = ? AND deleted_at = ''`,
+		title, description, status, string(tagsJSON), now, id)
 	if err != nil {
 		return err
 	}
@@ -247,7 +253,7 @@ func (s *Store) Update(id, title, description, status string, tags []string) err
 // Delete soft-deletes a product.
 func (s *Store) Delete(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE products SET deleted_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE products SET deleted_at = ? WHERE id = ? AND deleted_at = ''`, now, id)
 	return err
 }
 
@@ -531,9 +537,6 @@ func scanProduct(row *sql.Row) (*Product, error) {
 	}
 	p.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(p.ID) >= 12 {
-		p.Marker = p.ID[:12]
-	}
 
 	return &p, nil
 }
@@ -553,9 +556,6 @@ func scanProductRows(rows *sql.Rows) (*Product, error) {
 	}
 	p.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(p.ID) >= 12 {
-		p.Marker = p.ID[:12]
-	}
 
 	return &p, nil
 }

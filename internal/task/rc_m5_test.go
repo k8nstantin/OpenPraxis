@@ -28,7 +28,7 @@ func insertRunningTask(t *testing.T, db *sql.DB, taskID string) {
 // TestBuildPrompt_BranchPrefixOverride verifies the resolved
 // `branch_prefix` knob renders into the <git_workflow> block. The
 // manifest's acceptance bullet 4 (`branch_prefix=qa` → `git checkout -b
-// qa/<marker>`) is the concrete shape we assert.
+// qa/<id-prefix>`) is the concrete shape we assert.
 func TestBuildPrompt_BranchPrefixOverride(t *testing.T) {
 	task := &Task{ID: "019dba9f-9c5b-76ba-8221-e7e11093887f", Title: "T", Description: "D"}
 	got, err := buildPrompt(task, "M", "m body", "", "qa", nil)
@@ -71,7 +71,7 @@ func TestRunner_RecoverInFlight_StopMarksFailed(t *testing.T) {
 	r, _, _, _ := newRunnerHarness(t)
 
 	insertRunningTask(t, r.store.db, "019dbaa4-orph-stop-aaaaaaaaaaaa")
-	if err := r.store.SaveRuntimeState("019dbaa4-orph-stop-aaaaaaaaaaaa", "orph-stop", "T", "", "claude-code", 12345, false, 3, 40, "last", time.Now()); err != nil {
+	if err := r.store.SaveRuntimeState("019dbaa4-orph-stop-aaaaaaaaaaaa", "T", "", "claude-code", 12345, false, 3, 40, "last", time.Now()); err != nil {
 		t.Fatalf("SaveRuntimeState: %v", err)
 	}
 

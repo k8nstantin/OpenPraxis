@@ -99,11 +99,7 @@ func apiHook(n *node.Node) http.HandlerFunc {
 					ruleCount = len(allRules)
 					ruleList := ""
 					for i, r := range allRules {
-						marker := ""
-						if len(r.ID) >= 12 {
-							marker = r.ID[:12]
-						}
-						ruleList += fmt.Sprintf("\n  %d. [%s] %s", i+1, marker, r.L2)
+						ruleList += fmt.Sprintf("\n  %d. [%s] %s", i+1, r.ID, r.L2)
 					}
 					if err := n.Actions.RecordAmnesia(event.SessionID, n.PeerID(), "", "", "SYSTEM", "SYSTEM",
 							fmt.Sprintf("Session did not confirm visceral rules on startup. %d rules were NOT acknowledged.", ruleCount),

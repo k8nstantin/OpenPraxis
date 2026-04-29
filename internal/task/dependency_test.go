@@ -99,7 +99,7 @@ func TestSetDependency_ParentOpenLandsWaitingWithBlockReason(t *testing.T) {
 		t.Errorf("block_reason = %q, want 'not completed' phrasing", br)
 	}
 	if !strings.Contains(br, parent.ID[:12]) {
-		t.Errorf("block_reason = %q, want parent marker %q", br, parent.ID[:12])
+		t.Errorf("block_reason = %q, want parent id-prefix %q", br, parent.ID[:12])
 	}
 }
 

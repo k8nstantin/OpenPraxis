@@ -3,9 +3,8 @@ package idea
 import "strings"
 
 // Search finds ideas matching a query. Supports id-exact, id-prefix
-// (marker or UUID prefix), id-substring, and keyword substring in
-// title/description/tags. Mirrors manifest.Store.Search shape per
-// 019daafb-b5e M1.
+// (UUID prefix substring), and keyword substring in title/description/
+// tags. Mirrors manifest.Store.Search shape per 019daafb-b5e M1.
 func (s *Store) Search(query string, limit int) ([]*Idea, error) {
 	if limit <= 0 {
 		limit = 50

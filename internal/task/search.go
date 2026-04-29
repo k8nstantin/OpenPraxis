@@ -3,11 +3,11 @@ package task
 import "strings"
 
 // Search finds tasks matching a query. Supports id-exact, id-prefix
-// (marker or UUID prefix), id-substring, and keyword substring in
-// title/description. Mirrors manifest.Store.Search (see 019daafb-b5e
-// M1 per-entity scoped search) — the shape is a single LIKE OR-set
-// because the sibling ladder in internal/memory is only warranted where
-// semantic fallback and path lookups live.
+// (UUID prefix substring), and keyword substring in title/description.
+// Mirrors manifest.Store.Search (see 019daafb-b5e M1 per-entity scoped
+// search) — the shape is a single LIKE OR-set because the sibling
+// ladder in internal/memory is only warranted where semantic fallback
+// and path lookups live.
 func (s *Store) Search(query string, limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50

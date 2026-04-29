@@ -74,7 +74,7 @@ func TestCreate_ProductUnsatisfied_SeedsWaitingWithProductReason(t *testing.T) {
 		t.Errorf("block_reason = %q, want 'product not satisfied' prefix", br)
 	}
 	if !strings.Contains(br, "prod-dep-1") {
-		t.Errorf("block_reason = %q, want marker prod-dep-1", br)
+		t.Errorf("block_reason = %q, want id-prefix prod-dep-1", br)
 	}
 }
 

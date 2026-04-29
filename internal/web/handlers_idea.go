@@ -19,7 +19,6 @@ func apiIdeasByPeer(n *node.Node) http.HandlerFunc {
 		}
 		type iItem struct {
 			ID       string `json:"id"`
-			Marker   string `json:"marker"`
 			Title    string `json:"title"`
 			Status   string `json:"status"`
 			Priority string `json:"priority"`
@@ -39,7 +38,7 @@ func apiIdeasByPeer(n *node.Node) http.HandlerFunc {
 			if _, ok := peers[pid]; !ok {
 				peerOrder = append(peerOrder, pid)
 			}
-			peers[pid] = append(peers[pid], iItem{ID: i.ID, Marker: i.Marker, Title: i.Title, Status: i.Status, Priority: i.Priority})
+			peers[pid] = append(peers[pid], iItem{ID: i.ID, Title: i.Title, Status: i.Status, Priority: i.Priority})
 		}
 		var result []peerGroup
 		for _, pid := range peerOrder {

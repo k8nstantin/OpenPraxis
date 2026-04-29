@@ -673,10 +673,36 @@ func (n *Node) ReindexMemories(ids []string) {
 	}
 }
 
-// ResolveScopeID canonicalises a settings/comment scope_id from a short
-// marker to its full UUID by dispatching on scopeType. Used by every
-// settings + cross-entity write path so short markers don't end up
-// silently orphaned in the database (visceral rule #14, issue #207).
+// ResolveProductID validates a product UUID by ensuring the product
+// exists, returning the canonical ID. Empty input returns empty.
+func (n *Node) ResolveProductID(productID string) (string, error) {
+	if productID == "" {
+		return "", nil
+	}
+	p, err := n.Products.Get(productID)
+	if err != nil || p == nil {
+		return "", fmt.Errorf("product not found: %s", productID)
+	}
+	return p.ID, nil
+}
+
+// ResolveManifestID validates a manifest UUID by ensuring the manifest
+// exists, returning the canonical ID. Empty input returns empty.
+func (n *Node) ResolveManifestID(manifestID string) (string, error) {
+	if manifestID == "" {
+		return "", nil
+	}
+	m, err := n.Manifests.Get(manifestID)
+	if err != nil || m == nil {
+		return "", fmt.Errorf("manifest not found: %s", manifestID)
+	}
+	return m.ID, nil
+}
+
+// ResolveScopeID validates a settings/comment scope_id by ensuring the
+// referenced entity exists. With markers gone, every cross-entity reference
+// must already be a full UUID — this just checks the row is reachable so
+// callers can surface a 4xx instead of writing a phantom-FK row.
 //
 // Returns ("", nil) for an empty scope_id; returns the input unchanged
 // for unknown scope types (caller validates the type separately).
@@ -686,9 +712,17 @@ func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
 	}
 	switch scopeType {
 	case "product":
-		return n.ResolveProductID(scopeID)
+		p, err := n.Products.Get(scopeID)
+		if err != nil || p == nil {
+			return "", fmt.Errorf("product not found: %s", scopeID)
+		}
+		return p.ID, nil
 	case "manifest":
-		return n.ResolveManifestID(scopeID)
+		m, err := n.Manifests.Get(scopeID)
+		if err != nil || m == nil {
+			return "", fmt.Errorf("manifest not found: %s", scopeID)
+		}
+		return m.ID, nil
 	case "task":
 		if n.Tasks == nil {
 			return scopeID, nil
@@ -705,35 +739,10 @@ func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
 	return scopeID, nil
 }
 
-// ResolveProductID resolves a product marker or full ID to the full UUID.
-// Returns empty string if productID is empty, error if not found.
-func (n *Node) ResolveProductID(productID string) (string, error) {
-	if productID == "" {
-		return "", nil
-	}
-	p, err := n.Products.Get(productID)
-	if err != nil || p == nil {
-		return "", fmt.Errorf("product not found: %s", productID)
-	}
-	return p.ID, nil
-}
-
-// ResolveManifestID resolves a manifest marker or full ID to the full UUID.
-// Returns empty string if manifestID is empty, error if not found.
-func (n *Node) ResolveManifestID(manifestID string) (string, error) {
-	if manifestID == "" {
-		return "", nil
-	}
-	m, err := n.Manifests.Get(manifestID)
-	if err != nil || m == nil {
-		return "", fmt.Errorf("manifest not found: %s", manifestID)
-	}
-	return m.ID, nil
-}
-
-// ResolveManifestDependsOn resolves a comma-separated list of manifest markers/IDs to full IDs.
-// selfID is the manifest being created/updated (empty for create). Validates existence,
-// rejects self-dependency, and detects circular dependencies.
+// ResolveManifestDependsOn validates a comma-separated list of manifest IDs
+// against the manifests store. selfID is the manifest being created/updated
+// (empty for create). Validates existence, rejects self-dependency, and
+// detects circular dependencies. Every entry must be a full UUID.
 func (n *Node) ResolveManifestDependsOn(raw, selfID string) (string, error) {
 	if raw == "" {
 		return "", nil
@@ -758,7 +767,7 @@ func (n *Node) ResolveManifestDependsOn(raw, selfID string) (string, error) {
 		// Check for circular dependency: if the dependency transitively depends on selfID
 		if selfID != "" {
 			if n.hasTransitiveDependency(m.ID, selfID, make(map[string]bool)) {
-				return "", fmt.Errorf("circular dependency: %s transitively depends on this manifest", m.Marker)
+				return "", fmt.Errorf("circular dependency: %s transitively depends on this manifest", m.ID)
 			}
 		}
 		resolved = append(resolved, m.ID)
@@ -826,16 +835,11 @@ func (n *Node) CheckManifestDeps(manifestID string) (bool, string) {
 			continue // missing dependency — don't block on phantom
 		}
 		if dep.Status != "closed" && dep.Status != "archive" {
-			marker := depID
-			if len(depID) >= 12 {
-				marker = depID[:12]
-			}
 			// Canonical format — matches the prefix FlipManifestBlockedTasks
 			// filters on in task.Store. Diverging from this means the
 			// close-propagation walker (#78) can't see the task and the
-			// dep chain won't auto-advance. Kept trailing metadata
-			// (marker + title) for operator legibility.
-			return false, fmt.Sprintf("manifest not satisfied — blocked by: %s (%s)", marker, dep.Title)
+			// dep chain won't auto-advance.
+			return false, fmt.Sprintf("manifest not satisfied — blocked by: %s (%s)", depID, dep.Title)
 		}
 	}
 	return true, ""
@@ -849,7 +853,7 @@ func (n *Node) ValidateArchiveProduct(productID string) error {
 	}
 	for _, m := range manifests {
 		if m.Status != "archive" {
-			return fmt.Errorf("cannot archive product: manifest [%s] %s is still '%s' — archive all manifests first", m.Marker, m.Title, m.Status)
+			return fmt.Errorf("cannot archive product: manifest [%s] %s is still '%s' — archive all manifests first", m.ID, m.Title, m.Status)
 		}
 	}
 	return nil
@@ -864,7 +868,7 @@ func (n *Node) ValidateArchiveManifest(manifestID string) error {
 	terminal := map[string]bool{"completed": true, "failed": true, "cancelled": true}
 	for _, t := range tasks {
 		if !terminal[t.Status] {
-			return fmt.Errorf("cannot archive manifest: task [%s] %s is still '%s' — all tasks must be completed, failed, or cancelled first", t.Marker, t.Title, t.Status)
+			return fmt.Errorf("cannot archive manifest: task [%s] %s is still '%s' — all tasks must be completed, failed, or cancelled first", t.ID, t.Title, t.Status)
 		}
 	}
 	return nil

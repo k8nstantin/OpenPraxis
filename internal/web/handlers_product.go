@@ -18,7 +18,6 @@ import (
 // this product is detected as an umbrella (no manifests + has out-deps).
 type pItemMenu struct {
 	ID             string      `json:"id"`
-	Marker         string      `json:"marker"`
 	Title          string      `json:"title"`
 	Status         string      `json:"status"`
 	TotalManifests int         `json:"total_manifests"`
@@ -70,7 +69,7 @@ func apiProductsByPeer(n *node.Node) http.HandlerFunc {
 
 		itemFor := func(p *product.Product) pItemMenu {
 			return pItemMenu{
-				ID: p.ID, Marker: p.Marker, Title: p.Title, Status: p.Status,
+				ID: p.ID, Title: p.Title, Status: p.Status,
 				TotalManifests: p.TotalManifests, TotalTasks: p.TotalTasks,
 				TotalTurns: p.TotalTurns, TotalCost: p.TotalCost,
 				CreatedAt: p.CreatedAt.Format(time.RFC3339),
@@ -262,7 +261,6 @@ func apiProductManifests(n *node.Node) http.HandlerFunc {
 
 type hierarchyTaskNode struct {
 	ID        string         `json:"id"`
-	Marker    string         `json:"marker"`
 	Title     string         `json:"title"`
 	Type      string         `json:"type"`
 	Status    string         `json:"status"`
@@ -272,7 +270,6 @@ type hierarchyTaskNode struct {
 
 type hierarchyManifestNode struct {
 	ID              string              `json:"id"`
-	Marker          string              `json:"marker"`
 	Title           string              `json:"title"`
 	Type            string              `json:"type"`
 	Status          string              `json:"status"`
@@ -284,7 +281,6 @@ type hierarchyManifestNode struct {
 
 type hierarchyProductNode struct {
 	ID          string                  `json:"id"`
-	Marker      string                  `json:"marker"`
 	Title       string                  `json:"title"`
 	Type        string                  `json:"type"`
 	Status      string                  `json:"status"`
@@ -300,7 +296,7 @@ type hierarchyProductNode struct {
 // are already rejected at AddDep time; depth cap is defense in depth.
 func buildHierarchyProduct(ctx context.Context, n *node.Node, p *product.Product, depth int, seen map[string]bool) hierarchyProductNode {
 	if seen[p.ID] {
-		return hierarchyProductNode{ID: p.ID, Marker: p.Marker, Title: p.Title, Type: "product", Status: p.Status}
+		return hierarchyProductNode{ID: p.ID, Title: p.Title, Type: "product", Status: p.Status}
 	}
 	seen[p.ID] = true
 
@@ -312,7 +308,7 @@ func buildHierarchyProduct(ctx context.Context, n *node.Node, p *product.Product
 		tNodes := make([]hierarchyTaskNode, 0, len(tasks))
 		for _, t := range tasks {
 			tNodes = append(tNodes, hierarchyTaskNode{
-				ID: t.ID, Marker: t.Marker, Title: t.Title,
+				ID: t.ID, Title: t.Title,
 				Type: "task", Status: t.Status, DependsOn: t.DependsOn,
 				Meta: map[string]any{
 					"cost_usd":  t.TotalCost,
@@ -323,7 +319,7 @@ func buildHierarchyProduct(ctx context.Context, n *node.Node, p *product.Product
 		}
 		totalTasks += len(tasks)
 		mNodes = append(mNodes, hierarchyManifestNode{
-			ID: m.ID, Marker: m.Marker, Title: m.Title,
+			ID: m.ID, Title: m.Title,
 			Type: "manifest", Status: m.Status,
 			DependsOn: m.DependsOn, DependsOnTitles: n.ResolveDependsOnTitles(m.DependsOn),
 			Meta: map[string]any{
@@ -348,7 +344,7 @@ func buildHierarchyProduct(ctx context.Context, n *node.Node, p *product.Product
 	}
 
 	return hierarchyProductNode{
-		ID: p.ID, Marker: p.Marker, Title: p.Title,
+		ID: p.ID, Title: p.Title,
 		Type: "product", Status: p.Status,
 		Meta: map[string]any{
 			"total_cost":      p.TotalCost,
@@ -397,13 +393,14 @@ func apiProductIdeas(n *node.Node) http.HandlerFunc {
 	}
 }
 
-// resolveProductID accepts a marker or full UUID and returns the full
-// UUID via Products.Get (which handles prefix matching). Empty return
-// + error message means 404-worthy.
-func resolveProductID(n *node.Node, idOrMarker string) (string, string) {
-	p, _ := n.Products.Get(idOrMarker)
+// resolveProductID validates a product UUID and returns it canonical
+// via Products.Get. Post marker rip-out (eb49bef) Get accepts only
+// the full UUID; prefixes return 404. Empty string + error message
+// means 404-worthy.
+func resolveProductID(n *node.Node, id string) (string, string) {
+	p, _ := n.Products.Get(id)
 	if p == nil {
-		return "", "product not found: " + idOrMarker
+		return "", "product not found: " + id
 	}
 	return p.ID, ""
 }

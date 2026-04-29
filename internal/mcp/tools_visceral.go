@@ -36,7 +36,7 @@ func (s *Server) registerVisceralTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("visceral_remove",
 			mcplib.WithDescription("Remove a visceral rule by ID."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Rule ID (8-char marker or full UUID)")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Rule ID (full UUID)")),
 		),
 		s.handleVisceralRemove,
 	)
@@ -55,8 +55,7 @@ func (s *Server) handleVisceralRules(ctx context.Context, req mcplib.CallToolReq
 	var output string
 	output += fmt.Sprintf("=== VISCERAL RULES (%d) ===\nThese are MANDATORY. Follow every rule without exception.\n\n", len(rules))
 	for i, r := range rules {
-		marker := r.ID[:12]
-		output += fmt.Sprintf("%d. [%s] %s\n", i+1, marker, r.L2)
+		output += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
 	}
 	output += "\n=== END VISCERAL RULES ==="
 
@@ -103,8 +102,7 @@ func (s *Server) handleVisceralSet(ctx context.Context, req mcplib.CallToolReque
 		return errResult("store visceral rule: %v", err), nil
 	}
 
-	marker := mem.ID[:12]
-	return textResult(fmt.Sprintf("Visceral rule set [%s]: %s", marker, rule)), nil
+	return textResult(fmt.Sprintf("Visceral rule set [%s]: %s", mem.ID, rule)), nil
 }
 
 func (s *Server) handleVisceralRemove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

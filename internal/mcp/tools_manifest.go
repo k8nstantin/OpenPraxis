@@ -19,8 +19,8 @@ func (s *Server) registerManifestTools() {
 			mcplib.WithString("description", mcplib.Description("DEPRECATED — short summary, no longer surfaced in the dashboard. Use content for the manifest body. Optional, defaults to empty.")),
 			mcplib.WithString("content", mcplib.Required(), mcplib.Description("Full spec in markdown — architecture, modules, features, requirements. Rendered as the manifest body in the dashboard.")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive. Default: draft")),
-			mcplib.WithString("project_id", mcplib.Description("Project ID or marker to assign manifest to (optional)")),
-			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs or markers this manifest depends on (optional)")),
+			mcplib.WithString("project_id", mcplib.Description("Project ID to assign manifest to (optional)")),
+			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs this manifest depends on (optional)")),
 			mcplib.WithString("jira_refs", mcplib.Description("Comma-separated Jira tickets (e.g. 'ENG-4816,ENG-5266')")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -29,8 +29,8 @@ func (s *Server) registerManifestTools() {
 
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_get",
-			mcplib.WithDescription("Get a manifest by ID (8-char marker or full UUID)."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithDescription("Get a manifest by ID (full UUID)."),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID")),
 		),
 		s.handleManifestGet,
 	)
@@ -38,13 +38,13 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_update",
 			mcplib.WithDescription("Update a manifest — modify content, status, or references. Bumps version."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID")),
 			mcplib.WithString("title", mcplib.Description("New title")),
 			mcplib.WithString("description", mcplib.Description("New description")),
 			mcplib.WithString("content", mcplib.Description("New content (replaces entire content)")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive")),
-			mcplib.WithString("project_id", mcplib.Description("Project ID or marker to assign manifest to")),
-			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs or markers this manifest depends on")),
+			mcplib.WithString("project_id", mcplib.Description("Project ID to assign manifest to")),
+			mcplib.WithString("depends_on", mcplib.Description("Comma-separated manifest IDs this manifest depends on")),
 			mcplib.WithString("jira_refs", mcplib.Description("Comma-separated Jira tickets")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -70,7 +70,7 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_delete",
 			mcplib.WithDescription("Delete a manifest."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Manifest ID")),
 		),
 		s.handleManifestDelete,
 	)
@@ -78,8 +78,8 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_dep_add",
 			mcplib.WithDescription("Add a manifest→manifest dependency edge. Rejects self-loops and cycles; the error names the rejected pair so you can fix your graph. Triggers auto-activation downstream if the target manifest is already closed."),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest that will wait (ID or 12-char marker)")),
-			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Manifest that must close first (ID or marker)")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest that will wait (ID)")),
+			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Manifest that must close first (ID)")),
 		),
 		s.handleManifestDepAdd,
 	)
@@ -87,8 +87,8 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_dep_remove",
 			mcplib.WithDescription("Remove a manifest→manifest dependency edge. Idempotent. If the removal makes the source manifest fully satisfied, any tasks sitting in 'waiting' due to the manifest block flip to 'pending' (Option B — operator must explicitly arm them)."),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Source manifest (ID or marker)")),
-			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Dep to remove (ID or marker)")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Source manifest (ID)")),
+			mcplib.WithString("depends_on_manifest_id", mcplib.Required(), mcplib.Description("Dep to remove (ID)")),
 		),
 		s.handleManifestDepRemove,
 	)
@@ -96,7 +96,7 @@ func (s *Server) registerManifestTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("manifest_dep_list",
 			mcplib.WithDescription("List manifest dependencies. direction=out (default) returns manifests this one depends on; direction=in returns manifests that depend on this one; direction=both returns both lists."),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID")),
 			mcplib.WithString("direction", mcplib.Description("out | in | both (default: out)")),
 		),
 		s.handleManifestDepList,
@@ -107,8 +107,8 @@ func (s *Server) registerLinkTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("link_idea_manifest",
 			mcplib.WithDescription("Link an idea to a manifest. The idea spawned or is implemented by the manifest."),
-			mcplib.WithString("idea_id", mcplib.Required(), mcplib.Description("Idea ID or 8-char marker")),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or 8-char marker")),
+			mcplib.WithString("idea_id", mcplib.Required(), mcplib.Description("Idea full UUID")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest full UUID")),
 		),
 		s.handleLinkIdeaManifest,
 	)
@@ -116,8 +116,8 @@ func (s *Server) registerLinkTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("unlink_idea_manifest",
 			mcplib.WithDescription("Remove a link between an idea and manifest."),
-			mcplib.WithString("idea_id", mcplib.Required(), mcplib.Description("Idea ID or marker")),
-			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID or marker")),
+			mcplib.WithString("idea_id", mcplib.Required(), mcplib.Description("Idea ID")),
+			mcplib.WithString("manifest_id", mcplib.Required(), mcplib.Description("Manifest ID")),
 		),
 		s.handleUnlinkIdeaManifest,
 	)
@@ -128,7 +128,7 @@ func (s *Server) handleLinkIdeaManifest(ctx context.Context, req mcplib.CallTool
 	ideaID := argStr(a, "idea_id")
 	manifestID := argStr(a, "manifest_id")
 
-	// Resolve short markers to full IDs
+	// Validate IDs
 	idea, _ := s.node.Ideas.Get(ideaID)
 	if idea == nil {
 		return errResult("idea not found: %s", ideaID), nil
@@ -143,7 +143,7 @@ func (s *Server) handleLinkIdeaManifest(ctx context.Context, req mcplib.CallTool
 	}
 
 	return textResult(fmt.Sprintf("Linked: idea [%s] %s → manifest [%s] %s",
-		idea.Marker, idea.Title, manifest.Marker, manifest.Title)), nil
+		idea.ID, idea.Title, manifest.ID, manifest.Title)), nil
 }
 
 func (s *Server) handleUnlinkIdeaManifest(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -164,7 +164,7 @@ func (s *Server) handleUnlinkIdeaManifest(ctx context.Context, req mcplib.CallTo
 		return errResult("unlink failed: %v", err), nil
 	}
 
-	return textResult(fmt.Sprintf("Unlinked: idea [%s] from manifest [%s]", idea.Marker, manifest.Marker)), nil
+	return textResult(fmt.Sprintf("Unlinked: idea [%s] from manifest [%s]", idea.ID, manifest.ID)), nil
 }
 
 func (s *Server) handleManifestCreate(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -190,7 +190,7 @@ func (s *Server) handleManifestCreate(ctx context.Context, req mcplib.CallToolRe
 	}
 
 	return textResult(fmt.Sprintf("Manifest created [%s]: %s\nStatus: %s | Version: %d\nJira: %v",
-		m.Marker, m.Title, m.Status, m.Version, m.JiraRefs)), nil
+		m.ID, m.Title, m.Status, m.Version, m.JiraRefs)), nil
 }
 
 func (s *Server) handleManifestGet(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -216,17 +216,13 @@ func (s *Server) handleManifestGet(ctx context.Context, req mcplib.CallToolReque
 		depParts := make([]string, len(titles))
 		ids := m.ParseDependsOn()
 		for i, t := range titles {
-			marker := ids[i]
-			if len(marker) >= 12 {
-				marker = marker[:12]
-			}
-			depParts[i] = fmt.Sprintf("[%s] %s", marker, t)
+			depParts[i] = fmt.Sprintf("[%s] %s", ids[i], t)
 		}
 		deps = strings.Join(depParts, ", ")
 	}
 
 	return textResult(fmt.Sprintf("[%s] %s\nStatus: %s | Version: %d | Author: %s\nJira: %s\nDepends on: %s\nDescription: %s\nCreated: %s | Updated: %s\n\n%s",
-		m.Marker, m.Title, m.Status, m.Version, m.Author, jira, deps, m.Description,
+		m.ID, m.Title, m.Status, m.Version, m.Author, jira, deps, m.Description,
 		m.CreatedAt.Format("2006-01-02 15:04"), m.UpdatedAt.Format("2006-01-02 15:04"),
 		m.Content)), nil
 }
@@ -299,7 +295,7 @@ func (s *Server) handleManifestUpdate(ctx context.Context, req mcplib.CallToolRe
 	}
 
 	return textResult(fmt.Sprintf("Manifest updated [%s]: %s (v%d → v%d)",
-		existing.Marker, title, existing.Version, existing.Version+1)), nil
+		existing.ID, title, existing.Version, existing.Version+1)), nil
 }
 
 func (s *Server) handleManifestList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -327,7 +323,7 @@ func (s *Server) handleManifestList(ctx context.Context, req mcplib.CallToolRequ
 			deps = " | Deps: " + strings.Join(titles, ", ")
 		}
 		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s%s)\n",
-			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira, deps)
+			i+1, m.ID, m.Title, m.Description, m.Version, m.Status, jira, deps)
 	}
 
 	return textResult(output), nil
@@ -361,7 +357,7 @@ func (s *Server) handleManifestSearch(ctx context.Context, req mcplib.CallToolRe
 			deps = " | Deps: " + strings.Join(titles, ", ")
 		}
 		output += fmt.Sprintf("%d. [%s] %s — %s (v%d, %s%s%s)\n",
-			i+1, m.Marker, m.Title, m.Description, m.Version, m.Status, jira, deps)
+			i+1, m.ID, m.Title, m.Description, m.Version, m.Status, jira, deps)
 	}
 
 	return textResult(output), nil
@@ -378,10 +374,10 @@ func (s *Server) handleManifestDelete(ctx context.Context, req mcplib.CallToolRe
 	return textResult(fmt.Sprintf("Manifest deleted.")), nil
 }
 
-// resolveManifestPair accepts marker-or-id inputs for a source + target
-// manifest, looks up both, and returns the full UUIDs. Centralizes the
-// same "Manifests.Get accepts prefixes, dep tables want full IDs"
-// translation that the dep-add/remove/list handlers all need.
+// resolveManifestPair validates a source + target manifest UUID pair
+// via Manifests.Get (post marker rip-out: full UUID only) and returns
+// canonical IDs ready for the relationships table. Used by the
+// dep-add/remove/list handlers.
 func (s *Server) resolveManifestPair(src, dst string) (srcID, dstID string, errMsg string) {
 	srcM, _ := s.node.Manifests.Get(src)
 	if srcM == nil {
@@ -409,7 +405,7 @@ func (s *Server) handleManifestDepAdd(ctx context.Context, req mcplib.CallToolRe
 	src, _ := s.node.Manifests.Get(srcID)
 	dst, _ := s.node.Manifests.Get(dstID)
 	return textResult(fmt.Sprintf("Dep added: [%s] %s → [%s] %s",
-		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+		src.ID, src.Title, dst.ID, dst.Title)), nil
 }
 
 func (s *Server) handleManifestDepRemove(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -424,7 +420,7 @@ func (s *Server) handleManifestDepRemove(ctx context.Context, req mcplib.CallToo
 	src, _ := s.node.Manifests.Get(srcID)
 	dst, _ := s.node.Manifests.Get(dstID)
 	return textResult(fmt.Sprintf("Dep removed: [%s] %s → [%s] %s (downstream waiting tasks may have been rehabbed to 'pending').",
-		src.Marker, src.Title, dst.Marker, dst.Title)), nil
+		src.ID, src.Title, dst.ID, dst.Title)), nil
 }
 
 func (s *Server) handleManifestDepList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -444,7 +440,7 @@ func (s *Server) handleManifestDepList(ctx context.Context, req mcplib.CallToolR
 		}
 		var out []string
 		for _, d := range rows {
-			out = append(out, fmt.Sprintf("  [%s] %s — %s", d.Marker, d.Title, d.Status))
+			out = append(out, fmt.Sprintf("  [%s] %s — %s", d.ID, d.Title, d.Status))
 		}
 		return strings.Join(out, "\n")
 	}
@@ -456,13 +452,13 @@ func (s *Server) handleManifestDepList(ctx context.Context, req mcplib.CallToolR
 		if err != nil {
 			return errResult("list deps: %v", err), nil
 		}
-		output = fmt.Sprintf("[%s] %s depends on:\n%s\n", m.Marker, m.Title, formatDeps(deps))
+		output = fmt.Sprintf("[%s] %s depends on:\n%s\n", m.ID, m.Title, formatDeps(deps))
 	case "in":
 		dependents, err := s.node.Manifests.ListDependents(ctx, m.ID)
 		if err != nil {
 			return errResult("list dependents: %v", err), nil
 		}
-		output = fmt.Sprintf("[%s] %s is depended on by:\n%s\n", m.Marker, m.Title, formatDeps(dependents))
+		output = fmt.Sprintf("[%s] %s is depended on by:\n%s\n", m.ID, m.Title, formatDeps(dependents))
 	case "both":
 		deps, err := s.node.Manifests.ListDeps(ctx, m.ID)
 		if err != nil {
@@ -473,7 +469,7 @@ func (s *Server) handleManifestDepList(ctx context.Context, req mcplib.CallToolR
 			return errResult("list dependents: %v", err), nil
 		}
 		output = fmt.Sprintf("[%s] %s depends on:\n%s\n\n[%s] %s is depended on by:\n%s\n",
-			m.Marker, m.Title, formatDeps(deps), m.Marker, m.Title, formatDeps(dependents))
+			m.ID, m.Title, formatDeps(deps), m.ID, m.Title, formatDeps(dependents))
 	default:
 		return errResult("direction must be one of: out, in, both (got %q)", direction), nil
 	}

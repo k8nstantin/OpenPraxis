@@ -26,7 +26,6 @@ type CostAggregation struct {
 type CostDrillDownEntry struct {
 	RunID       int     `json:"run_id"`
 	TaskID      string  `json:"task_id"`
-	TaskMarker  string  `json:"task_marker"`
 	TaskTitle   string  `json:"task_title"`
 	ManifestID  string  `json:"manifest_id"`
 	Agent       string  `json:"agent"`
@@ -182,9 +181,6 @@ func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, 
 		}
 		if agentStr.Valid {
 			e.Agent = agentStr.String
-		}
-		if len(e.TaskID) >= 12 {
-			e.TaskMarker = e.TaskID[:12]
 		}
 		e.StartedAt = startedStr
 		e.CompletedAt = completedStr

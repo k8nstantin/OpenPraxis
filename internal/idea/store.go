@@ -13,10 +13,9 @@ import (
 // Idea represents a product idea, feature request, or improvement note.
 type Idea struct {
 	ID          string    `json:"id"`
-	Marker      string    `json:"marker"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
-	Status      string    `json:"status"` // draft, open, closed, archive
+	Status      string    `json:"status"`   // draft, open, closed, archive
 	Priority    string    `json:"priority"` // low, medium, high, critical
 	Tags        []string  `json:"tags"`
 	Author      string    `json:"author"`
@@ -97,7 +96,7 @@ func (s *Store) Create(title, description, status, priority, author, sourceNode,
 	}
 
 	return &Idea{
-		ID: id, Marker: id[:12], Title: title, Description: description,
+		ID: id, Title: title, Description: description,
 		Status: status, Priority: priority, Tags: tags,
 		Author: author, SourceNode: sourceNode, ProjectID: projectID, CreatedAt: now, UpdatedAt: now,
 	}, nil
@@ -107,15 +106,15 @@ func (s *Store) Create(title, description, status, priority, author, sourceNode,
 func (s *Store) Update(id, title, description, status, priority, projectID string, tags []string) error {
 	now := time.Now().UTC()
 	tagsJSON, _ := json.Marshal(tags)
-	_, err := s.db.Exec(`UPDATE ideas SET title=?, description=?, status=?, priority=?, project_id=?, tags=?, updated_at=? WHERE id=? OR id LIKE ?`,
-		title, description, status, priority, projectID, string(tagsJSON), now.Format(time.RFC3339), id, id+"%")
+	_, err := s.db.Exec(`UPDATE ideas SET title=?, description=?, status=?, priority=?, project_id=?, tags=?, updated_at=? WHERE id=?`,
+		title, description, status, priority, projectID, string(tagsJSON), now.Format(time.RFC3339), id)
 	return err
 }
 
-// Get retrieves an idea by ID or prefix.
+// Get retrieves an idea by full UUID.
 func (s *Store) Get(id string) (*Idea, error) {
 	row := s.db.QueryRow(`SELECT id, title, description, status, priority, tags, author, source_node, project_id, created_at, updated_at
-		FROM ideas WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
+		FROM ideas WHERE id = ? AND deleted_at = ''`, id)
 	return scanIdea(row)
 }
 
@@ -175,7 +174,7 @@ func (s *Store) List(status string, limit int) ([]*Idea, error) {
 // Delete soft-deletes an idea.
 func (s *Store) Delete(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE ideas SET deleted_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE ideas SET deleted_at = ? WHERE id = ? AND deleted_at = ''`, now, id)
 	return err
 }
 
@@ -203,7 +202,7 @@ func (s *Store) ListDeleted(limit int) ([]*Idea, error) {
 
 // Restore un-deletes a soft-deleted idea.
 func (s *Store) Restore(id string) error {
-	_, err := s.db.Exec(`UPDATE ideas SET deleted_at = '' WHERE (id = ? OR id LIKE ?) AND deleted_at != ''`, id, id+"%")
+	_, err := s.db.Exec(`UPDATE ideas SET deleted_at = '' WHERE id = ? AND deleted_at != ''`, id)
 	return err
 }
 
@@ -222,9 +221,6 @@ func scanIdea(row *sql.Row) (*Idea, error) {
 	}
 	i.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	i.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(i.ID) >= 12 {
-		i.Marker = i.ID[:12]
-	}
 	return &i, nil
 }
 
@@ -240,8 +236,5 @@ func scanIdeaRows(rows *sql.Rows) (*Idea, error) {
 	}
 	i.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	i.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
-	if len(i.ID) >= 12 {
-		i.Marker = i.ID[:12]
-	}
 	return &i, nil
 }

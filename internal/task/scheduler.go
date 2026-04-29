@@ -161,28 +161,28 @@ func (s *Scheduler) check() {
 		if t.ManifestID != "" && s.depCheck != nil {
 			satisfied, reason := s.depCheck.CheckManifestDeps(t.ManifestID)
 			if !satisfied {
-				slog.Info("task blocked by manifest dependency", "component", "scheduler", "marker", t.Marker, "reason", reason)
+				slog.Info("task blocked by manifest dependency", "component", "scheduler", "task_id", t.ID, "reason", reason)
 				// Put task back to waiting status so it doesn't re-fire every tick
 				if err := s.store.UpdateStatus(t.ID, "waiting"); err != nil {
-					slog.Error("update status to waiting failed", "component", "scheduler", "marker", t.Marker, "error", err)
+					slog.Error("update status to waiting failed", "component", "scheduler", "task_id", t.ID, "error", err)
 				}
 				if err := s.store.SetBlockReason(t.ID, reason); err != nil {
-					slog.Error("set block reason failed", "component", "scheduler", "marker", t.Marker, "error", err)
+					slog.Error("set block reason failed", "component", "scheduler", "task_id", t.ID, "error", err)
 				}
 				continue
 			}
 		}
 
-		slog.Info("firing task", "component", "scheduler", "marker", t.Marker, "title", t.Title, "schedule", t.Schedule)
+		slog.Info("firing task", "component", "scheduler", "task_id", t.ID, "title", t.Title, "schedule", t.Schedule)
 
 		// Clear any previous block reason
 		if err := s.store.SetBlockReason(t.ID, ""); err != nil {
-			slog.Error("clear block reason failed", "component", "scheduler", "marker", t.Marker, "error", err)
+			slog.Error("clear block reason failed", "component", "scheduler", "task_id", t.ID, "error", err)
 		}
 
 		// Mark as running
 		if err := s.store.UpdateStatus(t.ID, "running"); err != nil {
-			slog.Error("update status to running failed", "component", "scheduler", "marker", t.Marker, "error", err)
+			slog.Error("update status to running failed", "component", "scheduler", "task_id", t.ID, "error", err)
 		}
 
 		// Fire the callback
@@ -195,7 +195,7 @@ func (s *Scheduler) check() {
 			nextRun := ComputeNextRun(t.Schedule)
 			if !nextRun.IsZero() {
 				if err := s.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
-					slog.Error("set next run failed", "component", "scheduler", "marker", t.Marker, "error", err)
+					slog.Error("set next run failed", "component", "scheduler", "task_id", t.ID, "error", err)
 				}
 			}
 		}

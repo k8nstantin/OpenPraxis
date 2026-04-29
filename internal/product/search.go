@@ -3,9 +3,8 @@ package product
 import "strings"
 
 // Search finds products matching a query. Supports id-exact, id-prefix
-// (marker or UUID prefix), id-substring, and keyword substring in
-// title/description/tags. Mirrors manifest.Store.Search shape per
-// 019daafb-b5e M1.
+// (UUID prefix substring), and keyword substring in title/description/
+// tags. Mirrors manifest.Store.Search shape per 019daafb-b5e M1.
 func (s *Store) Search(query string, limit int) ([]*Product, error) {
 	if limit <= 0 {
 		limit = 50

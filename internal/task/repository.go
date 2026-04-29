@@ -69,11 +69,11 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	// completed, the task is waiting regardless of manifest state.
 	if dependsOn != "" {
 		var parentStatus string
-		err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-			dependsOn, dependsOn+"%").Scan(&parentStatus)
+		err := s.db.QueryRow(`SELECT status FROM tasks WHERE id = ? AND deleted_at = ''`,
+			dependsOn).Scan(&parentStatus)
 		if err == nil && parentStatus != string(StatusCompleted) {
 			initialStatus = StatusWaiting
-			blockReason = fmt.Sprintf("task %s not completed", firstN(dependsOn, 12))
+			blockReason = fmt.Sprintf("task %s not completed", dependsOn)
 		}
 		// sql.ErrNoRows or any other lookup failure: keep pending, operator
 		// can correct by attaching the dep later via Edit.
@@ -93,7 +93,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 		} else if !ok {
 			initialStatus = StatusWaiting
 			blockReason = fmt.Sprintf("manifest not satisfied — blocked by: %s",
-				joinMarkers(unsatisfied))
+				joinIDs(unsatisfied))
 		}
 	}
 
@@ -114,7 +114,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 			if err == nil && !ok {
 				initialStatus = StatusWaiting
 				blockReason = fmt.Sprintf("product not satisfied — blocked by: %s",
-					joinMarkers(unsatisfied))
+					joinIDs(unsatisfied))
 			}
 		}
 	}
@@ -166,7 +166,7 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	}
 
 	return &Task{
-		ID: id, Marker: id[:12], ManifestID: manifestID,
+		ID: id, ManifestID: manifestID,
 		Title: title, Description: description, Schedule: schedule,
 		Status: string(initialStatus), Agent: agent, SourceNode: sourceNode,
 		CreatedBy: createdBy, DependsOn: dependsOn, BlockReason: blockReason,
@@ -174,32 +174,19 @@ func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNo
 	}, nil
 }
 
-// firstN returns the first n chars of s. Used for logging task/manifest
-// markers in block_reason strings without pulling the whole UUID.
-func firstN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
-
-// joinMarkers formats a list of manifest ids as comma-separated markers
-// for inclusion in a block_reason. Empty input → "(unknown)" so the
-// reason is never ambiguous-looking to the operator.
-func joinMarkers(ids []string) string {
+// joinIDs formats a list of full UUIDs as comma-separated for inclusion
+// in a block_reason. Empty input → "(unknown)" so the reason is never
+// ambiguous-looking to the operator.
+func joinIDs(ids []string) string {
 	if len(ids) == 0 {
 		return "(unknown)"
 	}
-	markers := make([]string, 0, len(ids))
-	for _, id := range ids {
-		markers = append(markers, firstN(id, 12))
-	}
-	return strings.Join(markers, ", ")
+	return strings.Join(ids, ", ")
 }
 
-// Get retrieves a task by ID or prefix.
+// Get retrieves a task by full UUID.
 func (s *Store) Get(id string) (*Task, error) {
-	row := s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, id, id+"%")
+	row := s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ? AND deleted_at = ''`, id)
 	t, err := scanTask(row)
 	if err == nil && t != nil {
 		s.enrichWithCosts([]*Task{t})
@@ -212,7 +199,7 @@ func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE (manifest_id = ? OR manifest_id LIKE ?) AND deleted_at = '' ORDER BY created_at DESC LIMIT ?`, manifestID, manifestID+"%", limit)
+	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE manifest_id = ? AND deleted_at = '' ORDER BY created_at DESC LIMIT ?`, manifestID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -288,9 +275,9 @@ func (s *Store) Update(id string, title, description *string) (*Task, error) {
 
 	sets = append(sets, "updated_at = ?")
 	args = append(args, now)
-	args = append(args, id, id+"%")
+	args = append(args, id)
 
-	query := fmt.Sprintf("UPDATE tasks SET %s WHERE (id = ? OR id LIKE ?) AND deleted_at = ''", strings.Join(sets, ", "))
+	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ? AND deleted_at = ''", strings.Join(sets, ", "))
 	_, err := s.db.Exec(query, args...)
 	if err != nil {
 		return nil, err
@@ -300,14 +287,12 @@ func (s *Store) Update(id string, title, description *string) (*Task, error) {
 
 // SetManifest swaps a task's primary manifest_id. Used to re-home a task
 // when an operator splits / restructures manifests after the task was
-// originally created (e.g. ELS atomic split moved 12 tasks under 6 new
-// implementation manifests). The id may be a marker or full UUID. Returns
-// the task as it stands after the update.
+// originally created. Returns the task as it stands after the update.
 func (s *Store) SetManifest(taskID, manifestID string) (*Task, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(
-		"UPDATE tasks SET manifest_id = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''",
-		manifestID, now, taskID, taskID+"%",
+		"UPDATE tasks SET manifest_id = ?, updated_at = ? WHERE id = ? AND deleted_at = ''",
+		manifestID, now, taskID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("set manifest: %w", err)
@@ -323,24 +308,24 @@ func (s *Store) SetManifest(taskID, manifestID string) (*Task, error) {
 // writers don't see spurious errors.
 func (s *Store) UpdateStatus(id, status string) error {
 	// Resolve the row so we can read the current status for the
-	// transition check. Marker-prefix match is preserved.
+	// transition check.
 	var current string
-	if err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		id, id+"%").Scan(&current); err != nil {
+	if err := s.db.QueryRow(`SELECT status FROM tasks WHERE id = ? AND deleted_at = ''`,
+		id).Scan(&current); err != nil {
 		return err
 	}
 	if err := ValidateTransition(Status(current), Status(status)); err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? OR id LIKE ?`, status, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`, status, now, id)
 	return err
 }
 
 // Delete soft-deletes a task.
 func (s *Store) Delete(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = ? WHERE id = ? AND deleted_at = ''`, now, id)
 	return err
 }
 
@@ -359,15 +344,15 @@ func (s *Store) ListDeleted(limit int) ([]*Task, error) {
 
 // Restore un-deletes a soft-deleted task.
 func (s *Store) Restore(id string) error {
-	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = '' WHERE (id = ? OR id LIKE ?) AND deleted_at != ''`, id, id+"%")
+	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = '' WHERE id = ? AND deleted_at != ''`, id)
 	return err
 }
 
 // SetBlockReason sets or clears the block_reason field for a task.
 func (s *Store) SetBlockReason(id, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET block_reason = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		reason, now, id, id+"%")
+	_, err := s.db.Exec(`UPDATE tasks SET block_reason = ?, updated_at = ? WHERE id = ? AND deleted_at = ''`,
+		reason, now, id)
 	return err
 }
 
@@ -435,8 +420,8 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 		fullID, currentStatus string
 	)
 	if err := s.db.QueryRow(
-		`SELECT id, status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		id, id+"%").Scan(&fullID, &currentStatus); err != nil {
+		`SELECT id, status FROM tasks WHERE id = ? AND deleted_at = ''`,
+		id).Scan(&fullID, &currentStatus); err != nil {
 		return err
 	}
 
@@ -461,8 +446,8 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 	// Resolve + validate the proposed parent.
 	var parentID, parentStatus string
 	if err := s.db.QueryRow(
-		`SELECT id, status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		dependsOn, dependsOn+"%").Scan(&parentID, &parentStatus); err != nil {
+		`SELECT id, status FROM tasks WHERE id = ? AND deleted_at = ''`,
+		dependsOn).Scan(&parentID, &parentStatus); err != nil {
 		return err
 	}
 	if parentID == fullID {
@@ -472,7 +457,7 @@ func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) 
 		return fmt.Errorf("cycle check: %w", err)
 	} else if reaches {
 		return fmt.Errorf("%w: %s → %s would close a cycle",
-			ErrTaskDepCycle, shortID(fullID), shortID(parentID))
+			ErrTaskDepCycle, fullID, parentID)
 	}
 
 	nextStatus, blockReason := deriveDepState(currentStatus, parentStatus, parentID)
@@ -680,16 +665,7 @@ func deriveDepState(currentStatus, parentStatus, parentID string) (string, strin
 	// Parent is in some non-terminal state — task parks in Waiting
 	// with a populated block_reason that the UI surfaces.
 	return string(StatusWaiting), fmt.Sprintf("task %s not completed (is %s)",
-		shortID(parentID), parentStatus)
-}
-
-// shortID returns the first 12 chars of an ID (the marker convention).
-// Defensive for ids shorter than 12 (which shouldn't happen in prod).
-func shortID(id string) string {
-	if len(id) <= 12 {
-		return id
-	}
-	return id[:12]
+		parentID, parentStatus)
 }
 
 // taskDepPathExists runs a bounded DFS from src following single-parent

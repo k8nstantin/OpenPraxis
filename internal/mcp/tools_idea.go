@@ -17,7 +17,7 @@ func (s *Server) registerIdeaTools() {
 			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Idea title")),
 			mcplib.WithString("description", mcplib.Description("Detailed description")),
 			mcplib.WithString("priority", mcplib.Description("low, medium, high, critical. Default: medium")),
-			mcplib.WithString("project_id", mcplib.Description("Project ID or marker to assign idea to (optional)")),
+			mcplib.WithString("project_id", mcplib.Description("Project ID to assign idea to (optional)")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
 		s.handleIdeaAdd,
@@ -34,7 +34,7 @@ func (s *Server) registerIdeaTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("idea_update",
 			mcplib.WithDescription("Update an idea's status, priority, or description."),
-			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Idea ID or 8-char marker")),
+			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Idea full UUID")),
 			mcplib.WithString("title", mcplib.Description("New title")),
 			mcplib.WithString("description", mcplib.Description("New description")),
 			mcplib.WithString("status", mcplib.Description("draft, open, closed, archive")),
@@ -61,7 +61,7 @@ func (s *Server) handleIdeaAdd(ctx context.Context, req mcplib.CallToolRequest) 
 		return errResult("save idea: %v", err), nil
 	}
 
-	return textResult(fmt.Sprintf("Idea saved [%s]: %s (priority: %s)", idea.Marker, idea.Title, idea.Priority)), nil
+	return textResult(fmt.Sprintf("Idea saved [%s]: %s (priority: %s)", idea.ID, idea.Title, idea.Priority)), nil
 }
 
 func (s *Server) handleIdeaList(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -84,7 +84,7 @@ func (s *Server) handleIdeaList(ctx context.Context, req mcplib.CallToolRequest)
 			tags = " [" + strings.Join(idea.Tags, ", ") + "]"
 		}
 		output += fmt.Sprintf("%d. [%s] %s — %s (%s, %s%s)\n",
-			i+1, idea.Marker, idea.Title, idea.Description, idea.Status, idea.Priority, tags)
+			i+1, idea.ID, idea.Title, idea.Description, idea.Status, idea.Priority, tags)
 	}
 	return textResult(output), nil
 }
@@ -122,5 +122,5 @@ func (s *Server) handleIdeaUpdate(ctx context.Context, req mcplib.CallToolReques
 		return errResult("update idea: %v", err), nil
 	}
 
-	return textResult(fmt.Sprintf("Idea updated [%s]: %s (%s, %s)", existing.Marker, title, status, priority)), nil
+	return textResult(fmt.Sprintf("Idea updated [%s]: %s (%s, %s)", existing.ID, title, status, priority)), nil
 }

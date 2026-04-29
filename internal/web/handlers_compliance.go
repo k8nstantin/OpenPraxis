@@ -56,10 +56,6 @@ func checkVisceralCompliance(n *node.Node, sessionID, toolName string, toolInput
 
 	for _, rule := range rules {
 		polarity := action.ClassifyPolarity(rule.L2)
-		marker := ""
-		if len(rule.ID) >= 12 {
-			marker = rule.ID[:12]
-		}
 
 		switch polarity {
 		case action.PolarityPermission:
@@ -74,7 +70,7 @@ func checkVisceralCompliance(n *node.Node, sessionID, toolName string, toolInput
 			// Check if the action uses a forbidden tool/technique
 			if rp != nil && len(rp.ForbiddenPatterns) > 0 {
 				if matched, found := action.CheckForbiddenPatterns(actionDesc, rp.ForbiddenPatterns); found {
-					if err := n.Actions.RecordAmnesia(sessionID, n.PeerID(), "", "", rule.ID, marker, rule.L2,
+					if err := n.Actions.RecordAmnesia(sessionID, n.PeerID(), "", "", rule.ID, "", rule.L2,
 						toolName, inputStr, 1.0, action.MatchTypeForbiddenPattern, matched); err != nil {
 						slog.Warn("record amnesia failed", "match_type", "forbidden_pattern", "error", err)
 					}
@@ -99,7 +95,7 @@ func checkVisceralCompliance(n *node.Node, sessionID, toolName string, toolInput
 
 			sim := cosineSim(actionVec, ruleVec)
 			if sim >= 0.6 {
-				if err := n.Actions.RecordAmnesia(sessionID, n.PeerID(), "", "", rule.ID, marker, rule.L2,
+				if err := n.Actions.RecordAmnesia(sessionID, n.PeerID(), "", "", rule.ID, "", rule.L2,
 					toolName, inputStr, sim, action.MatchTypeSimilarity, ""); err != nil {
 					slog.Warn("record amnesia failed", "match_type", "similarity", "error", err)
 				}
@@ -195,12 +191,8 @@ func checkManifestDelusion(n *node.Node, sessionID, toolName string, toolInput a
 		// If similarity is very low (< 0.3), the action is unrelated to the manifest
 		// This means the agent is doing something off-spec
 		if sim < 0.3 {
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
-			}
 			reason := fmt.Sprintf("Action has %.0f%% similarity to manifest '%s' — agent may be going off-spec", sim*100, m.Title)
-			if err := n.Manifests.RecordDelusion(sessionID, n.PeerID(), "", "", m.ID, marker, m.Title, toolName, inputStr, sim, reason); err != nil {
+			if err := n.Manifests.RecordDelusion(sessionID, n.PeerID(), "", "", m.ID, "", m.Title, toolName, inputStr, sim, reason); err != nil {
 				slog.Warn("record delusion failed", "error", err)
 			}
 		}
@@ -255,7 +247,7 @@ func apiAmnesiaByPeer(n *node.Node) http.HandlerFunc {
 			}
 			peers[pid] = append(peers[pid], aItem{
 				ID: a.ID, SessionID: a.SessionID, ActionID: a.ActionID, TaskID: a.TaskID,
-				RuleMarker: a.RuleMarker, RuleText: a.RuleText,
+				RuleText: a.RuleText,
 				ToolName: a.ToolName, ToolInput: input, Score: a.Score,
 				MatchType: matchType, MatchedPattern: a.MatchedPattern,
 				Status: a.Status, CreatedAt: a.CreatedAt.UTC().Format(time.RFC3339),
@@ -304,18 +296,17 @@ func apiDelusionsByPeer(n *node.Node) http.HandlerFunc {
 			return
 		}
 		type dItem struct {
-			ID             int     `json:"id"`
-			SessionID      string  `json:"session_id"`
-			ActionID       string  `json:"action_id"`
-			TaskID         string  `json:"task_id"`
-			ManifestMarker string  `json:"manifest_marker"`
-			ManifestTitle  string  `json:"manifest_title"`
-			ToolName       string  `json:"tool_name"`
-			ToolInput      string  `json:"tool_input"`
-			Score          float64 `json:"score"`
-			Reason         string  `json:"reason"`
-			Status         string  `json:"status"`
-			CreatedAt      string  `json:"created_at"`
+			ID            int     `json:"id"`
+			SessionID     string  `json:"session_id"`
+			ActionID      string  `json:"action_id"`
+			TaskID        string  `json:"task_id"`
+			ManifestTitle string  `json:"manifest_title"`
+			ToolName      string  `json:"tool_name"`
+			ToolInput     string  `json:"tool_input"`
+			Score         float64 `json:"score"`
+			Reason        string  `json:"reason"`
+			Status        string  `json:"status"`
+			CreatedAt     string  `json:"created_at"`
 		}
 		type peerGroup struct {
 			PeerID    string  `json:"peer_id"`
@@ -338,7 +329,7 @@ func apiDelusionsByPeer(n *node.Node) http.HandlerFunc {
 			}
 			peers[pid] = append(peers[pid], dItem{
 				ID: d.ID, SessionID: d.SessionID, ActionID: d.ActionID, TaskID: d.TaskID,
-				ManifestMarker: d.ManifestMarker, ManifestTitle: d.ManifestTitle,
+				ManifestTitle: d.ManifestTitle,
 				ToolName: d.ToolName, ToolInput: input, Score: d.Score,
 				Reason: d.Reason, Status: d.Status,
 				CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339),
@@ -387,7 +378,6 @@ func apiVisceralByPeer(n *node.Node) http.HandlerFunc {
 		}
 		type rItem struct {
 			ID                string   `json:"id"`
-			Marker            string   `json:"marker"`
 			Text              string   `json:"text"`
 			Source            string   `json:"source"`
 			Polarity          string   `json:"polarity"`
@@ -405,10 +395,6 @@ func apiVisceralByPeer(n *node.Node) http.HandlerFunc {
 			pid := m.SourceNode
 			if pid == "" {
 				pid = n.PeerID()
-			}
-			marker := ""
-			if len(m.ID) >= 12 {
-				marker = m.ID[:12]
 			}
 
 			// Get polarity and patterns
@@ -432,7 +418,7 @@ func apiVisceralByPeer(n *node.Node) http.HandlerFunc {
 				peerOrder = append(peerOrder, pid)
 			}
 			peers[pid] = append(peers[pid], rItem{
-				ID: m.ID, Marker: marker, Text: m.L2, Source: m.SourceAgent,
+				ID: m.ID, Text: m.L2, Source: m.SourceAgent,
 				Polarity: polarity, RequiredPatterns: required, ForbiddenPatterns: forbidden,
 			})
 		}

@@ -47,7 +47,7 @@ func (cb *ContextBuilder) Build(ctx context.Context, userMessage string) string 
 		parts = append(parts, memories)
 	}
 
-	parts = append(parts, "Use the available tools to look up information when the user asks about memories, manifests, tasks, or conversations. Always provide specific markers and IDs in your responses.")
+	parts = append(parts, "Use the available tools to look up information when the user asks about memories, manifests, tasks, or conversations. Always provide full UUIDs in your responses.")
 
 	return strings.Join(parts, "\n\n")
 }
@@ -61,7 +61,7 @@ func (cb *ContextBuilder) buildVisceralRules() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Visceral Rules (%d mandatory)\n", len(rules)))
 	for i, r := range rules {
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, r.Marker, r.Text))
+		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.Text))
 	}
 	return sb.String()
 }
@@ -75,7 +75,7 @@ func (cb *ContextBuilder) buildManifestSummary() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Active Manifests (%d)\n", len(manifests)))
 	for _, m := range manifests {
-		sb.WriteString(fmt.Sprintf("- [%s] %s", m.Marker, m.Title))
+		sb.WriteString(fmt.Sprintf("- [%s] %s", m.ID, m.Title))
 		if m.JiraRef != "" {
 			sb.WriteString(fmt.Sprintf(" (Jira: %s)", m.JiraRef))
 		}
@@ -96,7 +96,7 @@ func (cb *ContextBuilder) buildTaskSummary() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Tasks (%d)\n", len(tasks)))
 	for _, t := range tasks {
-		sb.WriteString(fmt.Sprintf("- [%s] %s (status: %s)\n", t.Marker, t.Title, t.Status))
+		sb.WriteString(fmt.Sprintf("- [%s] %s (status: %s)\n", t.ID, t.Title, t.Status))
 	}
 	return sb.String()
 }
@@ -116,8 +116,7 @@ func (cb *ContextBuilder) buildRelevantMemories(ctx context.Context, userMessage
 		if r.Score < 0.3 {
 			continue
 		}
-		marker := r.ID[:12]
-		relevant = append(relevant, fmt.Sprintf("- [%s] %s: %s", marker, r.Path, r.L1))
+		relevant = append(relevant, fmt.Sprintf("- [%s] %s: %s", r.ID, r.Path, r.L1))
 	}
 	if len(relevant) == 0 {
 		return ""

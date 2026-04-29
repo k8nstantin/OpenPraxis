@@ -63,14 +63,14 @@ func TestSearch_IDExact(t *testing.T) {
 	}
 }
 
-// TestSearch_IDPrefix — marker (id[:12]) returns the owning manifest.
+// TestSearch_IDPrefix — id[:8] prefix returns the owning manifest.
 // This is the bread-and-butter scoped-id-search case from manifest M6.
 func TestSearch_IDPrefix(t *testing.T) {
 	s := openSearchTestStore(t)
 	a, _ := s.Create("A", "", "", "open", "t", "node", "", "", nil, nil)
 	_, _ = s.Create("B", "", "", "open", "t", "node", "", "", nil, nil)
 
-	res, err := s.Search(a.Marker, 10)
+	res, err := s.Search(a.ID[:8], 10)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSearch_IDPrefix(t *testing.T) {
 	}
 }
 
-// TestSearch_Unknown — unknown marker / unknown keyword returns empty.
+// TestSearch_Unknown — unknown id-prefix / unknown keyword returns empty.
 func TestSearch_Unknown(t *testing.T) {
 	s := openSearchTestStore(t)
 	_, _ = s.Create("A", "", "", "open", "t", "node", "", "", nil, nil)

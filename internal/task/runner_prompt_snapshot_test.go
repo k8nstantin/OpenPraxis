@@ -39,17 +39,13 @@ func legacyBuildPrompt(t *Task, manifestTitle, manifestContent, visceralRules st
 	b.WriteString("Call visceral_rules and visceral_confirm first.\n")
 	b.WriteString("</instructions>\n\n")
 
-	marker := t.ID
-	if len(marker) >= 12 {
-		marker = marker[:12]
-	}
 	b.WriteString("<git_workflow>\n")
 	b.WriteString("MANDATORY — every task gets its own branch and PR.\n\n")
 	b.WriteString("1. Before making ANY code changes, create a new branch:\n")
-	b.WriteString(fmt.Sprintf("   git checkout -b openpraxis/%s\n", marker))
+	b.WriteString(fmt.Sprintf("   git checkout -b openpraxis/%s\n", t.ID))
 	b.WriteString("2. Make all your changes on this branch.\n")
 	b.WriteString("3. Commit your work with a descriptive message.\n")
-	b.WriteString(fmt.Sprintf("4. Push the branch: git push -u origin openpraxis/%s\n", marker))
+	b.WriteString(fmt.Sprintf("4. Push the branch: git push -u origin openpraxis/%s\n", t.ID))
 	b.WriteString("5. Create a pull request using: gh pr create --title \"<title>\" --body \"<summary>\"\n")
 	b.WriteString("6. Include the PR URL in your final output.\n\n")
 	b.WriteString("NEVER work on an existing branch. NEVER push to main.\n")

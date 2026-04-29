@@ -25,8 +25,8 @@ func (ct *ChatTools) Definitions() []ToolDef {
 		},
 		{
 			Name:        "memory_recall",
-			Description: "Get a specific memory by its ID or 8-character marker.",
-			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Memory ID or 8-char marker"}},"required":["id"]}`,
+			Description: "Get a specific memory by its full UUID.",
+			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Memory full UUID"}},"required":["id"]}`,
 		},
 		{
 			Name:        "manifest_list",
@@ -35,8 +35,8 @@ func (ct *ChatTools) Definitions() []ToolDef {
 		},
 		{
 			Name:        "manifest_get",
-			Description: "Get a manifest by ID or 8-character marker.",
-			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Manifest ID or marker"}},"required":["id"]}`,
+			Description: "Get a manifest by full UUID.",
+			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Manifest full UUID"}},"required":["id"]}`,
 		},
 		{
 			Name:        "task_list",
@@ -45,8 +45,8 @@ func (ct *ChatTools) Definitions() []ToolDef {
 		},
 		{
 			Name:        "task_get",
-			Description: "Get a task by ID or 8-character marker.",
-			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Task ID or marker"}},"required":["id"]}`,
+			Description: "Get a task by full UUID.",
+			InputSchema: `{"type":"object","properties":{"id":{"type":"string","description":"Task full UUID"}},"required":["id"]}`,
 		},
 		{
 			Name:        "conversation_search",
@@ -115,8 +115,7 @@ func (ct *ChatTools) memorySearch(ctx context.Context, input map[string]any) (st
 
 	var out string
 	for i, r := range results {
-		marker := r.ID[:12]
-		out += fmt.Sprintf("%d. [%s] (%.3f) %s\n   %s\n\n", i+1, marker, r.Score, r.Path, r.L1)
+		out += fmt.Sprintf("%d. [%s] (%.3f) %s\n   %s\n\n", i+1, r.ID, r.Score, r.Path, r.L1)
 	}
 	return out, nil
 }
@@ -135,8 +134,7 @@ func (ct *ChatTools) memoryRecall(input map[string]any) (string, error) {
 		return fmt.Sprintf("Memory %s not found", id), nil
 	}
 
-	marker := mem.ID[:12]
-	return fmt.Sprintf("[%s] %s\nPath: %s\nType: %s\n\n%s", marker, mem.L0, mem.Path, mem.Type, mem.L2), nil
+	return fmt.Sprintf("[%s] %s\nPath: %s\nType: %s\n\n%s", mem.ID, mem.L0, mem.Path, mem.Type, mem.L2), nil
 }
 
 func (ct *ChatTools) manifestList(input map[string]any) (string, error) {
@@ -151,7 +149,7 @@ func (ct *ChatTools) manifestList(input map[string]any) (string, error) {
 
 	var out string
 	for _, m := range manifests {
-		out += fmt.Sprintf("[%s] %s (status: %s)\n", m.Marker, m.Title, m.Status)
+		out += fmt.Sprintf("[%s] %s (status: %s)\n", m.ID, m.Title, m.Status)
 	}
 	return out, nil
 }
@@ -168,7 +166,7 @@ func (ct *ChatTools) manifestGet(input map[string]any) (string, error) {
 	}
 
 	return fmt.Sprintf("[%s] %s\nStatus: %s | Version: %d | Author: %s\nJira: %s\n\n%s",
-		m.Marker, m.Title, m.Status, m.Version, m.Author, m.JiraRef, m.Content), nil
+		m.ID, m.Title, m.Status, m.Version, m.Author, m.JiraRef, m.Content), nil
 }
 
 func (ct *ChatTools) taskList(input map[string]any) (string, error) {
@@ -183,7 +181,7 @@ func (ct *ChatTools) taskList(input map[string]any) (string, error) {
 
 	var out string
 	for _, t := range tasks {
-		out += fmt.Sprintf("[%s] %s (status: %s, schedule: %s)\n", t.Marker, t.Title, t.Status, t.Schedule)
+		out += fmt.Sprintf("[%s] %s (status: %s, schedule: %s)\n", t.ID, t.Title, t.Status, t.Schedule)
 	}
 	return out, nil
 }
@@ -200,7 +198,7 @@ func (ct *ChatTools) taskGet(input map[string]any) (string, error) {
 	}
 
 	return fmt.Sprintf("[%s] %s\nStatus: %s | Schedule: %s\nAgent: %s\nManifest: %s\n\n%s",
-		t.Marker, t.Title, t.Status, t.Schedule, t.Agent, t.ManifestID, t.Description), nil
+		t.ID, t.Title, t.Status, t.Schedule, t.Agent, t.ManifestID, t.Description), nil
 }
 
 func (ct *ChatTools) conversationSearch(ctx context.Context, input map[string]any) (string, error) {
@@ -240,7 +238,7 @@ func (ct *ChatTools) visceralRules() (string, error) {
 	var out string
 	out += fmt.Sprintf("=== VISCERAL RULES (%d) ===\n", len(rules))
 	for i, r := range rules {
-		out += fmt.Sprintf("%d. [%s] %s\n", i+1, r.Marker, r.Text)
+		out += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.Text)
 	}
 	return out, nil
 }
