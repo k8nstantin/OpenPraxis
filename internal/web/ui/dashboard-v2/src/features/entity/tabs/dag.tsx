@@ -232,12 +232,18 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
                     label: { show: true, fontWeight: 'bold' },
                     lineStyle: { width: 2.5 },
                   },
+                  // Force tuning is node-count dependent. Sparse graphs
+                  // (≤ 10 nodes) need MUCH higher repulsion to spread
+                  // across the canvas; dense graphs (50+ nodes) need
+                  // lower repulsion or they fly apart. Auto-scale.
                   force: {
-                    repulsion: 280,
-                    edgeLength: [80, 160],
-                    gravity: 0.06,
+                    repulsion: built.data.length <= 10 ? 1500 : built.data.length <= 30 ? 600 : 320,
+                    edgeLength: built.data.length <= 10 ? [180, 280] : [100, 180],
+                    gravity: 0.08,
+                    friction: 0.6,
                     layoutAnimation: true,
                   },
+                  center: ['50%', '50%'],
                   lineStyle: { width: 1.4, curveness: 0.12, opacity: 0.8 },
                 },
               ],

@@ -101,12 +101,18 @@ export function EChart({
     return () => ro.disconnect()
   }, [])
 
+  // When the caller passes height='100%' the wrapper must forward it
+  // — without an explicit height the inner ReactECharts collapses to
+  // its content (often ~100px) and the chart renders into a tiny
+  // strip while the parent has hundreds of px of vertical space.
+  const wrapHeight =
+    typeof height === 'string' ? height : `${height}px`
   return (
-    <div ref={wrapRef} style={{ width: '100%', overflow: 'hidden' }}>
+    <div ref={wrapRef} style={{ width: '100%', height: wrapHeight, overflow: 'hidden' }}>
       <ReactECharts
         ref={chartRef}
         option={themed}
-        style={{ height, width: '100%' }}
+        style={{ height: '100%', width: '100%' }}
         className={className}
         notMerge
         lazyUpdate
