@@ -276,13 +276,20 @@ func New(cfg *config.Config) (*Node, error) {
 	}
 	// PR/M2 + PR/M3 — copy every row out of the three legacy dependency
 	// tables (product_dependencies / manifest_dependencies /
-	// task_dependency) into the unified relationships SCD-2 table.
-	// Idempotent — re-running on a migrated DB inserts zero rows. The
-	// legacy tables are NOT dropped; they sit dormant as historical
-	// safety. All read + write paths in product / manifest / task have
-	// been cut over to read from relationships.
+	// task_dependency) PLUS the legacy ownership FK columns
+	// (manifests.project_id / tasks.manifest_id) into the unified
+	// relationships SCD-2 table. Idempotent — re-running inserts zero
+	// rows.
 	if _, err := relationshipsStore.MigrateLegacyDeps(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate legacy deps to relationships: %w", err)
+	}
+	// PR/M3 — drop the legacy ownership columns now that every row is
+	// represented in `relationships` as an EdgeOwns edge. The migration
+	// is a SQLite-portable rename-table swap inside a single
+	// transaction; idempotent (a second boot finds the column already
+	// gone and is a no-op).
+	if err := relationships.DropOwnershipColumns(context.Background(), index.DB()); err != nil {
+		return nil, fmt.Errorf("drop legacy ownership columns: %w", err)
 	}
 	// Wire the relationships store into the legacy dep stores so their
 	// Add/Remove/List methods read + write the unified table while
