@@ -38,30 +38,49 @@ export function StatsTab({ kind, entityId }: StatsTabProps) {
   const runStats = useRunStats(kind, entityId)
   const runs = useMemo(() => runStats.data?.runs ?? [], [runStats.data])
   const samplesByRun = runStats.data?.samples_by_run ?? {}
+  const [view, setView] = useState<'cumulative' | 'per_run'>('cumulative')
+
+  const body = runStats.isLoading ? (
+    <Skeleton className='h-64 w-full' />
+  ) : runs.length === 0 ? (
+    <Empty msg='No runs yet for this entity.' />
+  ) : view === 'cumulative' ? (
+    <CumulativePanel runs={runs} kind={kind} />
+  ) : (
+    <PerRunPanel runs={runs} samplesByRun={samplesByRun} />
+  )
 
   return (
-    <div data-testid='stats-tab' className='space-y-6'>
-      <Panel title='Cumulative'>
-        {runStats.isLoading ? (
-          <Skeleton className='h-64 w-full' />
-        ) : runs.length === 0 ? (
-          <Empty msg='No runs yet for this entity.' />
-        ) : (
-          <CumulativePanel runs={runs} kind={kind} />
-        )}
-      </Panel>
-      <Panel title='Per-run'>
-        {runStats.isLoading ? (
-          <Skeleton className='h-64 w-full' />
-        ) : runs.length === 0 ? (
-          <Empty msg='No runs yet for this entity.' />
-        ) : (
-          <PerRunPanel runs={runs} samplesByRun={samplesByRun} />
-        )}
-      </Panel>
-      <Panel title='System capacity'>
-        <SystemPanel />
-      </Panel>
+    <div data-testid='stats-tab' className='space-y-3'>
+      {/* Sub-tab segmented control — single tab strip across the whole
+          Stats area. System Capacity moves to its own top-level menu. */}
+      <div className='inline-flex rounded-md border bg-card p-1 text-sm'>
+        <button
+          type='button'
+          onClick={() => setView('cumulative')}
+          className={
+            'rounded px-3 py-1 transition-colors ' +
+            (view === 'cumulative'
+              ? 'bg-primary/15 text-foreground font-semibold'
+              : 'text-muted-foreground hover:text-foreground')
+          }
+        >
+          Cumulative
+        </button>
+        <button
+          type='button'
+          onClick={() => setView('per_run')}
+          className={
+            'rounded px-3 py-1 transition-colors ' +
+            (view === 'per_run'
+              ? 'bg-primary/15 text-foreground font-semibold'
+              : 'text-muted-foreground hover:text-foreground')
+          }
+        >
+          Per run
+        </button>
+      </div>
+      {body}
     </div>
   )
 }
@@ -224,19 +243,37 @@ function CumulativePanel({
       ? 0
       : Math.round((latestMix.cache_read / latestTotalTokens) * 100)
 
-  // Common axisPointer/dataZoom config for every cumulative line chart
-  // — crosshair tooltips + brush-zoom slider so every chart feels rich
-  // and explorable, not just a static line.
-  const axisPointerCross = {
-    axisPointer: { type: 'cross' as const, label: { backgroundColor: '#1f2937' } },
+  // Shared chart config — distilled from apache/echarts-examples canonical
+  // patterns (area-stack-gradient.ts, line-marker.ts, mix-line-bar.ts).
+  //
+  //   - tooltip.axisPointer.type='cross' for crosshair guides
+  //   - toolbox feature { dataZoom (yAxis locked), restore, saveAsImage }
+  //   - dataZoom inside + slider so brush-zoom works wheel + drag
+  //   - LinearGradient via plain object form (same as constructor at runtime)
+  //   - emphasis.focus='series' so hovering one stacked series dims others
+  //
+  const tooltipCross = {
+    trigger: 'axis' as const,
+    axisPointer: {
+      type: 'cross' as const,
+      crossStyle: { color: '#94a3b8' },
+      label: { backgroundColor: '#1f2937' },
+    },
+  }
+  const toolboxStd = {
+    feature: {
+      dataZoom: { yAxisIndex: 'none' as const },
+      restore: {},
+      saveAsImage: {},
+    },
+    right: 8,
+    top: 4,
+    itemSize: 12,
   }
   const dataZoomBrush = [
     { type: 'inside' as const },
-    { type: 'slider' as const, height: 18, bottom: 0 },
+    { type: 'slider' as const, height: 16, bottom: 4 },
   ]
-  // Linear gradient helper — top of band is the series color, bottom
-  // fades to transparent. Reads as a soft "fill below the line" everyone
-  // recognizes from monitoring dashboards.
   const grad = (hex: string) => ({
     type: 'linear' as const,
     x: 0,
@@ -268,14 +305,10 @@ function CumulativePanel({
         <ChartCell label='Cost per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 50, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: {
                 type: 'value',
                 name: 'USD',
@@ -312,14 +345,10 @@ function CumulativePanel({
         <ChartCell label='Cumulative cost'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 50, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: {
                 type: 'value',
                 name: 'USD',
@@ -345,22 +374,62 @@ function CumulativePanel({
         <ChartCell label='Token mix per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               legend: { data: ['input', 'output', 'cache_read', 'cache_create'], top: 0 },
               grid: { left: 60, right: 24, top: 30, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
               dataZoom: dataZoomBrush,
               series: [
-                { name: 'input', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#fbbf24') }, data: inputs, color: '#fbbf24', symbol: 'none' },
-                { name: 'output', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#3b82f6') }, data: outputs, color: '#3b82f6', symbol: 'none' },
-                { name: 'cache_read', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#10b981') }, data: cacheRead, color: '#10b981', symbol: 'none' },
-                { name: 'cache_create', type: 'line', stack: 'tokens', smooth: true, areaStyle: { color: grad('#dc2626') }, data: cacheCreate, color: '#dc2626', symbol: 'none' },
+                {
+                  name: 'input',
+                  type: 'line',
+                  stack: 'tokens',
+                  smooth: true,
+                  showSymbol: false,
+                  lineStyle: { width: 0 },
+                  emphasis: { focus: 'series' },
+                  areaStyle: { opacity: 0.85, color: grad('#fbbf24') },
+                  color: '#fbbf24',
+                  data: inputs,
+                },
+                {
+                  name: 'output',
+                  type: 'line',
+                  stack: 'tokens',
+                  smooth: true,
+                  showSymbol: false,
+                  lineStyle: { width: 0 },
+                  emphasis: { focus: 'series' },
+                  areaStyle: { opacity: 0.85, color: grad('#3b82f6') },
+                  color: '#3b82f6',
+                  data: outputs,
+                },
+                {
+                  name: 'cache_read',
+                  type: 'line',
+                  stack: 'tokens',
+                  smooth: true,
+                  showSymbol: false,
+                  lineStyle: { width: 0 },
+                  emphasis: { focus: 'series' },
+                  areaStyle: { opacity: 0.85, color: grad('#10b981') },
+                  color: '#10b981',
+                  data: cacheRead,
+                },
+                {
+                  name: 'cache_create',
+                  type: 'line',
+                  stack: 'tokens',
+                  smooth: true,
+                  showSymbol: false,
+                  lineStyle: { width: 0 },
+                  emphasis: { focus: 'series' },
+                  areaStyle: { opacity: 0.85, color: grad('#dc2626') },
+                  color: '#dc2626',
+                  data: cacheCreate,
+                },
               ],
             }}
           />
@@ -369,14 +438,10 @@ function CumulativePanel({
         <ChartCell label='Cache-hit %'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 50, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: {
                 type: 'value',
                 max: 100,
@@ -408,14 +473,10 @@ function CumulativePanel({
         <ChartCell label='Duration per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 50, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: {
                 type: 'value',
                 name: 'sec',
@@ -445,15 +506,11 @@ function CumulativePanel({
         <ChartCell label='Errors + Compactions per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               legend: { data: ['errors', 'compactions'], top: 0 },
               grid: { left: 50, right: 24, top: 30, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: { type: 'value' },
               dataZoom: dataZoomBrush,
               series: [
@@ -467,15 +524,11 @@ function CumulativePanel({
         <ChartCell label='Cost efficiency ($ per turn / per action)'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               legend: { data: ['$/turn', '$/action'], top: 0 },
               grid: { left: 60, right: 24, top: 30, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: { type: 'value', axisLabel: { formatter: '${value}' } },
               dataZoom: dataZoomBrush,
               series: [
@@ -508,14 +561,10 @@ function CumulativePanel({
         <ChartCell label='Tokens per turn (verbosity)'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 60, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: { type: 'value', axisLabel: { formatter: fmtTokens } },
               dataZoom: dataZoomBrush,
               series: [
@@ -545,15 +594,11 @@ function CumulativePanel({
         <ChartCell label='Code churn — lines added / removed per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               legend: { data: ['added', 'removed'], top: 0 },
               grid: { left: 50, right: 24, top: 30, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: { type: 'value' },
               dataZoom: dataZoomBrush,
               series: [
@@ -567,15 +612,11 @@ function CumulativePanel({
         <ChartCell label='Files changed + commits per run'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               legend: { data: ['files', 'commits'], top: 0 },
               grid: { left: 40, right: 40, top: 30, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: [
                 { type: 'value', name: 'files' },
                 { type: 'value', name: 'commits' },
@@ -607,14 +648,10 @@ function CumulativePanel({
         <ChartCell label='Context pressure — compactions / turn (%)'>
           <EChart
             option={{
-              tooltip: { trigger: 'axis', ...axisPointerCross },
+              tooltip: tooltipCross,
+              toolbox: toolboxStd,
               grid: { left: 50, right: 24, top: 24, bottom: 36 },
-              xAxis: {
-                type: 'category',
-                data: xs,
-                boundaryGap: false,
-                axisLabel: { interval: 0 },
-              },
+              xAxis: { type: 'category', data: xs, boundaryGap: false },
               yAxis: {
                 type: 'value',
                 axisLabel: { formatter: '{value}%' },
@@ -646,7 +683,8 @@ function CumulativePanel({
           <ChartCell label='Cost by model'>
             <EChart
               option={{
-                tooltip: { trigger: 'axis', ...axisPointerCross },
+                tooltip: tooltipCross,
+              toolbox: toolboxStd,
                 legend: { top: 0 },
                 grid: { left: 50, right: 24, top: 30, bottom: 36 },
                 xAxis: {
@@ -709,7 +747,8 @@ function CumulativePanel({
           <ChartCell label='Top 10 tasks by cost'>
             <EChart
               option={{
-                tooltip: { trigger: 'axis', ...axisPointerCross },
+                tooltip: tooltipCross,
+              toolbox: toolboxStd,
                 grid: { left: 100, right: 60, top: 12, bottom: 30 },
                 xAxis: {
                   type: 'value',
