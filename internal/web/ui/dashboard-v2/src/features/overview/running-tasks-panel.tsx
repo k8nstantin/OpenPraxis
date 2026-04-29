@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -37,6 +37,10 @@ interface TasksStats {
   turns_total: number
   lines_total: number
   errors_total: number
+  input_tokens_total: number
+  output_tokens_total: number
+  cache_read_tokens_total: number
+  cache_create_tokens_total: number
 }
 
 interface SystemSample {
@@ -173,6 +177,33 @@ function AIStatsPanel() {
   const s = stats.data
   const env = actions.data
 
+  // In-memory history of the polled cumulative totals. Each poll adds
+  // a sample; the trend charts plot deltas/cumulative as time series.
+  // Lives in component state so it survives between polls but resets
+  // on full reload (acceptable — these are live-tail trends, not
+  // long-term audit data).
+  const [history, setHistory] = useState<{
+    ts: number
+    cost: number
+    turns: number
+    actions: number
+  }[]>([])
+  useEffect(() => {
+    if (!s || !env) return
+    setHistory((prev) => {
+      const sample = {
+        ts: Date.now(),
+        cost: s.cost_total,
+        turns: s.turns_total,
+        actions: env.total,
+      }
+      // Keep last 200 samples; drops oldest. With a 3s poll that's
+      // ~10 minutes of trend.
+      const next = [...prev, sample]
+      return next.length > 200 ? next.slice(-200) : next
+    })
+  }, [s, env])
+
   // Bucket recent actions per hour for the volume bar chart.
   const hourly = useMemo(() => {
     const buckets = new Map<string, number>()
@@ -209,49 +240,329 @@ function AIStatsPanel() {
         { label: 'Runs·all', value: s ? s.runs_total.toLocaleString() : '—' },
       ]}
     >
-      {/* Big-number tiles: the metrics the operator scans first. Live
-          values, today vs cumulative side-by-side so you can see "how
-          much of the all-time figure landed today". */}
-      <div className='mb-3 grid grid-cols-2 gap-2 md:grid-cols-4'>
-        <BigNumber
-          label='Cost today'
-          value={s ? `$${s.cost_today.toFixed(2)}` : '—'}
-          sub={s ? `of $${s.daily_budget} daily` : ''}
-          accent='violet'
-        />
-        <BigNumber
-          label='Turns today'
-          value={s ? s.turns_today.toLocaleString() : '—'}
-          sub={s && s.turns_total > 0 ? `${((s.turns_today / s.turns_total) * 100).toFixed(1)}% of all-time` : ''}
-        />
-        <BigNumber
-          label='Lines·all'
-          value={s ? s.lines_total.toLocaleString() : '—'}
-          sub={s && s.runs_total > 0 ? `${Math.round(s.lines_total / s.runs_total)} avg/run` : ''}
-        />
-        <BigNumber
-          label='Errors·all'
-          value={s ? s.errors_total.toLocaleString() : '—'}
-          sub='across every run'
-          accent={s && s.errors_total > 0 ? 'rose' : undefined}
-        />
+      {/* Three trend charts: cumulative cost, cumulative turns,
+          cumulative actions — all over the live polling history. */}
+      <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-3'>
+        <ChartTile label='Cumulative cost' note='live trend'>
+          <CumulativeTrend
+            data={history.map((h) => [h.ts, h.cost])}
+            color='#a78bfa'
+            unit='$'
+            currentLabel={s ? `$${s.cost_total.toFixed(2)}` : '—'}
+          />
+        </ChartTile>
+        <ChartTile label='Cumulative turns' note='live trend'>
+          <CumulativeTrend
+            data={history.map((h) => [h.ts, h.turns])}
+            color='#10b981'
+            unit=''
+            currentLabel={s ? s.turns_total.toLocaleString() : '—'}
+          />
+        </ChartTile>
+        <ChartTile label='Cumulative actions' note='live trend'>
+          <CumulativeTrend
+            data={history.map((h) => [h.ts, h.actions])}
+            color='#f59e0b'
+            unit=''
+            currentLabel={env ? env.total.toLocaleString() : '—'}
+          />
+        </ChartTile>
+      </div>
+
+      {/* Cache hit ratio + token split — the cache is where the real
+          cost saving lives. Stacked bar shows the four token kinds;
+          gauge shows the ratio cached_read / (input + cached_read). */}
+      <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-3'>
+        <ChartTile label='Cache hit ratio' note='cache_read / (input + cache_read)'>
+          <CacheHitGauge
+            cacheRead={s?.cache_read_tokens_total ?? 0}
+            input={s?.input_tokens_total ?? 0}
+          />
+        </ChartTile>
+        <ChartTile label='Token split' note='all-time' span={2}>
+          <TokenSplitBar
+            input={s?.input_tokens_total ?? 0}
+            output={s?.output_tokens_total ?? 0}
+            cacheRead={s?.cache_read_tokens_total ?? 0}
+            cacheCreate={s?.cache_create_tokens_total ?? 0}
+          />
+        </ChartTile>
       </div>
 
       <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-        <ChartTile label='Actions / hour' note='last 12 hr buckets' span={2}>
+        <ChartTile label='Actions / hour' note='last 12 hr buckets'>
           <HourlyBars data={hourly} color='#a78bfa' />
         </ChartTile>
         <ChartTile label='Top tools' note='in last 300 actions'>
           <ToolBreakdownBars data={toolBreakdown} />
         </ChartTile>
-        <ChartTile label='Cost / turn' note='all-time average'>
-          <CostPerTurnGauge
-            cost={s?.cost_total ?? 0}
-            turns={s?.turns_total ?? 0}
-          />
-        </ChartTile>
       </div>
     </PanelCard>
+  )
+}
+
+// CumulativeTrend — area-line chart over time-stamped cumulative
+// samples. Shows the current value as overlay text top-right.
+function CumulativeTrend({
+  data,
+  color,
+  unit,
+  currentLabel,
+}: {
+  data: [number, number][]
+  color: string
+  unit: string
+  currentLabel: string
+}) {
+  return (
+    <EChart
+      height='100%'
+      option={{
+        grid: { left: 36, right: 8, top: 22, bottom: 18 },
+        xAxis: {
+          type: 'time',
+          axisLabel: { fontSize: 9 },
+        },
+        yAxis: {
+          type: 'value',
+          axisLabel: {
+            fontSize: 9,
+            formatter: (v: number) => {
+              if (v >= 1000) return (v / 1000).toFixed(1) + 'k'
+              return String(v)
+            },
+          },
+          scale: true,
+        },
+        graphic: [
+          {
+            type: 'text',
+            right: 8,
+            top: 4,
+            style: {
+              text: currentLabel,
+              fill: color,
+              fontSize: 14,
+              fontWeight: 600,
+            },
+          },
+        ],
+        series: [
+          {
+            type: 'line',
+            data,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color, width: 2 },
+            areaStyle: {
+              color: {
+                type: 'linear' as const,
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: color + 'aa' },
+                  { offset: 1, color: color + '00' },
+                ],
+              },
+            },
+          },
+        ],
+      }}
+    />
+  )
+}
+
+// CacheHitGauge — radial showing what fraction of input-side tokens
+// came from the cache. Higher = better (cheaper, faster). Below 50%
+// is amber, below 25% is rose.
+function CacheHitGauge({
+  cacheRead,
+  input,
+}: {
+  cacheRead: number
+  input: number
+}) {
+  const denom = cacheRead + input
+  const ratio = denom > 0 ? cacheRead / denom : 0
+  const pct = ratio * 100
+  const color = pct >= 75 ? '#10b981' : pct >= 50 ? '#a78bfa' : pct >= 25 ? '#f59e0b' : '#f43f5e'
+  return (
+    <EChart
+      height='100%'
+      option={{
+        series: [
+          {
+            type: 'gauge',
+            startAngle: 200,
+            endAngle: -20,
+            min: 0,
+            max: 100,
+            progress: {
+              show: true,
+              width: 12,
+              roundCap: true,
+              itemStyle: { color },
+            },
+            axisLine: { lineStyle: { width: 12, color: [[1, '#27272a']] } },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { show: false },
+            pointer: { show: false },
+            title: { show: false },
+            detail: {
+              valueAnimation: true,
+              fontSize: 22,
+              fontWeight: 600,
+              offsetCenter: [0, '5%'],
+              formatter: () => `${pct.toFixed(0)}%`,
+              color,
+            },
+            data: [{ value: pct }],
+          },
+        ],
+        graphic: [
+          {
+            type: 'text',
+            left: 'center',
+            top: '70%',
+            style: {
+              text:
+                cacheRead > 1e9
+                  ? `${(cacheRead / 1e9).toFixed(1)}B cached`
+                  : cacheRead > 1e6
+                    ? `${(cacheRead / 1e6).toFixed(1)}M cached`
+                    : `${cacheRead} cached`,
+              fill: '#94a3b8',
+              fontSize: 10,
+            },
+          },
+        ],
+      }}
+    />
+  )
+}
+
+// TokenSplitBar — single horizontal stacked bar showing the four
+// token kinds and their proportions. Order: cache_read | input |
+// cache_create | output. Cache read first so it visually dominates
+// when the cache is doing its job.
+function TokenSplitBar({
+  input,
+  output,
+  cacheRead,
+  cacheCreate,
+}: {
+  input: number
+  output: number
+  cacheRead: number
+  cacheCreate: number
+}) {
+  const total = input + output + cacheRead + cacheCreate
+  if (total === 0) {
+    return (
+      <div className='text-muted-foreground flex h-full items-center justify-center text-xs'>
+        no token data yet
+      </div>
+    )
+  }
+  const fmt = (n: number) =>
+    n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : String(n)
+  return (
+    <EChart
+      height='100%'
+      option={{
+        grid: { left: 8, right: 8, top: 24, bottom: 32 },
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'shadow' },
+          formatter: (params: { name: string; value: number; color: string }[]) => {
+            return params
+              .map(
+                (p) =>
+                  `<span style="color:${p.color}">${p.name}</span> ${fmt(p.value)} (${((p.value / total) * 100).toFixed(1)}%)`
+              )
+              .join('<br/>')
+          },
+        },
+        legend: {
+          show: true,
+          bottom: 0,
+          itemWidth: 8,
+          itemHeight: 8,
+          textStyle: { fontSize: 9, color: '#a1a1aa' },
+        },
+        xAxis: {
+          type: 'value',
+          show: false,
+          max: total,
+        },
+        yAxis: {
+          type: 'category',
+          data: ['tokens'],
+          show: false,
+        },
+        series: [
+          {
+            name: 'cache read',
+            type: 'bar',
+            stack: 'tokens',
+            data: [cacheRead],
+            itemStyle: { color: '#10b981' },
+            label: {
+              show: true,
+              position: 'inside',
+              fontSize: 10,
+              color: '#fff',
+              formatter: () => fmt(cacheRead),
+            },
+          },
+          {
+            name: 'input',
+            type: 'bar',
+            stack: 'tokens',
+            data: [input],
+            itemStyle: { color: '#3b82f6' },
+            label: {
+              show: true,
+              position: 'inside',
+              fontSize: 10,
+              color: '#fff',
+              formatter: () => fmt(input),
+            },
+          },
+          {
+            name: 'cache create',
+            type: 'bar',
+            stack: 'tokens',
+            data: [cacheCreate],
+            itemStyle: { color: '#f59e0b' },
+            label: {
+              show: true,
+              position: 'inside',
+              fontSize: 10,
+              color: '#fff',
+              formatter: () => fmt(cacheCreate),
+            },
+          },
+          {
+            name: 'output',
+            type: 'bar',
+            stack: 'tokens',
+            data: [output],
+            itemStyle: { color: '#a78bfa' },
+            label: {
+              show: true,
+              position: 'inside',
+              fontSize: 10,
+              color: '#fff',
+              formatter: () => fmt(output),
+            },
+          },
+        ],
+      }}
+    />
   )
 }
 

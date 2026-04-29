@@ -604,13 +604,18 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 		// table grows we materialise this into a stats roll-up table.
 		var totalRuns, cumTurns, cumLines, cumErrors int
 		var cumCost float64
+		var cumInput, cumOutput, cumCacheRead, cumCacheCreate int64
 		_ = n.Tasks.DB().QueryRow(`SELECT
 			COUNT(*),
 			COALESCE(SUM(cost_usd), 0),
 			COALESCE(SUM(turns), 0),
 			COALESCE(SUM(lines), 0),
-			COALESCE(SUM(errors), 0)
-		FROM task_runs WHERE status='completed'`).Scan(&totalRuns, &cumCost, &cumTurns, &cumLines, &cumErrors)
+			COALESCE(SUM(errors), 0),
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(cache_create_tokens), 0)
+		FROM task_runs WHERE status='completed'`).Scan(&totalRuns, &cumCost, &cumTurns, &cumLines, &cumErrors, &cumInput, &cumOutput, &cumCacheRead, &cumCacheCreate)
 
 		writeJSON(w, map[string]any{
 			"running":         runningCount,
@@ -621,11 +626,15 @@ func apiTaskStats(n *node.Node) http.HandlerFunc {
 			"budget_pct":      budgetPct,
 			"budget_exceeded": budgetExceeded,
 			// Cumulative rollups across every completed run.
-			"runs_total":   totalRuns,
-			"cost_total":   math.Round(cumCost*100) / 100,
-			"turns_total":  cumTurns,
-			"lines_total":  cumLines,
-			"errors_total": cumErrors,
+			"runs_total":                totalRuns,
+			"cost_total":                math.Round(cumCost*100) / 100,
+			"turns_total":               cumTurns,
+			"lines_total":               cumLines,
+			"errors_total":              cumErrors,
+			"input_tokens_total":        cumInput,
+			"output_tokens_total":       cumOutput,
+			"cache_read_tokens_total":   cumCacheRead,
+			"cache_create_tokens_total": cumCacheCreate,
 		})
 	}
 }
