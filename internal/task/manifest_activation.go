@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // manifestBlockPrefix is the canonical prefix both Store.Create and
@@ -75,14 +78,39 @@ func (s *Store) FlipManifestBlockedTasks(ctx context.Context, manifestID string,
 	if newStatus == StatusScheduled {
 		nextRunAt = now
 	}
+	// Resolve owned task IDs via relationships (the legacy
+	// tasks.manifest_id column was dropped in PR/M3).
+	if s.rels == nil {
+		return 0, fmt.Errorf("FlipManifestBlockedTasks: relationships backend not wired")
+	}
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return 0, fmt.Errorf("flip manifest-blocked tasks: list owned tasks: %w", err)
+	}
+	taskIDs := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindTask {
+			taskIDs = append(taskIDs, e.DstID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	ph := strings.Repeat("?,", len(taskIDs))
+	ph = ph[:len(ph)-1]
+	args := make([]any, 0, len(taskIDs)+5)
+	args = append(args, string(newStatus), nextRunAt, now)
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	args = append(args, manifestBlockPrefix+"%", legacyManifestBlockPrefix+"%")
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE tasks
 		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
-		 WHERE manifest_id = ? AND status = 'waiting'
+		 WHERE id IN (`+ph+`) AND status = 'waiting'
 		   AND (block_reason LIKE ? OR block_reason LIKE ?)
 		   AND deleted_at = ''`,
-		string(newStatus), nextRunAt, now, manifestID,
-		manifestBlockPrefix+"%", legacyManifestBlockPrefix+"%")
+		args...)
 	if err != nil {
 		return 0, fmt.Errorf("flip manifest-blocked tasks: %w", err)
 	}
@@ -173,14 +201,36 @@ func (s *Store) PropagateManifestClosed(
 }
 
 // CountManifestBlockedTasks returns how many tasks in manifestID are
-// currently 'waiting' with a manifest-level block_reason. Useful for
-// tests + dashboards that want to show "N blocked" without a separate
-// query path.
+// currently 'waiting' with a manifest-level block_reason. Resolves
+// task IDs via the relationships store (PR/M3).
 func (s *Store) CountManifestBlockedTasks(ctx context.Context, manifestID string) (int, error) {
+	if s.rels == nil {
+		return 0, fmt.Errorf("CountManifestBlockedTasks: relationships backend not wired")
+	}
+	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return 0, err
+	}
+	taskIDs := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindTask {
+			taskIDs = append(taskIDs, e.DstID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	ph := strings.Repeat("?,", len(taskIDs))
+	ph = ph[:len(ph)-1]
+	args := make([]any, 0, len(taskIDs)+1)
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	args = append(args, manifestBlockPrefix+"%")
 	var n int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE manifest_id = ? AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
-		manifestID, manifestBlockPrefix+"%").Scan(&n)
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE id IN (`+ph+`) AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
+		args...).Scan(&n)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}

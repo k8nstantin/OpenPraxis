@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	"github.com/gorilla/mux"
@@ -585,8 +587,16 @@ func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
 				lt.StartedAt = r.startedAt.UTC().Format(time.RFC3339)
 				lt.ElapsedSec = int(now.Sub(r.startedAt).Seconds())
 			}
-			if lt.ManifestID == "" {
-				_ = db.QueryRow(`SELECT manifest_id FROM tasks WHERE id = ?`, r.id).Scan(&lt.ManifestID)
+			if lt.ManifestID == "" && n.Relationships != nil {
+				edges, err := n.Relationships.ListIncoming(context.Background(), r.id, relationships.EdgeOwns)
+				if err == nil {
+					for _, e := range edges {
+						if e.SrcKind == relationships.KindManifest {
+							lt.ManifestID = e.SrcID
+							break
+						}
+					}
+				}
 			}
 
 			// task_runs row for the live run (one is created at run start

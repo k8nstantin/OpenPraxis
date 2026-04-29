@@ -1,14 +1,87 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
+
+// taskIDsForManifest returns every task owned by manifestID, sourced
+// from the relationships SCD-2 store.
+func taskIDsForManifest(n *node.Node, manifestID string) ([]string, error) {
+	if n == nil || n.Relationships == nil {
+		return nil, nil
+	}
+	edges, err := n.Relationships.ListOutgoing(context.Background(), manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if e.DstKind == relationships.KindTask {
+			ids = append(ids, e.DstID)
+		}
+	}
+	return ids, nil
+}
+
+// taskIDsForProduct walks the product DAG (umbrella + sub-products via
+// EdgeDependsOn) then gathers every owned manifest + every owned task
+// purely through the relationships store.
+func taskIDsForProduct(n *node.Node, productID string) ([]string, error) {
+	if n == nil || n.Relationships == nil {
+		return nil, nil
+	}
+	ctx := context.Background()
+	walkRows, err := n.Relationships.Walk(ctx, productID, relationships.KindProduct,
+		[]string{relationships.EdgeDependsOn}, relationships.MaxWalkDepth)
+	if err != nil {
+		return nil, err
+	}
+	productIDs := make([]string, 0, len(walkRows))
+	for _, r := range walkRows {
+		if r.Kind == relationships.KindProduct {
+			productIDs = append(productIDs, r.ID)
+		}
+	}
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	manifestEdges, err := n.Relationships.ListOutgoingForMany(ctx, productIDs, relationships.EdgeOwns)
+	if err != nil {
+		return nil, err
+	}
+	manifestIDs := make([]string, 0, 16)
+	for _, edges := range manifestEdges {
+		for _, e := range edges {
+			if e.DstKind == relationships.KindManifest {
+				manifestIDs = append(manifestIDs, e.DstID)
+			}
+		}
+	}
+	if len(manifestIDs) == 0 {
+		return nil, nil
+	}
+	taskEdges, err := n.Relationships.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
+	if err != nil {
+		return nil, err
+	}
+	taskIDs := make([]string, 0, 16)
+	for _, edges := range taskEdges {
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				taskIDs = append(taskIDs, e.DstID)
+			}
+		}
+	}
+	return taskIDs, nil
+}
 
 // GET /api/run-stats?entity_kind=...&entity_id=...&as_of=<rfc3339>
 //
@@ -51,7 +124,8 @@ func apiRunStats(n *node.Node) http.HandlerFunc {
 		}
 
 		db := n.Tasks.DB()
-		runs, err := selectRunsForEntity(db, kind, entityID, asOfClause, asOfStr, args)
+		_ = args // kept for future extension; unused after PR/M3 cleanup
+		runs, err := selectRunsForEntity(n, db, kind, entityID, asOfClause, asOfStr)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -76,60 +150,65 @@ func apiRunStats(n *node.Node) http.HandlerFunc {
 	}
 }
 
-// selectRunsForEntity returns task_runs scoped to the entity. Walks the
-// product DAG when kind=product so a parent product's stats include all
-// descendants — mirrors the existing EnrichRecursiveCosts walk.
-func selectRunsForEntity(db *sql.DB, kind, entityID, asOfClause, asOfStr string, _ []any) ([]task.TaskRun, error) {
+// selectRunsForEntity returns task_runs scoped to the entity. Resolves
+// the manifest/product cases through the relationships store (PR/M3
+// dropped tasks.manifest_id and manifests.project_id from the schema).
+func selectRunsForEntity(n *node.Node, db *sql.DB, kind, entityID, asOfClause, asOfStr string) ([]task.TaskRun, error) {
 	cols := taskRunColumnsForSelect("tr")
 
-	var (
-		query string
-		args  []any
-	)
 	switch kind {
 	case "task":
-		query = `SELECT ` + cols + ` FROM task_runs tr WHERE tr.task_id = ?` + asOfClause + ` ORDER BY tr.started_at DESC LIMIT 500`
-		args = append(args, entityID)
+		query := `SELECT ` + cols + ` FROM task_runs tr WHERE tr.task_id = ?` + asOfClause + ` ORDER BY tr.started_at DESC LIMIT 500`
+		args := []any{entityID}
 		if asOfStr != "" {
 			args = append(args, asOfStr)
 		}
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanTaskRunsRows(rows)
 	case "manifest":
-		query = `SELECT ` + cols + ` FROM task_runs tr
-			INNER JOIN tasks t ON t.id = tr.task_id AND t.deleted_at = ''
-			WHERE t.manifest_id = ?` + asOfClause + ` ORDER BY tr.started_at DESC LIMIT 500`
-		args = append(args, entityID)
-		if asOfStr != "" {
-			args = append(args, asOfStr)
+		taskIDs, err := taskIDsForManifest(n, entityID)
+		if err != nil || len(taskIDs) == 0 {
+			return []task.TaskRun{}, err
 		}
+		return runsByTaskIDs(db, cols, taskIDs, asOfClause, asOfStr)
 	case "product":
-		// Mirror product.Store.EnrichRecursiveCosts — recursive descend
-		// into descendant products via product_dependencies, then sum
-		// task_runs under any descendant's manifests.
-		query = `WITH RECURSIVE descendants(id) AS (
-				SELECT ?
-				UNION ALL
-				SELECT pd.depends_on_product_id FROM product_dependencies pd
-				INNER JOIN descendants d ON pd.product_id = d.id
-			)
-			SELECT ` + cols + ` FROM task_runs tr
-			INNER JOIN tasks t ON t.id = tr.task_id AND t.deleted_at = ''
-			INNER JOIN manifests m ON m.id = t.manifest_id AND m.deleted_at = ''
-			INNER JOIN descendants d ON d.id = m.project_id
-			WHERE 1=1` + asOfClause + ` ORDER BY tr.started_at DESC LIMIT 500`
-		args = append(args, entityID)
-		if asOfStr != "" {
-			args = append(args, asOfStr)
+		// Walk the product DAG (umbrella → sub-products) via
+		// EdgeDependsOn and gather every owned manifest, then every
+		// owned task, then run the same task_runs aggregate as the
+		// task case.
+		taskIDs, err := taskIDsForProduct(n, entityID)
+		if err != nil || len(taskIDs) == 0 {
+			return []task.TaskRun{}, err
 		}
+		return runsByTaskIDs(db, cols, taskIDs, asOfClause, asOfStr)
 	default:
 		return nil, errBadKind(kind)
 	}
+}
 
-	rows, err := db.Query(query, args...)
+func runsByTaskIDs(db *sql.DB, cols string, taskIDs []string, asOfClause, asOfStr string) ([]task.TaskRun, error) {
+	if len(taskIDs) == 0 {
+		return []task.TaskRun{}, nil
+	}
+	ph := strings.Repeat("?,", len(taskIDs))
+	ph = ph[:len(ph)-1]
+	args := make([]any, 0, len(taskIDs)+1)
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	if asOfStr != "" {
+		args = append(args, asOfStr)
+	}
+	q := `SELECT ` + cols + ` FROM task_runs tr WHERE tr.task_id IN (` + ph + `)` + asOfClause + ` ORDER BY tr.started_at DESC LIMIT 500`
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	return scanTaskRunsRows(rows)
 }
 
