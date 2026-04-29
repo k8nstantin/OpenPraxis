@@ -273,10 +273,10 @@ function AIStatsPanel() {
           cost saving lives. Stacked bar shows the four token kinds;
           gauge shows the ratio cached_read / (input + cached_read). */}
       <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-3'>
-        <ChartTile label='Cache hit ratio' note='cache_read / (input + cache_read)'>
+        <ChartTile label='Cache hit ratio' note='cache_read / (cache_read + cache_create)'>
           <CacheHitGauge
             cacheRead={s?.cache_read_tokens_total ?? 0}
-            input={s?.input_tokens_total ?? 0}
+            cacheCreate={s?.cache_create_tokens_total ?? 0}
           />
         </ChartTile>
         <ChartTile label='Token split' note='all-time' span={2}>
@@ -374,17 +374,18 @@ function CumulativeTrend({
   )
 }
 
-// CacheHitGauge — radial showing what fraction of input-side tokens
-// came from the cache. Higher = better (cheaper, faster). Below 50%
-// is amber, below 25% is rose.
+// CacheHitGauge — radial showing what fraction of cache traffic was
+// reuse (cache_read) vs new entries written (cache_create). Higher =
+// the prompt cache is amortising well across runs. Below 50% is
+// amber, below 25% is rose.
 function CacheHitGauge({
   cacheRead,
-  input,
+  cacheCreate,
 }: {
   cacheRead: number
-  input: number
+  cacheCreate: number
 }) {
-  const denom = cacheRead + input
+  const denom = cacheRead + cacheCreate
   const ratio = denom > 0 ? cacheRead / denom : 0
   const pct = ratio * 100
   const color = pct >= 75 ? '#10b981' : pct >= 50 ? '#a78bfa' : pct >= 25 ? '#f59e0b' : '#f43f5e'
