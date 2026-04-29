@@ -121,11 +121,14 @@ function useActionsRecent() {
   })
 }
 
-// Top-level panel container — three side-by-side cards on wide screens,
-// stacked on narrow.
+// Top-level panel container — three stacked full-width cards.
+// Order: Tasks → AI Stats → System Stats. Each panel gets the full
+// row so chart titles + content breathe; stacking also makes the
+// scrolling story coherent (you scroll through tasks, then agents,
+// then host metrics, top-down).
 export function RunningTasksPanel() {
   return (
-    <div className='grid grid-cols-1 gap-3 xl:grid-cols-3'>
+    <div className='space-y-3'>
       <TasksPanel />
       <AIStatsPanel />
       <SystemPanel />
@@ -155,7 +158,7 @@ function TasksPanel() {
         },
       ]}
     >
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4'>
         <ChartTile label='Running count' note='0…N tasks live'>
           <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
         </ChartTile>
@@ -242,7 +245,7 @@ function AIStatsPanel() {
     >
       {/* Three trend charts: cumulative cost, cumulative turns,
           cumulative actions — all over the live polling history. */}
-      <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-3'>
+      <div className='mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3'>
         <ChartTile label='Cumulative cost' note='live trend'>
           <CumulativeTrend
             data={history.map((h) => [h.ts, h.cost])}
@@ -664,7 +667,7 @@ function SystemPanel() {
 
   return (
     <PanelCard
-      title='System'
+      title='System Stats'
       badge='host'
       badgeTone='sky'
       stats={[
@@ -680,7 +683,7 @@ function SystemPanel() {
         { label: 'Load·1m', value: last ? last.load_1m.toFixed(2) : '—' },
       ]}
     >
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4'>
         <ChartTile label='CPU' note='last 4 min'>
           <SystemSparkline series={series} field='cpu_pct' color='#34d399' unit='%' />
         </ChartTile>
