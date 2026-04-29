@@ -15,7 +15,7 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react'
-import dagre from '@dagrejs/dagre'
+import ELK from 'elkjs/lib/elk.bundled.js'
 import { Pencil, Plus, Unlink, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -108,17 +108,18 @@ type EntityNodeData = {
 // border palette across all three for visual continuity. Each MUST
 // include <Handle> components — without them React Flow renders the
 // edge marker defs but not the path connecting source to target.
+// LR layout: edges enter from the left, exit on the right.
 function NodeHandles() {
   return (
     <>
       <Handle
         type='target'
-        position={Position.Top}
+        position={Position.Left}
         style={{ opacity: 0, pointerEvents: 'none' }}
       />
       <Handle
         type='source'
-        position={Position.Bottom}
+        position={Position.Right}
         style={{ opacity: 0, pointerEvents: 'none' }}
       />
     </>
@@ -207,24 +208,67 @@ const NODE_TYPES = {
 // dagre top→bottom layout. Returns a fresh nodes/edges pair with
 // computed positions. Nodes are anchor-centered; we shift back by
 // half the box so React Flow's top-left convention lines up.
-const NODE_W = 180
+const NODE_W = 170
 const NODE_H = 56
-function layout(nodes: Node[], edges: Edge[], dir: 'TB' | 'LR' = 'TB') {
-  const g = new dagre.graphlib.Graph()
-  g.setGraph({ rankdir: dir, nodesep: 60, ranksep: 80 })
-  g.setDefaultEdgeLabel(() => ({}))
-  for (const n of nodes) g.setNode(n.id, { width: NODE_W, height: NODE_H })
-  for (const e of edges) g.setEdge(e.source, e.target)
-  dagre.layout(g)
-  return {
-    nodes: nodes.map((n) => {
-      const p = g.node(n.id)
-      return {
-        ...n,
-        position: { x: p.x - NODE_W / 2, y: p.y - NODE_H / 2 },
-      }
-    }),
-    edges,
+const elk = new ELK()
+
+// ELK.js layered layout — handles wide fan-out (umbrella → 20+
+// sub-products) gracefully where dagre would explode the sibling row
+// across the canvas. The 'layered' algorithm produces the same
+// hierarchical look but with smarter edge routing + node ordering.
+//
+// Direction:
+//   - 'RIGHT' (left → right) — vertical stacks per rank; works best
+//     for trees with wide siblings.
+//   - 'DOWN' (top → bottom) — classic org-chart shape; better for
+//     narrow trees.
+//
+// Returns a Promise — caller awaits or wraps in useState/useEffect.
+async function layoutELK(
+  nodes: Node[],
+  edges: Edge[],
+  dir: 'RIGHT' | 'DOWN' = 'RIGHT'
+): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  if (nodes.length === 0) return { nodes, edges }
+  const isHorizontal = dir === 'RIGHT'
+  const graph = {
+    id: 'root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': dir,
+      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+      'elk.spacing.nodeNode': '24',
+      'elk.layered.crossingMinimization.semiInteractive': 'true',
+      'elk.edgeRouting': 'POLYLINE',
+    },
+    children: nodes.map((n) => ({
+      id: n.id,
+      width: NODE_W,
+      height: NODE_H,
+    })),
+    edges: edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+  }
+  try {
+    const laid = await elk.layout(graph)
+    const positionMap = new Map<string, { x: number; y: number }>()
+    for (const c of laid.children ?? []) {
+      positionMap.set(c.id!, { x: c.x ?? 0, y: c.y ?? 0 })
+    }
+    return {
+      nodes: nodes.map((n) => {
+        const p = positionMap.get(n.id) ?? { x: 0, y: 0 }
+        return {
+          ...n,
+          position: p,
+          targetPosition: isHorizontal ? Position.Left : Position.Top,
+          sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
+        }
+      }),
+      edges,
+    }
+  } catch (err) {
+    console.error('elk layout failed', err)
+    return { nodes, edges }
   }
 }
 
@@ -521,11 +565,20 @@ function DAGTabInner({
     return acc
   }, [graphResp.data, entityId])
 
-  const laidOut = useMemo(
-    () => layout(graph.nodes, graph.edges, 'TB'),
-    [graph]
-  )
-
+  // ELK.js layout is async. Hold the result in state, recompute on
+  // graph change. Initial paint shows nodes at (0,0) for one frame
+  // until ELK returns — fine for our graph sizes (typically < 200ms).
+  const [laidOut, setLaidOut] = useState<GraphInput>({ nodes: graph.nodes, edges: graph.edges })
+  useEffect(() => {
+    let cancelled = false
+    layoutELK(graph.nodes, graph.edges, 'RIGHT').then((res) => {
+      if (cancelled) return
+      setLaidOut(res)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [graph])
   // Refit whenever the graph changes — same UX as cytoscape's
   // layout.fit:true on init.
   useEffect(() => {
