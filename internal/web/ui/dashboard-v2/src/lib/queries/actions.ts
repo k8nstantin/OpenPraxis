@@ -47,14 +47,15 @@ export function useActions(params: UseActionsParams) {
       const res = await fetch(url.toString().replace(window.location.origin, ''))
       if (!res.ok) throw new Error(`actions/search → ${res.status}`)
       const env = (await res.json()) as ActionsSearchResponse
-      // Backend returns null when total === 0; normalise to [] so
-      // consumers can map without a guard every time.
       if (!env.items) env.items = []
       return env
     },
-    // Cheap to refetch — pagination state is in the queryKey, so a
-    // change to offset / limit / q creates a fresh entry.
-    staleTime: 5 * 1000,
-    keepPreviousData: true,
-  } as never) // keepPreviousData supported across versions; cast pacifies older typings
+    // Live-tail behaviour: poll the FIRST page every 2s so new actions
+    // surface as they're recorded by the hook. Deeper pages don't poll
+    // (the operator is browsing history; refetch would be jarring) — we
+    // only auto-refresh at offset 0.
+    refetchInterval: params.offset === 0 ? 2000 : false,
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+  })
 }

@@ -60,21 +60,26 @@ export function ActionsLogPage() {
 
   const page = useActions({ q: debounced, offset, limit: PAGE_SIZE })
 
-  // Accumulate pages so "Load more" works without losing earlier rows.
-  // Keyed by (q, offset) — the queryKey already covers cache-side; here
-  // we're just stitching the pages on the client for the visible feed.
+  // Accumulate rows by id so:
+  //   - "Load more" (offset advances) appends without dups
+  //   - Polling on the first page (offset=0, runs every 2s) prepends
+  //     newly-recorded actions without trashing earlier-loaded pages
+  // Sorted by id DESC so freshly-arrived rows surface at the top of
+  // the feed automatically.
   useEffect(() => {
     if (!page.data) return
+    const incoming = page.data.items ?? []
     setAccumulated((prev) => {
-      // If offset===0 (new query), replace. Otherwise append.
-      if (offset === 0) return page.data!.items ?? []
-      const existing = new Set(prev.map((a) => a.id))
-      const additions = (page.data!.items ?? []).filter(
-        (a) => !existing.has(a.id)
-      )
-      return prev.concat(additions)
+      const byId = new Map<string, ActionRow>()
+      for (const a of prev) byId.set(a.id, a)
+      for (const a of incoming) byId.set(a.id, a)
+      const merged = Array.from(byId.values())
+      // Action ids are integer strings — numeric sort DESC keeps the
+      // newest row at index 0, matching the server-side ORDER BY.
+      merged.sort((a, b) => Number(b.id) - Number(a.id))
+      return merged
     })
-  }, [page.data, offset])
+  }, [page.data])
 
   const total = page.data?.total ?? 0
   const hasMore = page.data?.has_more ?? false
