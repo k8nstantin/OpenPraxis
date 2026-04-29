@@ -148,7 +148,8 @@ func apiTasksByPeer(n *node.Node) http.HandlerFunc {
 func apiTaskList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		tasks, err := n.Tasks.List(status, 50)
+		// limit=0 → unbounded. v2 list pane paginates client-side.
+		tasks, err := n.Tasks.List(status, 0)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return

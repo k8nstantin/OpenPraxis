@@ -117,7 +117,10 @@ func apiProductsByPeer(n *node.Node) http.HandlerFunc {
 func apiProductList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		products, err := n.Products.List(status, 50)
+		// limit=0 → unbounded. The v2 list pane paginates client-side
+		// (10 visible + Load more in 10-increments); a backend cap
+		// silently truncates.
+		products, err := n.Products.List(status, 0)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return

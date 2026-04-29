@@ -1,12 +1,15 @@
 package task
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // CostAggregation holds aggregated cost data for a time period.
@@ -279,6 +282,63 @@ func (s *Store) SumCostSince(productID string, since time.Time) (float64, error)
 	if productID == "" {
 		return 0, nil
 	}
+	// Resolve manifest → task chain via the relationships store.
+	// Falls back to the legacy m.project_id / t.manifest_id JOINs when
+	// rels backend isn't wired OR when rels has no rows for this
+	// product (test bootstrap path that writes only to legacy
+	// columns).
+	if s.rels != nil {
+		ctx := context.Background()
+		manifestEdges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeOwns)
+		if err != nil {
+			return 0, err
+		}
+		manifestIDs := make([]string, 0, len(manifestEdges))
+		for _, e := range manifestEdges {
+			if e.DstKind == relationships.KindManifest {
+				manifestIDs = append(manifestIDs, e.DstID)
+			}
+		}
+		if len(manifestIDs) == 0 {
+			// Empty result — could be (a) genuinely no manifests under
+			// this product, or (b) test fixture that wrote only to
+			// manifests.project_id without the EdgeOwns row. Fall
+			// through to legacy JOIN to disambiguate; legacy returns 0
+			// in case (a) too, so behaviour is identical.
+			goto legacyFallback
+		}
+		taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
+		if err != nil {
+			return 0, err
+		}
+		taskIDs := []string{}
+		for _, edges := range taskEdgesByManifest {
+			for _, e := range edges {
+				if e.DstKind == relationships.KindTask {
+					taskIDs = append(taskIDs, e.DstID)
+				}
+			}
+		}
+		if len(taskIDs) == 0 {
+			return 0, nil
+		}
+		ph := strings.Repeat("?,", len(taskIDs))
+		ph = ph[:len(ph)-1]
+		args := make([]any, 0, len(taskIDs)+1)
+		for _, id := range taskIDs {
+			args = append(args, id)
+		}
+		args = append(args, since.UTC().Format(time.RFC3339))
+		var total float64
+		err = s.db.QueryRow(`SELECT COALESCE(SUM(cost_usd), 0)
+			FROM task_runs WHERE task_id IN (`+ph+`) AND started_at >= ?`, args...).Scan(&total)
+		if err != nil {
+			return 0, fmt.Errorf("sum cost since: %w", err)
+		}
+		return total, nil
+	}
+legacyFallback:
+	// Legacy fallback.
 	var total float64
 	err := s.db.QueryRow(`SELECT COALESCE(SUM(tr.cost_usd), 0)
 		FROM task_runs tr

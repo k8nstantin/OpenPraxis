@@ -187,8 +187,15 @@ func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
 }
 
 // List returns all tasks.
+//
+// limit semantics:
+//   - limit > 0  → cap at that many rows
+//   - limit == 0 → UNBOUNDED (return every matching row). Used by the
+//     v2 dashboard list pane which paginates client-side at
+//     PAGE_SIZE=10 with "Load more" — the backend MUST return all rows.
+//   - limit < 0  → defensively treated as 50 (likely a caller bug)
 func (s *Store) List(status string, limit int) ([]*Task, error) {
-	if limit <= 0 {
+	if limit < 0 {
 		limit = 50
 	}
 	query := `SELECT ` + taskColumns + ` FROM tasks WHERE deleted_at = ''`
@@ -197,8 +204,11 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 		query += ` AND status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'waiting' THEN 1 WHEN 'pending' THEN 2 WHEN 'completed' THEN 3 WHEN 'failed' THEN 4 WHEN 'cancelled' THEN 5 ELSE 6 END, updated_at DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'waiting' THEN 1 WHEN 'pending' THEN 2 WHEN 'completed' THEN 3 WHEN 'failed' THEN 4 WHEN 'cancelled' THEN 5 ELSE 6 END, updated_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

@@ -163,8 +163,16 @@ func (s *Store) Get(id string) (*Product, error) {
 }
 
 // List returns products sorted by updated_at.
+//
+// limit semantics:
+//   - limit > 0  → cap at that many rows
+//   - limit == 0 → UNBOUNDED (return every matching row). Used by the
+//     dashboard list pane which paginates client-side at PAGE_SIZE=10
+//     with "Load more" → the backend MUST return every row, not the
+//     prior arbitrary 50-row cap that silently truncated.
+//   - limit < 0  → defensively treated as 50 (likely a caller bug)
 func (s *Store) List(status string, limit int) ([]*Product, error) {
-	if limit <= 0 {
+	if limit < 0 {
 		limit = 50
 	}
 
@@ -176,8 +184,11 @@ func (s *Store) List(status string, limit int) ([]*Product, error) {
 		args = append(args, status)
 	}
 
-	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -274,24 +285,76 @@ func (s *Store) EnrichRecursiveCosts(p *Product) {
 	for i, id := range descendantIDs {
 		args[i] = id
 	}
+	// Resolve owned manifests + their tasks via the relationships store
+	// instead of the legacy `m.project_id` / `t.manifest_id` JOINs.
+	// Owns(product→manifest) for each descendant product, then
+	// Owns(manifest→task) for each manifest. Aggregate task_runs over
+	// the union of task IDs.
+	manifestEdges, err := s.rels.ListOutgoingForMany(ctx, descendantIDs, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	manifestIDs := []string{}
+	for _, edges := range manifestEdges {
+		for _, e := range edges {
+			if e.DstKind == relationships.KindManifest {
+				manifestIDs = append(manifestIDs, e.DstID)
+			}
+		}
+	}
+	if len(manifestIDs) == 0 {
+		p.TotalManifests = 0
+		p.TotalTasks = 0
+		p.TotalTurns = 0
+		p.TotalCost = 0
+		p.TotalActions = 0
+		p.TotalTokens = 0
+		return
+	}
+	taskEdges, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	taskIDs := []string{}
+	for _, edges := range taskEdges {
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				taskIDs = append(taskIDs, e.DstID)
+			}
+		}
+	}
+	if len(taskIDs) == 0 {
+		// Manifests exist but no tasks; report manifest count.
+		p.TotalManifests = len(manifestIDs)
+		p.TotalTasks = 0
+		p.TotalTurns = 0
+		p.TotalCost = 0
+		p.TotalActions = 0
+		p.TotalTokens = 0
+		return
+	}
+	taskPH := strings.Repeat("?,", len(taskIDs))
+	taskPH = taskPH[:len(taskPH)-1]
+	taskArgs := make([]any, len(taskIDs))
+	for i, id := range taskIDs {
+		taskArgs[i] = id
+	}
 	row := s.db.QueryRow(fmt.Sprintf(`
 		SELECT
-			COUNT(DISTINCT m.id),
 			COUNT(DISTINCT t.id),
 			COALESCE(SUM(tr.turns), 0),
 			COALESCE(SUM(tr.cost_usd), 0),
 			COALESCE(SUM(tr.actions), 0),
 			COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
-		FROM manifests m
-		LEFT JOIN tasks t ON t.manifest_id = m.id AND t.deleted_at = ''
+		FROM tasks t
 		LEFT JOIN task_runs tr ON tr.task_id = t.id
-		WHERE m.project_id IN (%s) AND m.deleted_at = ''`, placeholders),
-		args...,
+		WHERE t.id IN (%s) AND t.deleted_at = ''`, taskPH),
+		taskArgs...,
 	)
-	var manifests, tasks, turns, actions, tokens int
+	var tasks, turns, actions, tokens int
 	var cost float64
-	if err := row.Scan(&manifests, &tasks, &turns, &cost, &actions, &tokens); err == nil {
-		p.TotalManifests = manifests
+	if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
+		p.TotalManifests = len(manifestIDs)
 		p.TotalTasks = tasks
 		p.TotalTurns = turns
 		p.TotalCost = cost
@@ -300,7 +363,11 @@ func (s *Store) EnrichRecursiveCosts(p *Product) {
 	}
 }
 
-// EnrichWithCosts populates TotalManifests, TotalTasks, TotalTurns, TotalCost from manifests → tasks → task_runs.
+// EnrichWithCosts populates TotalManifests, TotalTasks, TotalTurns,
+// TotalCost from manifests → tasks → task_runs. Direct-only (no
+// recursive descend) — list endpoints use this for the cheaper path.
+// Reads ownership through the relationships store; legacy JOIN is the
+// fallback when rels isn't wired.
 func (s *Store) EnrichWithCosts(products []*Product) {
 	if len(products) == 0 {
 		return
@@ -312,6 +379,98 @@ func (s *Store) EnrichWithCosts(products []*Product) {
 		ids[i] = p.ID
 	}
 
+	if s.rels != nil {
+		ctx := context.Background()
+		ownsByProduct, err := s.rels.ListOutgoingForMany(ctx, ids, relationships.EdgeOwns)
+		if err == nil {
+			// (manifestID → productID) so a single SQL aggregate over
+			// task_runs joined via tasks.manifest_id rolls up by product
+			// without N+1.
+			manifestToProduct := make(map[string]string)
+			perProductManifestCount := make(map[string]int)
+			allManifestIDs := []string{}
+			for pid, edges := range ownsByProduct {
+				for _, e := range edges {
+					if e.DstKind != relationships.KindManifest {
+						continue
+					}
+					manifestToProduct[e.DstID] = pid
+					perProductManifestCount[pid]++
+					allManifestIDs = append(allManifestIDs, e.DstID)
+				}
+			}
+			for pid, n := range perProductManifestCount {
+				if p, ok := pMap[pid]; ok {
+					p.TotalManifests = n
+				}
+			}
+			if len(allManifestIDs) == 0 {
+				return
+			}
+			// Owns(manifest→task) for the manifests we found.
+			taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, allManifestIDs, relationships.EdgeOwns)
+			if err != nil {
+				return
+			}
+			taskToProduct := make(map[string]string)
+			perProductTaskCount := make(map[string]int)
+			allTaskIDs := []string{}
+			for mID, edges := range taskEdgesByManifest {
+				pid, ok := manifestToProduct[mID]
+				if !ok {
+					continue
+				}
+				for _, e := range edges {
+					if e.DstKind != relationships.KindTask {
+						continue
+					}
+					taskToProduct[e.DstID] = pid
+					perProductTaskCount[pid]++
+					allTaskIDs = append(allTaskIDs, e.DstID)
+				}
+			}
+			for pid, n := range perProductTaskCount {
+				if p, ok := pMap[pid]; ok {
+					p.TotalTasks = n
+				}
+			}
+			if len(allTaskIDs) == 0 {
+				return
+			}
+			ph := strings.Repeat("?,", len(allTaskIDs))
+			ph = ph[:len(ph)-1]
+			tArgs := make([]any, len(allTaskIDs))
+			for i, id := range allTaskIDs {
+				tArgs[i] = id
+			}
+			rows, err := s.db.Query(`SELECT t.id,
+				COALESCE(SUM(tr.turns), 0),
+				COALESCE(SUM(tr.cost_usd), 0)
+				FROM tasks t LEFT JOIN task_runs tr ON tr.task_id = t.id
+				WHERE t.id IN (`+ph+`) AND t.deleted_at = ''
+				GROUP BY t.id`, tArgs...)
+			if err != nil {
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var tid string
+				var turns int
+				var cost float64
+				if err := rows.Scan(&tid, &turns, &cost); err == nil {
+					if pid, ok := taskToProduct[tid]; ok {
+						if p, ok := pMap[pid]; ok {
+							p.TotalTurns += turns
+							p.TotalCost += cost
+						}
+					}
+				}
+			}
+			return
+		}
+	}
+
+	// Legacy fallback path.
 	placeholders := strings.Repeat("?,", len(ids))
 	placeholders = placeholders[:len(placeholders)-1]
 	args := make([]any, len(ids))

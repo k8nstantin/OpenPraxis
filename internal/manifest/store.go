@@ -242,10 +242,52 @@ func (s *Store) Get(id string) (*Manifest, error) {
 	return m, err
 }
 
-// ListByProject returns manifests belonging to a project.
+// ListByProject returns manifests belonging to a project. Reads
+// canonical ownership from the relationships SCD-2 store via
+// `EdgeOwns(product → manifest)`. Falls back to the legacy
+// `manifests.project_id` column when the relationships backend isn't
+// wired (test fixtures + boot path before SetRelationshipsBackend).
 func (s *Store) ListByProject(projectID string, limit int) ([]*Manifest, error) {
 	if limit <= 0 {
 		limit = 50
+	}
+	if s.rels != nil {
+		ctx := context.Background()
+		edges, err := s.rels.ListOutgoing(ctx, projectID, relationships.EdgeOwns)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(edges))
+		for _, e := range edges {
+			if e.DstKind == relationships.KindManifest {
+				ids = append(ids, e.DstID)
+			}
+		}
+		if len(ids) == 0 {
+			return nil, nil
+		}
+		placeholders := strings.Repeat("?,", len(ids))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, 0, len(ids)+1)
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		args = append(args, limit)
+		rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
+			FROM manifests WHERE id IN (`+placeholders+`) AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var results []*Manifest
+		for rows.Next() {
+			m, err := scanManifestRows(rows)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, m)
+		}
+		return results, rows.Err()
 	}
 	rows, err := s.db.Query(`SELECT id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at
 		FROM manifests WHERE project_id = ? AND deleted_at = '' ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'open' THEN 1 WHEN 'closed' THEN 2 WHEN 'archive' THEN 3 ELSE 4 END, updated_at DESC LIMIT ?`, projectID, limit)
@@ -355,11 +397,80 @@ func (s *Store) EnrichWithCosts(manifests []*Manifest) {
 		return
 	}
 	mMap := make(map[string]*Manifest, len(manifests))
+	ids := make([]string, 0, len(manifests))
 	for _, m := range manifests {
 		mMap[m.ID] = m
+		ids = append(ids, m.ID)
 	}
 
-	// Aggregate cost from task_runs via tasks.manifest_id
+	// Resolve task ownership via the unified relationships store. Falls
+	// back to the legacy tasks.manifest_id JOIN when the relationships
+	// backend isn't wired (test bootstrap path).
+	if s.rels != nil {
+		ctx := context.Background()
+		ownsByMan, err := s.rels.ListOutgoingForMany(ctx, ids, relationships.EdgeOwns)
+		if err != nil {
+			return
+		}
+		// Flatten to (taskID → manifestID) so a single SQL aggregate over
+		// task_runs yields the per-manifest totals without N+1.
+		taskToMan := make(map[string]string)
+		allTaskIDs := []string{}
+		for mID, edges := range ownsByMan {
+			for _, e := range edges {
+				if e.DstKind != relationships.KindTask {
+					continue
+				}
+				taskToMan[e.DstID] = mID
+				allTaskIDs = append(allTaskIDs, e.DstID)
+			}
+		}
+		if len(allTaskIDs) == 0 {
+			return
+		}
+		placeholders := strings.Repeat("?,", len(allTaskIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(allTaskIDs))
+		for i, id := range allTaskIDs {
+			args[i] = id
+		}
+		rows, err := s.db.Query(`SELECT t.id, COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
+			FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
+			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''
+			GROUP BY t.id`, args...)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		// Initialise per-manifest task counts from the ownership graph;
+		// tasks with no runs still count toward TotalTasks.
+		for mID := range mMap {
+			edges := ownsByMan[mID]
+			n := 0
+			for _, e := range edges {
+				if e.DstKind == relationships.KindTask {
+					n++
+				}
+			}
+			mMap[mID].TotalTasks = n
+		}
+		for rows.Next() {
+			var tID string
+			var turns int
+			var cost float64
+			if err := rows.Scan(&tID, &turns, &cost); err == nil {
+				if mID, ok := taskToMan[tID]; ok {
+					if m, ok := mMap[mID]; ok {
+						m.TotalTurns += turns
+						m.TotalCost += cost
+					}
+				}
+			}
+		}
+		return
+	}
+
+	// Legacy fallback — only reached when rels backend isn't wired.
 	rows, err := s.db.Query(`SELECT t.manifest_id, COUNT(DISTINCT t.id), COALESCE(SUM(tr.turns),0), COALESCE(SUM(tr.cost_usd),0)
 		FROM tasks t LEFT JOIN task_runs tr ON t.id = tr.task_id
 		WHERE t.manifest_id != '' AND t.deleted_at = ''
@@ -393,6 +504,59 @@ func (s *Store) EnrichRecursiveCosts(m *Manifest) {
 	if m == nil {
 		return
 	}
+	// Resolve owned task IDs through the relationships store; aggregate
+	// task_runs WHERE task_id IN (...). Falls back to the legacy
+	// tasks.manifest_id JOIN when rels isn't wired.
+	if s.rels != nil {
+		ctx := context.Background()
+		edges, err := s.rels.ListOutgoing(ctx, m.ID, relationships.EdgeOwns)
+		if err != nil {
+			return
+		}
+		taskIDs := make([]string, 0, len(edges))
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				taskIDs = append(taskIDs, e.DstID)
+			}
+		}
+		if len(taskIDs) == 0 {
+			m.TotalTasks = 0
+			m.TotalTurns = 0
+			m.TotalCost = 0
+			m.TotalActions = 0
+			m.TotalTokens = 0
+			return
+		}
+		placeholders := strings.Repeat("?,", len(taskIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(taskIDs))
+		for i, id := range taskIDs {
+			args[i] = id
+		}
+		row := s.db.QueryRow(`
+			SELECT
+				COUNT(DISTINCT t.id),
+				COALESCE(SUM(tr.turns), 0),
+				COALESCE(SUM(tr.cost_usd), 0),
+				COALESCE(SUM(tr.actions), 0),
+				COALESCE(SUM(tr.input_tokens + tr.output_tokens + tr.cache_read_tokens + tr.cache_create_tokens), 0)
+			FROM tasks t
+			LEFT JOIN task_runs tr ON tr.task_id = t.id
+			WHERE t.id IN (`+placeholders+`) AND t.deleted_at = ''`,
+			args...,
+		)
+		var tasks, turns, actions, tokens int
+		var cost float64
+		if err := row.Scan(&tasks, &turns, &cost, &actions, &tokens); err == nil {
+			m.TotalTasks = tasks
+			m.TotalTurns = turns
+			m.TotalCost = cost
+			m.TotalActions = actions
+			m.TotalTokens = tokens
+		}
+		return
+	}
+	// Legacy fallback.
 	row := s.db.QueryRow(`
 		SELECT
 			COUNT(DISTINCT t.id),

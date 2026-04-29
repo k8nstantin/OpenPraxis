@@ -62,7 +62,8 @@ func apiManifestsByPeer(n *node.Node) http.HandlerFunc {
 func apiManifestList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		manifests, err := n.Manifests.List(status, 50)
+		// limit=0 → unbounded. v2 list pane paginates client-side.
+		manifests, err := n.Manifests.List(status, 0)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
