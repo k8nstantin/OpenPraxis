@@ -5,17 +5,16 @@ import { Badge } from '@/components/ui/badge'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
 
-// Running-tasks chart panel — eight different ways to look at the
-// same live data so the operator can pick which views earn a
-// permanent slot on the front page. All charts share three pollers:
-//   - GET /api/tasks?status=running    (1.5s)  → list of running tasks
-//   - GET /api/tasks/stats              (3s)   → counts + budget
-//   - GET /api/system-stats?limit=120  (2s)   → host CPU/load/mem time series
+// Front-page panels — three side-by-side cards over live data:
+//   - TasksPanel:   what's running RIGHT NOW (count, list, budget)
+//   - AIStatsPanel: cumulative agent metrics (turns, actions, cost trend)
+//   - SystemPanel:  host-level CPU/mem/load/io
 //
-// Goal of the layout is comparative: render every variant simultaneously
-// at the same height so judgments are about the chart kind, not the
-// data. Once the user picks favourites we collapse to ~3 and promote
-// them to the real overview header strip.
+// Pollers:
+//   /api/tasks?status=running   1.5s   running list
+//   /api/tasks/stats            3s     counts + budget + turns_today
+//   /api/system-stats?limit=120 2s     host time series
+//   /api/actions/search         3s     total + recent for action volume
 
 interface RunningTask {
   id: string
@@ -51,18 +50,25 @@ interface SystemSample {
   disk_write_mbps: number
 }
 
-interface SystemStatsResponse {
-  samples: SystemSample[]
+interface ActionRow {
+  id: string
+  tool_name: string
+  source_node: string
+  created_at: string
+}
+
+interface ActionsSearchEnvelope {
+  items: ActionRow[] | null
+  total: number
 }
 
 function useRunningTasks() {
   return useQuery({
     queryKey: ['running-tasks-list'],
     queryFn: async () => {
-      const res = await fetch('/api/tasks?status=running')
-      if (!res.ok) throw new Error(`tasks → ${res.status}`)
-      const j = (await res.json()) as RunningTask[] | null
-      return j ?? []
+      const r = await fetch('/api/tasks?status=running')
+      if (!r.ok) throw new Error(`tasks → ${r.status}`)
+      return ((await r.json()) as RunningTask[] | null) ?? []
     },
     refetchInterval: 1500,
     staleTime: 0,
@@ -84,7 +90,7 @@ function useSystemStats(window: number = 120) {
     queryFn: async () => {
       const r = await fetch(`/api/system-stats?limit=${window}`)
       if (!r.ok) throw new Error(`system-stats → ${r.status}`)
-      const env = (await r.json()) as SystemStatsResponse
+      const env = (await r.json()) as { samples: SystemSample[] }
       return env.samples ?? []
     },
     refetchInterval: 2000,
@@ -92,100 +98,213 @@ function useSystemStats(window: number = 120) {
   })
 }
 
+function useActionsRecent() {
+  return useQuery({
+    queryKey: ['actions-recent-300'],
+    queryFn: async () => {
+      const r = await fetch('/api/actions/search?limit=300')
+      if (!r.ok) throw new Error(`actions/search → ${r.status}`)
+      return (await r.json()) as ActionsSearchEnvelope
+    },
+    refetchInterval: 3000,
+    staleTime: 0,
+  })
+}
+
+// Top-level panel container — three side-by-side cards on wide screens,
+// stacked on narrow.
 export function RunningTasksPanel() {
+  return (
+    <div className='grid grid-cols-1 gap-3 xl:grid-cols-3'>
+      <TasksPanel />
+      <AIStatsPanel />
+      <SystemPanel />
+    </div>
+  )
+}
+
+// ── 1. Tasks panel ───────────────────────────────────────────────────
+function TasksPanel() {
   const tasks = useRunningTasks()
   const stats = useTasksStats()
-  const samples = useSystemStats(120)
-
   const running = tasks.data ?? []
   const s = stats.data
-  const series = samples.data ?? []
 
   return (
-    <Card className='gap-0 py-0'>
-      <CardHeader className='flex flex-row items-center justify-between gap-2 border-b py-3'>
-        <div className='flex items-center gap-2'>
-          <CardTitle className='text-base'>Running Tasks — chart options</CardTitle>
-          <Badge
-            variant='outline'
-            className='text-[10px] border-emerald-500/40 text-emerald-300'
-          >
-            live
-          </Badge>
-        </div>
-        <div className='flex items-baseline gap-3 text-xs'>
-          <Stat label='Running' value={String(running.length)} accent />
-          <Stat label='Total' value={s ? String(s.tasks_total) : '—'} />
-          <Stat
-            label='Cost today'
-            value={s ? `$${s.cost_today.toFixed(2)} / $${s.daily_budget}` : '—'}
-            tone={s && s.budget_pct > 80 ? 'rose' : undefined}
+    <PanelCard
+      title='Tasks'
+      badge='live'
+      badgeTone='emerald'
+      stats={[
+        { label: 'Running', value: String(running.length), accent: 'emerald' },
+        { label: 'Total', value: s ? String(s.tasks_total) : '—' },
+        {
+          label: 'Budget',
+          value: s ? `${(s.budget_pct ?? 0).toFixed(0)}%` : '—',
+          accent: s && s.budget_pct > 80 ? 'rose' : undefined,
+        },
+      ]}
+    >
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+        <ChartTile label='Running count' note='0…N tasks live'>
+          <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
+        </ChartTile>
+        <ChartTile label='Daily budget' note={`$${s?.cost_today.toFixed(2) ?? '0.00'} of $${s?.daily_budget ?? 100}`}>
+          <BudgetRing used={s?.cost_today ?? 0} budget={s?.daily_budget ?? 100} />
+        </ChartTile>
+        <ChartTile label='Running list' note='one bar per task' span={2}>
+          <RunningTaskBars running={running} />
+        </ChartTile>
+      </div>
+    </PanelCard>
+  )
+}
+
+// ── 2. AI Stats panel ────────────────────────────────────────────────
+function AIStatsPanel() {
+  const stats = useTasksStats()
+  const actions = useActionsRecent()
+  const s = stats.data
+  const env = actions.data
+
+  // Bucket recent actions per hour for the volume bar chart.
+  const hourly = useMemo(() => {
+    const buckets = new Map<string, number>()
+    for (const a of env?.items ?? []) {
+      // YYYY-MM-DD HH key
+      const k = a.created_at.slice(0, 13)
+      buckets.set(k, (buckets.get(k) ?? 0) + 1)
+    }
+    return Array.from(buckets.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-12) // last 12 hours
+  }, [env])
+
+  // Bucket actions by tool_name for the breakdown.
+  const toolBreakdown = useMemo(() => {
+    const t = new Map<string, number>()
+    for (const a of env?.items ?? []) {
+      t.set(a.tool_name, (t.get(a.tool_name) ?? 0) + 1)
+    }
+    return Array.from(t.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+  }, [env])
+
+  return (
+    <PanelCard
+      title='AI Stats'
+      badge='cumulative'
+      badgeTone='violet'
+      stats={[
+        { label: 'Actions·all', value: env ? env.total.toLocaleString() : '—', accent: 'violet' },
+        { label: 'Turns·today', value: s ? String(s.turns_today) : '—' },
+        { label: 'Cost·today', value: s ? `$${s.cost_today.toFixed(2)}` : '—' },
+      ]}
+    >
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+        <ChartTile label='Actions / hour' note='last 12 hr buckets' span={2}>
+          <HourlyBars data={hourly} color='#a78bfa' />
+        </ChartTile>
+        <ChartTile label='Top tools' note='in last 300 actions'>
+          <ToolBreakdownBars data={toolBreakdown} />
+        </ChartTile>
+        <ChartTile label='Turns ratio' note='today / budget'>
+          <TurnsRatio
+            turns={s?.turns_today ?? 0}
+            budget={s?.daily_budget ?? 100}
+            cost={s?.cost_today ?? 0}
           />
-          <Stat label='Turns today' value={s ? String(s.turns_today) : '—'} />
+        </ChartTile>
+      </div>
+    </PanelCard>
+  )
+}
+
+// ── 3. System panel ──────────────────────────────────────────────────
+function SystemPanel() {
+  const samples = useSystemStats(120)
+  const series = samples.data ?? []
+  const last = series.length ? series[series.length - 1] : null
+
+  return (
+    <PanelCard
+      title='System'
+      badge='host'
+      badgeTone='sky'
+      stats={[
+        {
+          label: 'CPU',
+          value: last ? `${last.cpu_pct.toFixed(1)}%` : '—',
+          accent: last && last.cpu_pct > 80 ? 'rose' : 'sky',
+        },
+        {
+          label: 'Mem',
+          value: last ? `${(last.mem_used_mb / 1024).toFixed(1)}G` : '—',
+        },
+        { label: 'Load·1m', value: last ? last.load_1m.toFixed(2) : '—' },
+      ]}
+    >
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+        <ChartTile label='CPU' note='last 4 min'>
+          <SystemSparkline series={series} field='cpu_pct' color='#34d399' unit='%' />
+        </ChartTile>
+        <ChartTile label='Memory' note='used over time'>
+          <SystemArea series={series} />
+        </ChartTile>
+        <ChartTile label='Load avg' note='1m / 5m / 15m'>
+          <LoadLines series={series} />
+        </ChartTile>
+        <ChartTile label='Throughput' note='disk + net mbps'>
+          <ThroughputBars series={series} />
+        </ChartTile>
+      </div>
+    </PanelCard>
+  )
+}
+
+// ── primitives ───────────────────────────────────────────────────────
+function PanelCard({
+  title,
+  badge,
+  badgeTone,
+  stats,
+  children,
+}: {
+  title: string
+  badge?: string
+  badgeTone?: 'emerald' | 'violet' | 'sky'
+  stats?: { label: string; value: string; accent?: 'emerald' | 'violet' | 'sky' | 'rose' }[]
+  children: React.ReactNode
+}) {
+  const badgeBorder =
+    badgeTone === 'emerald'
+      ? 'border-emerald-500/40 text-emerald-300'
+      : badgeTone === 'violet'
+        ? 'border-violet-500/40 text-violet-300'
+        : 'border-sky-500/40 text-sky-300'
+  return (
+    <Card className='gap-0 py-0'>
+      <CardHeader className='flex flex-col gap-2 border-b py-3'>
+        <div className='flex items-center justify-between gap-2'>
+          <div className='flex items-center gap-2'>
+            <CardTitle className='text-sm'>{title}</CardTitle>
+            {badge && (
+              <Badge variant='outline' className={cn('text-[10px]', badgeBorder)}>
+                {badge}
+              </Badge>
+            )}
+          </div>
         </div>
+        {stats && (
+          <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs'>
+            {stats.map((st) => (
+              <Stat key={st.label} {...st} />
+            ))}
+          </div>
+        )}
       </CardHeader>
-      <CardContent className='p-3'>
-        <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4'>
-          <ChartTile
-            label='1 — Running count gauge'
-            note='liquid-fill ring; 0…N tasks'
-          >
-            <RunningGauge running={running.length} max={Math.max(8, running.length + 2)} />
-          </ChartTile>
-
-          <ChartTile
-            label='2 — Budget burn ring'
-            note='daily $ used vs daily budget'
-          >
-            <BudgetRing
-              used={s?.cost_today ?? 0}
-              budget={s?.daily_budget ?? 100}
-            />
-          </ChartTile>
-
-          <ChartTile
-            label='3 — System CPU sparkline'
-            note='last ~4 min'
-          >
-            <SystemSparkline series={series} field='cpu_pct' color='#34d399' unit='%' />
-          </ChartTile>
-
-          <ChartTile
-            label='4 — System memory area'
-            note='used / total over time'
-          >
-            <SystemArea series={series} />
-          </ChartTile>
-
-          <ChartTile
-            label='5 — Load average lines'
-            note='1m / 5m / 15m'
-          >
-            <LoadLines series={series} />
-          </ChartTile>
-
-          <ChartTile
-            label='6 — Disk + network bars'
-            note='live throughput'
-          >
-            <ThroughputBars series={series} />
-          </ChartTile>
-
-          <ChartTile
-            label='7 — Running task list'
-            note='one bar per task'
-          >
-            <RunningTaskBars running={running} />
-          </ChartTile>
-
-          <ChartTile
-            label='8 — CPU radial heat'
-            note='last 60 ticks of CPU'
-          >
-            <CPURadialHeat series={series} />
-          </ChartTile>
-        </div>
-      </CardContent>
+      <CardContent className='p-3'>{children}</CardContent>
     </Card>
   )
 }
@@ -193,19 +312,26 @@ export function RunningTasksPanel() {
 function ChartTile({
   label,
   note,
+  span,
   children,
 }: {
   label: string
   note?: string
+  span?: number
   children: React.ReactNode
 }) {
   return (
-    <div className='flex flex-col gap-1 rounded-md border bg-background/40 p-2'>
+    <div
+      className={cn(
+        'flex flex-col gap-1 rounded-md border bg-background/40 p-2',
+        span === 2 && 'md:col-span-2'
+      )}
+    >
       <div className='flex items-baseline justify-between'>
         <span className='text-xs font-medium'>{label}</span>
         {note && <span className='text-muted-foreground text-[10px]'>{note}</span>}
       </div>
-      <div className='h-[180px]'>{children}</div>
+      <div className='h-[160px]'>{children}</div>
     </div>
   )
 }
@@ -214,12 +340,10 @@ function Stat({
   label,
   value,
   accent,
-  tone,
 }: {
   label: string
   value: string
-  accent?: boolean
-  tone?: 'rose'
+  accent?: 'emerald' | 'violet' | 'sky' | 'rose'
 }) {
   return (
     <div className='flex items-baseline gap-1'>
@@ -227,8 +351,10 @@ function Stat({
       <span
         className={cn(
           'font-mono font-medium tabular-nums',
-          accent && 'text-emerald-300',
-          tone === 'rose' && 'text-rose-300'
+          accent === 'emerald' && 'text-emerald-300',
+          accent === 'violet' && 'text-violet-300',
+          accent === 'sky' && 'text-sky-300',
+          accent === 'rose' && 'text-rose-300'
         )}
       >
         {value}
@@ -237,7 +363,8 @@ function Stat({
   )
 }
 
-// ── Chart 1 — Running gauge ──────────────────────────────────────────
+// ── chart components (unchanged from prior iteration except formatting) ─
+
 function RunningGauge({ running, max }: { running: number; max: number }) {
   return (
     <EChart
@@ -251,18 +378,18 @@ function RunningGauge({ running, max }: { running: number; max: number }) {
             min: 0,
             max,
             itemStyle: { color: '#10b981' },
-            progress: { show: true, width: 14 },
-            axisLine: { lineStyle: { width: 14, color: [[1, '#27272a']] } },
+            progress: { show: true, width: 12 },
+            axisLine: { lineStyle: { width: 12, color: [[1, '#27272a']] } },
             axisTick: { show: false },
-            splitLine: { length: 8, lineStyle: { color: '#71717a' } },
-            axisLabel: { distance: 18, color: '#a1a1aa', fontSize: 9 },
+            splitLine: { length: 6, lineStyle: { color: '#71717a' } },
+            axisLabel: { distance: 14, color: '#a1a1aa', fontSize: 9 },
             pointer: { show: false },
             anchor: { show: false },
             title: { show: false },
             detail: {
               valueAnimation: true,
               formatter: '{value}',
-              fontSize: 28,
+              fontSize: 24,
               fontWeight: 600,
               color: '#10b981',
               offsetCenter: [0, '20%'],
@@ -275,7 +402,6 @@ function RunningGauge({ running, max }: { running: number; max: number }) {
   )
 }
 
-// ── Chart 2 — Budget burn ring ────────────────────────────────────────
 function BudgetRing({ used, budget }: { used: number; budget: number }) {
   const pct = budget > 0 ? Math.min(100, (used / budget) * 100) : 0
   const color = pct > 80 ? '#f43f5e' : pct > 50 ? '#f59e0b' : '#10b981'
@@ -291,13 +417,8 @@ function BudgetRing({ used, budget }: { used: number; budget: number }) {
             min: 0,
             max: 100,
             radius: '90%',
-            progress: {
-              show: true,
-              width: 14,
-              roundCap: true,
-              itemStyle: { color },
-            },
-            axisLine: { lineStyle: { width: 14, color: [[1, '#27272a']] } },
+            progress: { show: true, width: 12, roundCap: true, itemStyle: { color } },
+            axisLine: { lineStyle: { width: 12, color: [[1, '#27272a']] } },
             axisTick: { show: false },
             splitLine: { show: false },
             axisLabel: { show: false },
@@ -305,7 +426,7 @@ function BudgetRing({ used, budget }: { used: number; budget: number }) {
             title: { show: false },
             detail: {
               valueAnimation: true,
-              fontSize: 24,
+              fontSize: 20,
               fontWeight: 600,
               offsetCenter: [0, '0%'],
               formatter: () => `$${used.toFixed(2)}`,
@@ -314,15 +435,42 @@ function BudgetRing({ used, budget }: { used: number; budget: number }) {
             data: [{ value: pct }],
           },
         ],
-        graphic: [
+      }}
+    />
+  )
+}
+
+function RunningTaskBars({ running }: { running: RunningTask[] }) {
+  if (running.length === 0) {
+    return (
+      <div className='text-muted-foreground flex h-full items-center justify-center text-xs'>
+        no running tasks
+      </div>
+    )
+  }
+  return (
+    <EChart
+      height='100%'
+      option={{
+        grid: { left: 100, right: 24, top: 8, bottom: 18 },
+        xAxis: { type: 'value', show: false },
+        yAxis: {
+          type: 'category',
+          data: running.map((t) => truncate(t.title, 20)),
+          axisLabel: { fontSize: 10 },
+        },
+        series: [
           {
-            type: 'text',
-            left: 'center',
-            top: '70%',
-            style: {
-              text: `of $${budget} (${pct.toFixed(0)}%)`,
-              fill: '#94a3b8',
-              fontSize: 11,
+            type: 'bar',
+            data: running.map(() => 1),
+            itemStyle: { color: '#10b981' },
+            barWidth: 12,
+            label: {
+              show: true,
+              position: 'right',
+              fontSize: 10,
+              formatter: 'running',
+              color: '#10b981',
             },
           },
         ],
@@ -331,7 +479,146 @@ function BudgetRing({ used, budget }: { used: number; budget: number }) {
   )
 }
 
-// ── Chart 3 — System sparkline (one metric) ───────────────────────────
+function HourlyBars({
+  data,
+  color,
+}: {
+  data: [string, number][]
+  color: string
+}) {
+  if (data.length === 0) {
+    return (
+      <div className='text-muted-foreground flex h-full items-center justify-center text-xs'>
+        no recent actions
+      </div>
+    )
+  }
+  return (
+    <EChart
+      height='100%'
+      option={{
+        grid: { left: 32, right: 8, top: 16, bottom: 24 },
+        tooltip: { trigger: 'axis' },
+        xAxis: {
+          type: 'category',
+          data: data.map(([k]) => k.slice(11, 13) + 'h'),
+          axisLabel: { fontSize: 9 },
+        },
+        yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
+        series: [
+          {
+            type: 'bar',
+            data: data.map(([, v]) => v),
+            itemStyle: { color },
+            barWidth: '70%',
+          },
+        ],
+      }}
+    />
+  )
+}
+
+function ToolBreakdownBars({ data }: { data: [string, number][] }) {
+  if (data.length === 0) {
+    return (
+      <div className='text-muted-foreground flex h-full items-center justify-center text-xs'>
+        no recent actions
+      </div>
+    )
+  }
+  return (
+    <EChart
+      height='100%'
+      option={{
+        grid: { left: 110, right: 24, top: 4, bottom: 18 },
+        tooltip: { trigger: 'item' },
+        xAxis: { type: 'value', show: false },
+        yAxis: {
+          type: 'category',
+          data: data.map(([k]) => truncate(k, 20)),
+          axisLabel: { fontSize: 10 },
+          inverse: true,
+        },
+        series: [
+          {
+            type: 'bar',
+            data: data.map(([, v]) => v),
+            itemStyle: { color: '#a78bfa' },
+            barWidth: 10,
+            label: {
+              show: true,
+              position: 'right',
+              fontSize: 10,
+              color: '#a1a1aa',
+            },
+          },
+        ],
+      }}
+    />
+  )
+}
+
+function TurnsRatio({
+  turns,
+  budget,
+  cost,
+}: {
+  turns: number
+  budget: number
+  cost: number
+}) {
+  const costPct = budget > 0 ? Math.min(100, (cost / budget) * 100) : 0
+  return (
+    <EChart
+      height='100%'
+      option={{
+        series: [
+          {
+            type: 'gauge',
+            startAngle: 200,
+            endAngle: -20,
+            min: 0,
+            max: 100,
+            progress: {
+              show: true,
+              width: 12,
+              roundCap: true,
+              itemStyle: { color: '#a78bfa' },
+            },
+            axisLine: { lineStyle: { width: 12, color: [[1, '#27272a']] } },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { show: false },
+            pointer: { show: false },
+            title: { show: false },
+            detail: {
+              valueAnimation: true,
+              fontSize: 22,
+              fontWeight: 600,
+              offsetCenter: [0, '5%'],
+              formatter: () => String(turns),
+              color: '#e5e7eb',
+            },
+            data: [{ value: costPct }],
+          },
+        ],
+        graphic: [
+          {
+            type: 'text',
+            left: 'center',
+            top: '70%',
+            style: {
+              text: 'turns today',
+              fill: '#94a3b8',
+              fontSize: 10,
+            },
+          },
+        ],
+      }}
+    />
+  )
+}
+
 function SystemSparkline({
   series,
   field,
@@ -350,10 +637,7 @@ function SystemSparkline({
       height='100%'
       option={{
         grid: { left: 36, right: 8, top: 24, bottom: 18 },
-        xAxis: {
-          type: 'time',
-          axisLabel: { fontSize: 9 },
-        },
+        xAxis: { type: 'time', axisLabel: { fontSize: 9 } },
         yAxis: {
           type: 'value',
           axisLabel: { fontSize: 9, formatter: `{value}${unit ?? ''}` },
@@ -398,7 +682,6 @@ function SystemSparkline({
   )
 }
 
-// ── Chart 4 — Memory area used vs total ──────────────────────────────
 function SystemArea({ series }: { series: SystemSample[] }) {
   const used = series.map((s) => [s.ts, s.mem_used_mb / 1024])
   const total = series.length ? series[series.length - 1].mem_total_mb / 1024 : 16
@@ -406,7 +689,7 @@ function SystemArea({ series }: { series: SystemSample[] }) {
     <EChart
       height='100%'
       option={{
-        grid: { left: 40, right: 8, top: 18, bottom: 18 },
+        grid: { left: 36, right: 8, top: 18, bottom: 18 },
         xAxis: { type: 'time', axisLabel: { fontSize: 9 } },
         yAxis: {
           type: 'value',
@@ -440,14 +723,13 @@ function SystemArea({ series }: { series: SystemSample[] }) {
   )
 }
 
-// ── Chart 5 — Load average lines ─────────────────────────────────────
 function LoadLines({ series }: { series: SystemSample[] }) {
   const colors = { '1m': '#3b82f6', '5m': '#10b981', '15m': '#f59e0b' }
   return (
     <EChart
       height='100%'
       option={{
-        grid: { left: 36, right: 8, top: 24, bottom: 18 },
+        grid: { left: 32, right: 8, top: 24, bottom: 18 },
         legend: {
           show: true,
           top: 0,
@@ -489,7 +771,6 @@ function LoadLines({ series }: { series: SystemSample[] }) {
   )
 }
 
-// ── Chart 6 — Throughput bars (disk r/w + net rx/tx) ─────────────────
 function ThroughputBars({ series }: { series: SystemSample[] }) {
   const last = series.length ? series[series.length - 1] : null
   const data = last
@@ -517,10 +798,7 @@ function ThroughputBars({ series }: { series: SystemSample[] }) {
         series: [
           {
             type: 'bar',
-            data: data.map((d) => ({
-              value: d.value,
-              itemStyle: { color: d.color },
-            })),
+            data: data.map((d) => ({ value: d.value, itemStyle: { color: d.color } })),
             label: {
               show: true,
               position: 'right',
@@ -532,93 +810,6 @@ function ThroughputBars({ series }: { series: SystemSample[] }) {
       }}
     />
   )
-}
-
-// ── Chart 7 — Running task bars (count of runs / activity per task) ──
-function RunningTaskBars({ running }: { running: RunningTask[] }) {
-  if (running.length === 0) {
-    return (
-      <div className='text-muted-foreground flex h-full items-center justify-center text-xs'>
-        no running tasks
-      </div>
-    )
-  }
-  // For v1 just show a 1-per-task bar with title — value is a constant
-  // 1 (presence indicator). Once we wire per-task host samples this
-  // becomes lines/sec or CPU%.
-  return (
-    <EChart
-      height='100%'
-      option={{
-        grid: { left: 100, right: 24, top: 8, bottom: 18 },
-        xAxis: { type: 'value', show: false },
-        yAxis: {
-          type: 'category',
-          data: running.map((t) => truncate(t.title, 18)),
-          axisLabel: { fontSize: 10 },
-        },
-        series: [
-          {
-            type: 'bar',
-            data: running.map(() => 1),
-            itemStyle: { color: '#10b981' },
-            barWidth: 14,
-            label: {
-              show: true,
-              position: 'right',
-              fontSize: 10,
-              formatter: 'running',
-              color: '#10b981',
-            },
-          },
-        ],
-      }}
-    />
-  )
-}
-
-// ── Chart 8 — CPU radial heat (recent ticks as radial segments) ──────
-function CPURadialHeat({ series }: { series: SystemSample[] }) {
-  const recent = series.slice(-60)
-  return (
-    <EChart
-      height='100%'
-      option={{
-        polar: { radius: ['30%', '85%'] },
-        angleAxis: {
-          type: 'category',
-          data: recent.map((_, i) => String(i)),
-          axisLabel: { show: false },
-          axisTick: { show: false },
-          axisLine: { show: false },
-        },
-        radiusAxis: {
-          max: 100,
-          axisLabel: { show: false },
-          axisLine: { show: false },
-          splitLine: { show: false },
-        },
-        series: [
-          {
-            type: 'bar',
-            coordinateSystem: 'polar',
-            data: recent.map((s) => ({
-              value: s.cpu_pct,
-              itemStyle: { color: heatColor(s.cpu_pct) },
-            })),
-            barWidth: '95%',
-          },
-        ],
-      }}
-    />
-  )
-}
-
-function heatColor(pct: number): string {
-  if (pct < 20) return '#10b981'
-  if (pct < 50) return '#3b82f6'
-  if (pct < 75) return '#f59e0b'
-  return '#f43f5e'
 }
 
 function truncate(s: string, n: number): string {
