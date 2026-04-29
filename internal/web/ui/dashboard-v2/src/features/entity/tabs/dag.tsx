@@ -165,6 +165,12 @@ function pushNode(
   })
 }
 
+// Edge style — SVG <path> doesn't resolve CSS vars on stroke, so use a
+// concrete color (matches the muted-foreground token in the dark theme).
+// Marker color must be set explicitly too — otherwise the arrowhead
+// inherits a default that's often invisible against the canvas.
+const EDGE_COLOR = '#94a3b8'
+
 function pushEdge(acc: GraphInput, source: string, target: string) {
   const id = `${source}->${target}`
   if (acc.edges.some((e) => e.id === id)) return
@@ -173,8 +179,14 @@ function pushEdge(acc: GraphInput, source: string, target: string) {
     source,
     target,
     type: 'smoothstep',
-    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
-    style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.25 },
+    animated: false,
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color: EDGE_COLOR,
+    },
+    style: { stroke: EDGE_COLOR, strokeWidth: 1.5 },
   })
 }
 
