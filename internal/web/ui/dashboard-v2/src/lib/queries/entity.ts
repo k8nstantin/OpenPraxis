@@ -79,6 +79,45 @@ async function fetchJSON<T>(path: string): Promise<T> {
 
 // ── Reads ─────────────────────────────────────────────────────────────
 
+// Graph query — flat (nodes, edges) shape over the unified
+// relationships SCD-2 table. Single canonical source for the DAG tab;
+// no hierarchy-walker games, no kind-specific endpoints. Backend:
+// GET /api/relationships/graph?root_id=&root_kind=&depth=&edge_kinds=
+export interface GraphNode {
+  id: string
+  kind: 'product' | 'manifest' | 'task'
+  title: string
+  status: string
+}
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  kind: 'owns' | 'depends_on' | 'reviews' | 'links_to'
+}
+export interface GraphPayload {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
+export function useEntityGraph(
+  kind: EntityKind,
+  id: string | undefined,
+  depth = 10
+) {
+  return useQuery({
+    queryKey: [...entityKeys.all(kind), 'graph', id ?? '', depth] as const,
+    queryFn: async () => {
+      const url = `/api/relationships/graph?root_id=${id}&root_kind=${kind}&depth=${depth}`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`graph → ${res.status}`)
+      return (await res.json()) as GraphPayload
+    },
+    enabled: !!id,
+    staleTime: 30 * 1000,
+  })
+}
+
 export function useEntityList(kind: EntityKind) {
   return useQuery({
     queryKey: entityKeys.list(kind),

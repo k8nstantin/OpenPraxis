@@ -4,8 +4,10 @@ import { useNavigate } from '@tanstack/react-router'
 import {
   Background,
   Controls,
+  Handle,
   MarkerType,
   MiniMap,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -27,6 +29,7 @@ import {
   useEntity,
   useEntityChildren,
   useEntityDependencies,
+  useEntityGraph,
   useEntityHierarchy,
   useLinkManifest,
   useRemoveDownstreamDep,
@@ -99,9 +102,44 @@ type EntityNodeData = {
   current: boolean
 }
 
-// Custom React Flow node — shadcn-admin themed. Border tints by
-// status; ring-2 on the currently-viewed entity ("you are here").
-function EntityNode({ data }: NodeProps<Node<EntityNodeData>>) {
+// Three custom React Flow node components with distinct shapes —
+// product = rounded rectangle (anchor / container), manifest =
+// hexagon (specification), task = pill (actionable). Same status
+// border palette across all three for visual continuity. Each MUST
+// include <Handle> components — without them React Flow renders the
+// edge marker defs but not the path connecting source to target.
+function NodeHandles() {
+  return (
+    <>
+      <Handle
+        type='target'
+        position={Position.Top}
+        style={{ opacity: 0, pointerEvents: 'none' }}
+      />
+      <Handle
+        type='source'
+        position={Position.Bottom}
+        style={{ opacity: 0, pointerEvents: 'none' }}
+      />
+    </>
+  )
+}
+
+function NodeBody({ data, children }: { data: EntityNodeData; children?: React.ReactNode }) {
+  return (
+    <>
+      <div className='truncate text-xs font-medium leading-tight'>
+        {data.label}
+      </div>
+      <div className='text-muted-foreground truncate text-[10px] uppercase tracking-wide'>
+        {data.type}
+      </div>
+      {children}
+    </>
+  )
+}
+
+function ProductNode({ data }: NodeProps<Node<EntityNodeData>>) {
   const border = STATUS_BORDER[data.status] ?? '#71717a'
   return (
     <div
@@ -111,17 +149,60 @@ function EntityNode({ data }: NodeProps<Node<EntityNodeData>>) {
       }
       style={{ borderColor: border, width: 180, height: 56 }}
     >
-      <div className='truncate text-xs font-medium leading-tight'>
-        {data.label}
-      </div>
-      <div className='text-muted-foreground truncate text-[10px] uppercase tracking-wide'>
-        {data.type}
+      <NodeHandles />
+      <NodeBody data={data} />
+    </div>
+  )
+}
+
+function ManifestNode({ data }: NodeProps<Node<EntityNodeData>>) {
+  const border = STATUS_BORDER[data.status] ?? '#71717a'
+  const clip =
+    'polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%)'
+  return (
+    <div
+      className={
+        'relative shadow-sm ' + (data.current ? 'ring-primary ring-2' : '')
+      }
+      style={{ width: 200, height: 64 }}
+    >
+      <NodeHandles />
+      <div
+        className='absolute inset-0'
+        style={{ background: border, clipPath: clip }}
+      />
+      <div
+        className='bg-card text-foreground absolute flex flex-col justify-center px-4 py-1'
+        style={{ inset: 2, clipPath: clip }}
+      >
+        <NodeBody data={data} />
       </div>
     </div>
   )
 }
 
-const NODE_TYPES = { entity: EntityNode }
+function TaskNode({ data }: NodeProps<Node<EntityNodeData>>) {
+  const border = STATUS_BORDER[data.status] ?? '#71717a'
+  return (
+    <div
+      className={
+        'bg-card text-foreground rounded-full border-2 px-4 py-1.5 shadow-sm ' +
+        (data.current ? 'ring-primary ring-2 ring-offset-1' : '')
+      }
+      style={{ borderColor: border, width: 180, height: 56 }}
+    >
+      <NodeHandles />
+      <NodeBody data={data} />
+    </div>
+  )
+}
+
+const NODE_TYPES = {
+  entity: ProductNode, // legacy fallback (existing call sites pass type:'entity')
+  product: ProductNode,
+  manifest: ManifestNode,
+  task: TaskNode,
+}
 
 // dagre top→bottom layout. Returns a fresh nodes/edges pair with
 // computed positions. Nodes are anchor-centered; we shift back by
@@ -389,30 +470,56 @@ function DAGTabInner({
     })
   )
 
+  // Single source of truth: the relationships table. Walk all
+  // reachable nodes from this entity, get back a flat (nodes, edges)
+  // payload, build React Flow nodes + edges directly. No nested
+  // hierarchy walker, no kind-specific JSON shape — the relationships
+  // store IS the graph.
+  const graphResp = useEntityGraph(kind, entityId, 10)
   const graph = useMemo<GraphInput>(() => {
-    if (isProduct) return productGraph(hierarchy.data, entityId)
-    if (isTask)
-      return taskGraph(entityId, taskData, upstreamRows, downstreamTaskRows)
-    return manifestGraph(
-      entityId,
-      m,
-      parent.data?.title,
-      upstreamRows,
-      childRows
-    )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isProduct,
-    isTask,
-    hierarchy.data,
-    entityId,
-    m,
-    taskData,
-    parent.data?.title,
-    deps.data,
-    children.data,
-    taskDownstream.data,
-  ])
+    const acc: GraphInput = { nodes: [], edges: [] }
+    if (!graphResp.data) return acc
+    for (const n of graphResp.data.nodes) {
+      acc.nodes.push({
+        id: n.id,
+        type: n.kind, // 'product' | 'manifest' | 'task' → matches NODE_TYPES
+        position: { x: 0, y: 0 },
+        data: {
+          label: n.title,
+          status: n.status,
+          type: n.kind,
+          current: n.id === entityId,
+        },
+        draggable: false,
+        selectable: true,
+      })
+    }
+    for (const e of graphResp.data.edges) {
+      // Style edges differently by kind. Owns = solid blue (the
+      // "container" relationship); depends_on = dashed amber (the
+      // "blocking" relationship). Both arrow-headed.
+      const isOwns = e.kind === 'owns'
+      acc.edges.push({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: 'smoothstep',
+        animated: false,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 16,
+          height: 16,
+          color: isOwns ? '#3b82f6' : '#f59e0b',
+        },
+        style: {
+          stroke: isOwns ? '#3b82f6' : '#f59e0b',
+          strokeWidth: 1.5,
+          strokeDasharray: isOwns ? undefined : '6 4',
+        },
+      })
+    }
+    return acc
+  }, [graphResp.data, entityId])
 
   const laidOut = useMemo(
     () => layout(graph.nodes, graph.edges, 'TB'),

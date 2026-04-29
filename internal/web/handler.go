@@ -696,6 +696,11 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	// by as_of.
 	api.HandleFunc("/run-stats", apiRunStats(n)).Methods("GET")
 	api.HandleFunc("/system-stats", apiSystemStats(n)).Methods("GET")
+	// /api/relationships/graph?root_id=&root_kind=&depth=&edge_kinds=
+	// returns a flat (nodes, edges) shape for the DAG tab. Source of
+	// truth: the relationships SCD-2 table; Walk traversal handles the
+	// recursive descent.
+	api.HandleFunc("/relationships/graph", apiRelationshipsGraph(n)).Methods("GET")
 	api.HandleFunc("/tasks/{id}/start", apiTaskStart(n)).Methods("POST")
 	api.HandleFunc("/tasks/{id}/cancel", apiTaskUpdateStatus(n, "cancelled")).Methods("POST")
 	api.HandleFunc("/tasks/{id}/reject", apiTaskReject(n)).Methods("POST")

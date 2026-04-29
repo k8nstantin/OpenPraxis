@@ -13,10 +13,11 @@ import { MainTab } from './tabs/main'
 import { ScheduleTab } from './tabs/schedule'
 import { StatsTab } from './tabs/stats'
 
-// Seven tabs in operator-priority order — same set across product /
-// manifest / task. Schedule + Stats are placeholders pending the
-// central schedules + run_stats backend (next PR); they render a
-// "pending backend" stub so the tab strip is complete now.
+// Tab strip — base 7 (Main · Execution · Comments · Deps · DAG ·
+// Schedule · Stats) + a Task-only "Live Output" between Schedule and
+// Stats that streams the current/most-recent run's stdout/stderr.
+// `live_output` is added to the union here so URL routing accepts it
+// across all kinds; the UI hides the trigger for product/manifest.
 const TAB_IDS = [
   'main',
   'execution',
@@ -24,6 +25,7 @@ const TAB_IDS = [
   'dependencies',
   'dag',
   'schedule',
+  'live_output',
   'stats',
 ] as const
 
