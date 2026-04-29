@@ -8,7 +8,7 @@ import {
   FileText,
   Inbox,
   LayoutDashboard,
-  PlayCircle,
+  ScrollText,
   Settings,
   TrendingUp,
 } from 'lucide-react'
@@ -41,9 +41,9 @@ export const sidebarData: SidebarData = {
           icon: LayoutDashboard,
         },
         {
-          title: 'Active',
-          url: '/active',
-          icon: PlayCircle,
+          title: 'Actions Log',
+          url: '/actions',
+          icon: ScrollText,
         },
         {
           title: 'Products',

@@ -19,7 +19,7 @@ import { Route as AuthenticatedManifestsRouteImport } from './routes/_authentica
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
-import { Route as AuthenticatedActiveRouteImport } from './routes/_authenticated/active'
+import { Route as AuthenticatedActionsRouteImport } from './routes/_authenticated/actions'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors404RouteImport } from './routes/(errors)/404'
@@ -82,9 +82,9 @@ const AuthenticatedActivityRoute = AuthenticatedActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedActiveRoute = AuthenticatedActiveRouteImport.update({
-  id: '/active',
-  path: '/active',
+const AuthenticatedActionsRoute = AuthenticatedActionsRouteImport.update({
+  id: '/actions',
+  path: '/actions',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const errors503Route = errors503RouteImport.update({
@@ -157,7 +157,7 @@ export interface FileRoutesByFullPath {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/active': typeof AuthenticatedActiveRoute
+  '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -178,7 +178,7 @@ export interface FileRoutesByTo {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/active': typeof AuthenticatedActiveRoute
+  '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -203,7 +203,7 @@ export interface FileRoutesById {
   '/(errors)/404': typeof errors404Route
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
-  '/_authenticated/active': typeof AuthenticatedActiveRoute
+  '/_authenticated/actions': typeof AuthenticatedActionsRoute
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
@@ -229,7 +229,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
-    | '/active'
+    | '/actions'
     | '/activity'
     | '/audit'
     | '/inbox'
@@ -250,7 +250,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
-    | '/active'
+    | '/actions'
     | '/activity'
     | '/audit'
     | '/inbox'
@@ -274,7 +274,7 @@ export interface FileRouteTypes {
     | '/(errors)/404'
     | '/(errors)/500'
     | '/(errors)/503'
-    | '/_authenticated/active'
+    | '/_authenticated/actions'
     | '/_authenticated/activity'
     | '/_authenticated/audit'
     | '/_authenticated/inbox'
@@ -372,11 +372,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedActivityRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/active': {
-      id: '/_authenticated/active'
-      path: '/active'
-      fullPath: '/active'
-      preLoaderRoute: typeof AuthenticatedActiveRouteImport
+    '/_authenticated/actions': {
+      id: '/_authenticated/actions'
+      path: '/actions'
+      fullPath: '/actions'
+      preLoaderRoute: typeof AuthenticatedActionsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/(errors)/503': {
@@ -484,7 +484,7 @@ const AuthenticatedSettingsRouteRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
-  AuthenticatedActiveRoute: typeof AuthenticatedActiveRoute
+  AuthenticatedActionsRoute: typeof AuthenticatedActionsRoute
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
@@ -498,7 +498,7 @@ interface AuthenticatedRouteRouteChildren {
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
-  AuthenticatedActiveRoute: AuthenticatedActiveRoute,
+  AuthenticatedActionsRoute: AuthenticatedActionsRoute,
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,

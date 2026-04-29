@@ -313,18 +313,27 @@ func apiActionsSearch(n *node.Node) http.HandlerFunc {
 		env := searchEnvelope[actionSearchItem]{
 			Items: []actionSearchItem{}, Total: 0, Offset: offset, Limit: limit,
 		}
+		// Empty q means "give me every action paged DESC". The
+		// Actions Log surface uses a single endpoint for both browse and
+		// search; q is purely optional. No empty-query short-circuit.
+		var results []action.Action
+		var total int
+		var err error
 		if q == "" {
-			writeJSON(w, env)
-			return
+			results, total, err = n.Actions.ListRecentPaged(limit, offset)
+		} else {
+			results, total, err = n.Actions.SearchPaged(q, limit, offset)
 		}
-		results, total, err := n.Actions.SearchPaged(q, limit, offset)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
 		}
 		items := make([]actionSearchItem, 0, len(results))
 		for _, a := range results {
-			snippet := highlightSnippet(q, a.ToolInput, a.ToolResponse, a.ToolName)
+			var snippet string
+			if q != "" {
+				snippet = highlightSnippet(q, a.ToolInput, a.ToolResponse, a.ToolName)
+			}
 			items = append(items, actionSearchItem{Action: a, SnippetHTML: snippet})
 		}
 		env.Items = items
