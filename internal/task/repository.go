@@ -269,12 +269,12 @@ func (s *Store) List(status string, limit int) ([]*Task, error) {
 		query += ` AND status = ?`
 		args = append(args, status)
 	}
-	// Sort: most-recently-executed first, tiebreak by created_at DESC.
-	// Running tasks naturally bubble to the top because their last_run_at
-	// is the most recent (set when the task fired). Never-run tasks have
-	// last_run_at='' which sorts last under DESC, then their created_at
-	// DESC ranks newest creations above older ones.
-	query += ` ORDER BY last_run_at DESC, created_at DESC`
+	// Sort: most-recent activity first. For never-run tasks, "activity"
+	// is the create event — collapse to created_at via COALESCE/NULLIF
+	// so a freshly-created task sorts above completed tasks that finished
+	// hours ago. Tiebreak on created_at DESC for two rows with identical
+	// last_run_at (rare but possible with sub-second creates).
+	query += ` ORDER BY COALESCE(NULLIF(last_run_at,''), created_at) DESC, created_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
