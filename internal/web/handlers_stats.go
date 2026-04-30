@@ -113,6 +113,45 @@ func apiRunStats(n *node.Node) http.HandlerFunc {
 			return
 		}
 
+		// Reliability Recovery P10 — distinguish "no runs yet" (empty 200)
+		// from "entity does not exist" (404). Without this the Stats tab
+		// silently renders an empty chart for typo'd UUIDs.
+		switch kind {
+		case "task":
+			t, err := n.Tasks.Get(entityID)
+			if err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
+			if t == nil {
+				writeError(w, "task not found", 404)
+				return
+			}
+		case "manifest":
+			m, err := n.Manifests.Get(entityID)
+			if err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
+			if m == nil {
+				writeError(w, "manifest not found", 404)
+				return
+			}
+		case "product":
+			p, err := n.Products.Get(entityID)
+			if err != nil {
+				writeError(w, err.Error(), 500)
+				return
+			}
+			if p == nil {
+				writeError(w, "product not found", 404)
+				return
+			}
+		default:
+			writeError(w, "entity_kind must be task|manifest|product", 400)
+			return
+		}
+
 		asOfClause := ""
 		var args []any
 		if asOfStr != "" {
