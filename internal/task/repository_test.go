@@ -174,3 +174,56 @@ func TestActivateDependents_DoesNotTouchTerminalStates(t *testing.T) {
 		}
 	}
 }
+
+// TestList_FreshTaskRanksAboveCompleted — Reliability Recovery P4 regression.
+//
+// Before PR #288, List sorted by last_run_at DESC only. A never-run task
+// has last_run_at='' which collated below every completed task's timestamp,
+// burying freshly-created rows under the historical pile. Fix: COALESCE
+// NULLIF(last_run_at,'') back to created_at. This test asserts the new
+// behavior so the regression cannot return.
+func TestList_FreshTaskRanksAboveCompleted(t *testing.T) {
+	s := openRepoTestStore(t)
+
+	// Old completed task: last_run_at far in the past.
+	old, err := s.Create("", "old-completed", "", "once", "claude-code", "node", "test", "")
+	if err != nil {
+		t.Fatalf("create old: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE tasks SET status = 'completed', last_run_at = '2025-01-01T00:00:00Z' WHERE id = ?`,
+		old.ID,
+	); err != nil {
+		t.Fatalf("backdate old: %v", err)
+	}
+
+	// Fresh task: created_at is now (set by Create), last_run_at is ''.
+	fresh, err := s.Create("", "fresh-pending", "", "once", "claude-code", "node", "test", "")
+	if err != nil {
+		t.Fatalf("create fresh: %v", err)
+	}
+
+	tasks, err := s.List("", 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tasks) < 2 {
+		t.Fatalf("expected ≥2 tasks, got %d", len(tasks))
+	}
+
+	freshIdx, oldIdx := -1, -1
+	for i, tk := range tasks {
+		switch tk.ID {
+		case fresh.ID:
+			freshIdx = i
+		case old.ID:
+			oldIdx = i
+		}
+	}
+	if freshIdx < 0 || oldIdx < 0 {
+		t.Fatalf("fresh=%d old=%d both must be present", freshIdx, oldIdx)
+	}
+	if freshIdx >= oldIdx {
+		t.Fatalf("fresh task at idx %d must rank above old completed at idx %d", freshIdx, oldIdx)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -665,6 +666,18 @@ func apiRunningTasksLive(n *node.Node) http.HandlerFunc {
 
 			out = append(out, lt)
 		}
+
+		// Stable order: oldest-running first. The map-based runner state
+		// returns tasks in non-deterministic order, which made per-tile
+		// sparklines appear to "reset" each poll because React kept the
+		// component instance (stable key=task_id) but ECharts re-rasterized
+		// when its DOM node moved between grid cells.
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].StartedAt == out[j].StartedAt {
+				return out[i].TaskID < out[j].TaskID
+			}
+			return out[i].StartedAt < out[j].StartedAt
+		})
 
 		writeJSON(w, out)
 	}
