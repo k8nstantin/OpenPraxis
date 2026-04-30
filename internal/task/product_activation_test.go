@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 type fakeProductChecker struct {
@@ -28,25 +30,35 @@ func (f *fakeProductChecker) IsSatisfied(_ context.Context, productID string) (b
 	return true, nil, nil
 }
 
-// seedManifestForProduct inserts a minimal manifest row. task.Create's
-// product lookup joins manifests.project_id; internal/manifest import
-// from tests here would produce a cycle, so raw SQL it is.
+// seedManifestForProduct creates a minimal manifests row + the
+// EdgeOwns(product → manifest) edge in the relationships store.
+// PR/M3 dropped the legacy manifests.project_id column; ownership now
+// lives exclusively in `relationships`.
 func seedManifestForProduct(t *testing.T, s *Store, manifestID, productID string) {
 	t.Helper()
 	if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS manifests (
 		id TEXT PRIMARY KEY, title TEXT, description TEXT, content TEXT,
 		status TEXT, jira_refs TEXT, tags TEXT, author TEXT, source_node TEXT,
-		project_id TEXT, depends_on TEXT, version INT, created_at TEXT,
+		depends_on TEXT, version INT, created_at TEXT,
 		updated_at TEXT, deleted_at TEXT DEFAULT ''
 	)`); err != nil {
 		t.Fatalf("create manifests fixture: %v", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.db.Exec(`INSERT OR REPLACE INTO manifests
-		(id, title, description, content, status, jira_refs, tags, author, source_node, project_id, depends_on, version, created_at, updated_at, deleted_at)
-		VALUES (?, 'm', '', '', 'open', '[]', '[]', 't', '', ?, '', 1, ?, ?, '')`,
-		manifestID, productID, now, now); err != nil {
+		(id, title, description, content, status, jira_refs, tags, author, source_node, depends_on, version, created_at, updated_at, deleted_at)
+		VALUES (?, 'm', '', '', 'open', '[]', '[]', 't', '', '', 1, ?, ?, '')`,
+		manifestID, now, now); err != nil {
 		t.Fatalf("seed manifest row: %v", err)
+	}
+	if s.rels != nil {
+		if err := s.rels.Create(context.Background(), relationships.Edge{
+			SrcKind: relationships.KindProduct, SrcID: productID,
+			DstKind: relationships.KindManifest, DstID: manifestID,
+			Kind: relationships.EdgeOwns, CreatedBy: "test", Reason: "test fixture",
+		}); err != nil {
+			t.Fatalf("seed owns edge: %v", err)
+		}
 	}
 }
 

@@ -149,8 +149,10 @@ func (s *Store) CostByPeriod(period string, days int, agent string) ([]CostAggre
 }
 
 // CostDrillDown returns individual task runs for a specific date.
+// ManifestID is resolved via the relationships store after the SELECT
+// (PR/M3 dropped tasks.manifest_id from the schema).
 func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, error) {
-	query := `SELECT r.id, r.task_id, t.title, t.manifest_id, t.agent, r.run_number, r.status, r.actions, r.cost_usd, r.turns, r.started_at, r.completed_at
+	query := `SELECT r.id, r.task_id, t.title, t.agent, r.run_number, r.status, r.actions, r.cost_usd, r.turns, r.started_at, r.completed_at
 		FROM task_runs r LEFT JOIN tasks t ON r.task_id = t.id
 		WHERE strftime('%Y-%m-%d', r.started_at) = ?`
 	args := []any{date}
@@ -166,18 +168,17 @@ func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, 
 	defer rows.Close()
 
 	var results []CostDrillDownEntry
+	taskIDs := []string{}
+	idxByTaskID := map[string][]int{}
 	for rows.Next() {
 		var e CostDrillDownEntry
-		var title, manifestID, agentStr sql.NullString
+		var title, agentStr sql.NullString
 		var startedStr, completedStr string
-		if err := rows.Scan(&e.RunID, &e.TaskID, &title, &manifestID, &agentStr, &e.RunNumber, &e.Status, &e.Actions, &e.CostUSD, &e.Turns, &startedStr, &completedStr); err != nil {
+		if err := rows.Scan(&e.RunID, &e.TaskID, &title, &agentStr, &e.RunNumber, &e.Status, &e.Actions, &e.CostUSD, &e.Turns, &startedStr, &completedStr); err != nil {
 			return nil, err
 		}
 		if title.Valid {
 			e.TaskTitle = title.String
-		}
-		if manifestID.Valid {
-			e.ManifestID = manifestID.String
 		}
 		if agentStr.Valid {
 			e.Agent = agentStr.String
@@ -191,9 +192,31 @@ func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, 
 				e.Duration = int(ct.Sub(st).Seconds())
 			}
 		}
+		idxByTaskID[e.TaskID] = append(idxByTaskID[e.TaskID], len(results))
+		taskIDs = append(taskIDs, e.TaskID)
 		results = append(results, e)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Resolve owning manifest per task via relationships.
+	if s.rels != nil && len(taskIDs) > 0 {
+		ctx := context.Background()
+		byTask, err := s.rels.ListIncomingForMany(ctx, taskIDs, relationships.EdgeOwns)
+		if err == nil {
+			for tID, edges := range byTask {
+				for _, e := range edges {
+					if e.SrcKind == relationships.KindManifest {
+						for _, idx := range idxByTaskID[tID] {
+							results[idx].ManifestID = e.SrcID
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+	return results, nil
 }
 
 // DistinctAgents returns the list of distinct agent names that have task runs.
@@ -265,83 +288,64 @@ func (s *Store) GetCostTrendSummary(agent string) (*CostTrendSummary, error) {
 	return &ts, nil
 }
 
-// SumCostSince returns the total cost_usd spent across task_runs whose tasks
-// belong to the given product (via tasks.manifest_id → manifests.project_id)
-// since the supplied timestamp. Used by the runner's daily-budget pre-spawn
-// check: the runtime sums all runs on/after start-of-day UTC and refuses to
-// spawn another when a per-product daily cap has already been hit.
+// SumCostSince returns the total cost_usd spent across task_runs whose
+// tasks belong to the given product since the supplied timestamp.
+// Used by the runner's daily-budget pre-spawn check: the runtime sums
+// all runs on/after start-of-day UTC and refuses to spawn another when
+// a per-product daily cap has already been hit.
 //
-// An empty productID returns 0 — standalone tasks (no manifest/product) have
-// no product-level budget to enforce. This is a feature: the daily-budget
-// knob is defined at product scope and nowhere else in the catalog.
+// Empty productID returns 0 — standalone tasks (no manifest/product)
+// have no product-level budget to enforce. The daily-budget knob is
+// defined at product scope and nowhere else in the catalog.
+//
+// Resolves manifest → task chain via the relationships store. The
+// legacy m.project_id / t.manifest_id JOIN was retired in PR/M3.
 func (s *Store) SumCostSince(productID string, since time.Time) (float64, error) {
 	if productID == "" {
 		return 0, nil
 	}
-	// Resolve manifest → task chain via the relationships store.
-	// Falls back to the legacy m.project_id / t.manifest_id JOINs when
-	// rels backend isn't wired OR when rels has no rows for this
-	// product (test bootstrap path that writes only to legacy
-	// columns).
-	if s.rels != nil {
-		ctx := context.Background()
-		manifestEdges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeOwns)
-		if err != nil {
-			return 0, err
-		}
-		manifestIDs := make([]string, 0, len(manifestEdges))
-		for _, e := range manifestEdges {
-			if e.DstKind == relationships.KindManifest {
-				manifestIDs = append(manifestIDs, e.DstID)
-			}
-		}
-		if len(manifestIDs) == 0 {
-			// Empty result — could be (a) genuinely no manifests under
-			// this product, or (b) test fixture that wrote only to
-			// manifests.project_id without the EdgeOwns row. Fall
-			// through to legacy JOIN to disambiguate; legacy returns 0
-			// in case (a) too, so behaviour is identical.
-			goto legacyFallback
-		}
-		taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
-		if err != nil {
-			return 0, err
-		}
-		taskIDs := []string{}
-		for _, edges := range taskEdgesByManifest {
-			for _, e := range edges {
-				if e.DstKind == relationships.KindTask {
-					taskIDs = append(taskIDs, e.DstID)
-				}
-			}
-		}
-		if len(taskIDs) == 0 {
-			return 0, nil
-		}
-		ph := strings.Repeat("?,", len(taskIDs))
-		ph = ph[:len(ph)-1]
-		args := make([]any, 0, len(taskIDs)+1)
-		for _, id := range taskIDs {
-			args = append(args, id)
-		}
-		args = append(args, since.UTC().Format(time.RFC3339))
-		var total float64
-		err = s.db.QueryRow(`SELECT COALESCE(SUM(cost_usd), 0)
-			FROM task_runs WHERE task_id IN (`+ph+`) AND started_at >= ?`, args...).Scan(&total)
-		if err != nil {
-			return 0, fmt.Errorf("sum cost since: %w", err)
-		}
-		return total, nil
+	if s.rels == nil {
+		return 0, fmt.Errorf("SumCostSince: relationships backend not wired")
 	}
-legacyFallback:
-	// Legacy fallback.
+	ctx := context.Background()
+	manifestEdges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeOwns)
+	if err != nil {
+		return 0, err
+	}
+	manifestIDs := make([]string, 0, len(manifestEdges))
+	for _, e := range manifestEdges {
+		if e.DstKind == relationships.KindManifest {
+			manifestIDs = append(manifestIDs, e.DstID)
+		}
+	}
+	if len(manifestIDs) == 0 {
+		return 0, nil
+	}
+	taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
+	if err != nil {
+		return 0, err
+	}
+	taskIDs := []string{}
+	for _, edges := range taskEdgesByManifest {
+		for _, e := range edges {
+			if e.DstKind == relationships.KindTask {
+				taskIDs = append(taskIDs, e.DstID)
+			}
+		}
+	}
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+	ph := strings.Repeat("?,", len(taskIDs))
+	ph = ph[:len(ph)-1]
+	args := make([]any, 0, len(taskIDs)+1)
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	args = append(args, since.UTC().Format(time.RFC3339))
 	var total float64
-	err := s.db.QueryRow(`SELECT COALESCE(SUM(tr.cost_usd), 0)
-		FROM task_runs tr
-		JOIN tasks t ON tr.task_id = t.id
-		JOIN manifests m ON t.manifest_id = m.id
-		WHERE m.project_id = ? AND tr.started_at >= ?`,
-		productID, since.UTC().Format(time.RFC3339)).Scan(&total)
+	err = s.db.QueryRow(`SELECT COALESCE(SUM(cost_usd), 0)
+		FROM task_runs WHERE task_id IN (`+ph+`) AND started_at >= ?`, args...).Scan(&total)
 	if err != nil {
 		return 0, fmt.Errorf("sum cost since: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 )
 
@@ -273,37 +274,50 @@ func recordPastRun(t *testing.T, db *sql.DB, taskID string, costUSD float64, sta
 	}
 }
 
-// insertTaskRow creates a real tasks row so the manifest join in SumCostSince
-// returns the product_id. The fake task/manifest lookups used for the
-// resolver cannot satisfy the SQL join — we need actual DB state here.
+// insertTaskRow creates a real tasks row + the EdgeOwns(manifest →
+// task) row that ownership-aware queries (SumCostSince, etc.) join
+// against. PR/M3 dropped the legacy tasks.manifest_id column; tests
+// must wire ownership through the relationships store now.
 func insertTaskRow(t *testing.T, db *sql.DB, taskID, manifestID string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, created_at, updated_at)
-		VALUES (?, ?, 'test task', '', 'once', 'pending', 'claude-code', '', 'test', ?, ?)`,
-		taskID, manifestID, now, now)
+	_, err := db.Exec(`INSERT INTO tasks (id, title, description, schedule, status, agent, source_node, created_by, created_at, updated_at)
+		VALUES (?, 'test task', '', 'once', 'pending', 'claude-code', '', 'test', ?, ?)`,
+		taskID, now, now)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
+	if manifestID != "" {
+		rels, err := relationships.New(db)
+		if err != nil {
+			t.Fatalf("init rels for owns edge: %v", err)
+		}
+		if err := rels.Create(context.Background(), relationships.Edge{
+			SrcKind: relationships.KindManifest, SrcID: manifestID,
+			DstKind: relationships.KindTask, DstID: taskID,
+			Kind: relationships.EdgeOwns, CreatedBy: "test", Reason: "test fixture",
+		}); err != nil {
+			t.Fatalf("write owns edge: %v", err)
+		}
+	}
 }
 
-// insertManifestRow creates a real manifests row tying manifest_id to
-// project_id (the settings package calls this ProductID). Required for the
-// daily-budget JOIN in SumCostSince.
+// insertManifestRow creates an EdgeOwns(product → manifest) row in the
+// relationships store. The legacy manifests.project_id column was
+// dropped in PR/M3; ownership-aware joins (SumCostSince, etc.) read
+// from relationships.
 func insertManifestRow(t *testing.T, db *sql.DB, manifestID, productID string) {
 	t.Helper()
-	// The manifests table is created by manifest.NewStore; the runner test
-	// DB does not wire that up. Create the minimal shape SumCostSince needs.
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS manifests (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL DEFAULT ''
-	)`)
+	rels, err := relationships.New(db)
 	if err != nil {
-		t.Fatalf("create manifests table: %v", err)
+		t.Fatalf("init rels: %v", err)
 	}
-	_, err = db.Exec(`INSERT OR REPLACE INTO manifests (id, project_id) VALUES (?, ?)`, manifestID, productID)
-	if err != nil {
-		t.Fatalf("insert manifest: %v", err)
+	if err := rels.Create(context.Background(), relationships.Edge{
+		SrcKind: relationships.KindProduct, SrcID: productID,
+		DstKind: relationships.KindManifest, DstID: manifestID,
+		Kind: relationships.EdgeOwns, CreatedBy: "test", Reason: "test fixture",
+	}); err != nil {
+		t.Fatalf("write owns edge: %v", err)
 	}
 }
 

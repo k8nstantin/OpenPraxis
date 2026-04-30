@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -144,9 +145,12 @@ func NewStore(db *sql.DB) (*Store, error) {
 func (s *Store) DB() *sql.DB { return s.db }
 
 func (s *Store) init() error {
+	// Schema after PR/M3: ownership lives in `relationships` (EdgeOwns
+	// manifest → task). The legacy `manifest_id` column is no longer
+	// part of CREATE TABLE; existing DBs get it dropped by
+	// relationships.DropOwnershipColumns at boot.
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
-		manifest_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		description TEXT NOT NULL DEFAULT '',
 		schedule TEXT NOT NULL DEFAULT 'once',
@@ -164,11 +168,6 @@ func (s *Store) init() error {
 	)`)
 	if err != nil {
 		return fmt.Errorf("create tasks table: %w", err)
-	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_manifest ON tasks(manifest_id)`)
-	if err != nil {
-		return fmt.Errorf("create tasks manifest index: %w", err)
 	}
 
 	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`)
@@ -425,12 +424,14 @@ func (s *Store) init() error {
 }
 
 // taskColumns is the standard column list for task SELECT queries.
-const taskColumns = `id, manifest_id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, run_count, last_run_at, next_run_at, last_output, created_at, updated_at`
+// PR/M3 dropped manifest_id; Task.ManifestID is now populated post-scan
+// via populateOwnership using the relationships store.
+const taskColumns = `id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, run_count, last_run_at, next_run_at, last_output, created_at, updated_at`
 
 func scanTask(row *sql.Row) (*Task, error) {
 	var t Task
 	var createdStr, updatedStr string
-	err := row.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
+	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
 		&t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -448,7 +449,7 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 	for rows.Next() {
 		var t Task
 		var createdStr, updatedStr string
-		err := rows.Scan(&t.ID, &t.ManifestID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
+		err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Schedule, &t.Status, &t.Agent, &t.SourceNode, &t.CreatedBy,
 			&t.DependsOn, &t.BlockReason, &t.RunCount, &t.LastRunAt, &t.NextRunAt, &t.LastOutput, &createdStr, &updatedStr)
 		if err != nil {
 			return nil, err
@@ -458,6 +459,62 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		tasks = append(tasks, &t)
 	}
 	return tasks, rows.Err()
+}
+
+// populateOwnership fills Task.ManifestID via the relationships store
+// using a single batched ListIncomingForMany call. Used by every read
+// path so Task consumers continue to see ManifestID populated even
+// though the column was dropped in PR/M3.
+func (s *Store) populateOwnership(tasks []*Task) {
+	if s.rels == nil || len(tasks) == 0 {
+		return
+	}
+	ctx := context.Background()
+	ids := make([]string, 0, len(tasks))
+	mapByID := make(map[string]*Task, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		ids = append(ids, t.ID)
+		mapByID[t.ID] = t
+	}
+	if len(ids) == 0 {
+		return
+	}
+	byDst, err := s.rels.ListIncomingForMany(ctx, ids, relationships.EdgeOwns)
+	if err != nil {
+		return
+	}
+	for tid, edges := range byDst {
+		t, ok := mapByID[tid]
+		if !ok {
+			continue
+		}
+		for _, e := range edges {
+			if e.SrcKind == relationships.KindManifest {
+				t.ManifestID = e.SrcID
+				break
+			}
+		}
+	}
+}
+
+// lookupOwner returns the current manifest owner of a task (or "").
+func (s *Store) lookupOwner(ctx context.Context, taskID string) string {
+	if s.rels == nil {
+		return ""
+	}
+	edges, err := s.rels.ListIncoming(ctx, taskID, relationships.EdgeOwns)
+	if err != nil {
+		return ""
+	}
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindManifest {
+			return e.SrcID
+		}
+	}
+	return ""
 }
 
 // taskRunsColumns is the canonical column list for task_runs SELECTs.

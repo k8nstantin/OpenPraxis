@@ -100,7 +100,10 @@ func (s *Store) migrateManifestOwnership(ctx context.Context) (int, error) {
 		 WHERE project_id IS NOT NULL AND project_id != ''
 		   AND deleted_at = ''`)
 	if err != nil {
-		if isNoSuchTable(err) {
+		// Fresh DBs (post-M3) no longer have the project_id column at
+		// all — the read fails with "no such column", which means
+		// "nothing to backfill" and is the expected steady state.
+		if isNoSuchTable(err) || isNoSuchColumn(err) {
 			return 0, nil
 		}
 		return 0, err
@@ -164,7 +167,8 @@ func (s *Store) migrateTaskOwnership(ctx context.Context) (int, error) {
 		 WHERE manifest_id IS NOT NULL AND manifest_id != ''
 		   AND deleted_at = ''`)
 	if err != nil {
-		if isNoSuchTable(err) {
+		// Post-M3 fresh DBs lack the manifest_id column entirely.
+		if isNoSuchTable(err) || isNoSuchColumn(err) {
 			return 0, nil
 		}
 		return 0, err
@@ -433,6 +437,16 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// isNoSuchColumn returns true when err is SQLite's missing-column
+// error. Used by the ownership backfills which read legacy columns
+// that no longer exist on M3+ fresh DBs.
+func isNoSuchColumn(err error) bool {
+	if err == nil || err == sql.ErrNoRows {
+		return false
+	}
+	return contains(err.Error(), "no such column")
 }
 
 // isNoSuchTable returns true when err is SQLite's missing-table error.

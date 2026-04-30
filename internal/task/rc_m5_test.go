@@ -13,12 +13,14 @@ import (
 
 // insertRunningTask seeds a task row directly in the running status so
 // RecoverInFlight has something to classify. Bypasses Store.Create
-// because that path forces status='pending'.
+// because that path forces status='pending'. PR/M3 dropped the legacy
+// manifest_id column from tasks; ownership wiring lives in the
+// relationships store now.
 func insertRunningTask(t *testing.T, db *sql.DB, taskID string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := db.Exec(`INSERT INTO tasks (id, manifest_id, title, description, schedule, status, agent, source_node, created_by, created_at, updated_at)
-		VALUES (?, '', 'orphan', '', 'once', 'running', 'claude-code', '', 'test', ?, ?)`,
+	_, err := db.Exec(`INSERT INTO tasks (id, title, description, schedule, status, agent, source_node, created_by, created_at, updated_at)
+		VALUES (?, 'orphan', '', 'once', 'running', 'claude-code', '', 'test', ?, ?)`,
 		taskID, now, now)
 	if err != nil {
 		t.Fatalf("insert running task: %v", err)
