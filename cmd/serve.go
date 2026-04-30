@@ -19,7 +19,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/peer"
 	"github.com/k8nstantin/OpenPraxis/internal/setup"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
-	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 	"github.com/k8nstantin/OpenPraxis/internal/web"
 
 	"github.com/spf13/cobra"
@@ -218,69 +217,28 @@ var serveCmd = &cobra.Command{
 			slog.Info("backfilled cost data", "runs", backfilled)
 		}
 
-		// Watcher — independent server-side task audit
-		cwd, _ := os.Getwd()
-		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", cfg.Node.PeerID())
-		taskWatcher.SetCommentPoster(n.Comments)
+		// Post-task subsystem torn out per operator request 2026-04-30.
+		// To be redesigned. Only dependent activation remains on
+		// task_completed events.
+		_ = n.Watcher
+		_ = n.Comments
 
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
 
-			// Watcher hook: audit completed tasks
 			if event == "task_completed" {
 				go func() {
-					// Wait for agent's final git push / PR creation to complete
 					time.Sleep(5 * time.Second)
 					taskID := data["task_id"]
 					status := data["status"]
-					t, err := n.Tasks.Get(taskID)
-					if err != nil || t == nil {
-						return
-					}
-
-					// Only audit tasks that have a manifest
-					var manifestTitle, manifestContent string
-					if t.ManifestID != "" {
-						m, _ := n.Manifests.Get(t.ManifestID)
-						if m != nil {
-							manifestTitle = m.Title
-							manifestContent = m.Content
-						}
-					}
-
-					// Count actions for this task
-					actions, _ := n.Actions.ListByTask(taskID, 1000)
-					actionCount := len(actions)
-
-					// Get cost from latest run
-					var costUSD float64
-					runs, _ := n.Tasks.ListRuns(taskID, 1)
-					if len(runs) > 0 {
-						costUSD = runs[0].CostUSD
-					}
-
-					audit := taskWatcher.AuditTask(
-						t.ID, t.Title,
-						t.ManifestID, manifestTitle, manifestContent,
-						status, actionCount, costUSD,
-					)
-
-					// Watcher is observer-only: audit records + finding comments
-					// surface signal on the task, but never mutate task state or
-					// gate dependents. The paired review task is the sole decision
-					// point for downstream activation.
 					if status == "completed" || status == "max_turns" {
-						activated, actErr := n.Tasks.ActivateDependents(t.ID)
+						activated, actErr := n.Tasks.ActivateDependents(taskID)
 						if actErr != nil {
-							slog.Error("activate dependents failed", "task_id", t.ID, "error", actErr)
+							slog.Error("activate dependents failed", "task_id", taskID, "error", actErr)
 						} else if activated > 0 {
-							slog.Info("activated dependent tasks", "task_id", t.ID, "count", activated)
+							slog.Info("activated dependent tasks", "task_id", taskID, "count", activated)
 						}
 					}
-
-					hub.Broadcast(web.Event{Type: "watcher_audit", Data: map[string]string{
-						"task_id": taskID, "audit_id": audit.ID, "status": audit.Status,
-					}})
 				}()
 			}
 		})

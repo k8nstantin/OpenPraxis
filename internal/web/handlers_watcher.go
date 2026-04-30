@@ -1,9 +1,7 @@
 package web
 
 import (
-	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/watcher"
@@ -99,23 +97,16 @@ func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
 			costUSD = runs[0].CostUSD
 		}
 
-		// Create the watcher and run audit
-		cwd, _ := os.Getwd()
-		taskWatcher := watcher.New(n.Watcher, cwd, "go build ./...", n.PeerID())
-		taskWatcher.SetCommentPoster(n.Comments)
-		audit := taskWatcher.AuditTask(
-			t.ID, t.Title,
-			t.ManifestID, manifestTitle, manifestContent,
-			t.Status, actionCount, costUSD,
-		)
-
-		// If audit failed and task was "completed", downgrade
-		if audit.Status == "failed" && t.Status == "completed" {
-			if err := n.Tasks.UpdateStatus(t.ID, "failed"); err != nil {
-				slog.Warn("update task status to failed after audit", "error", err)
-			}
-		}
-
-		writeJSON(w, audit)
+		// Subsystem torn out per operator request 2026-04-30.
+		// Endpoint kept for routing compatibility but returns a stub.
+		_ = manifestTitle
+		_ = manifestContent
+		_ = actionCount
+		_ = costUSD
+		_ = t
+		writeJSON(w, map[string]string{
+			"status": "skipped",
+			"reason": "post-task audit subsystem torn out — to be redesigned",
+		})
 	}
 }
