@@ -37,8 +37,8 @@ func apiHook(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Record actions on PostToolUse + check visceral compliance
-		if event.HookEventName == "PostToolUse" && event.SessionID != "" {
+		// Record actions on PostToolUse/AfterTool + check visceral compliance
+		if (event.HookEventName == "PostToolUse" || event.HookEventName == "AfterTool") && event.SessionID != "" {
 			var toolName string
 			var toolInput, toolResponse any
 			var raw map[string]any
@@ -67,7 +67,7 @@ func apiHook(n *node.Node) http.HandlerFunc {
 		}
 
 		// On Stop: check if this session ever confirmed visceral rules
-		if event.HookEventName == "Stop" && event.SessionID != "" {
+		if (event.HookEventName == "Stop" || event.HookEventName == "AfterAgent") && event.SessionID != "" {
 			confs, _ := n.Actions.ListConfirmations(100)
 			confirmed := false
 			for _, c := range confs {
@@ -163,8 +163,46 @@ func apiHook(n *node.Node) http.HandlerFunc {
 	}
 }
 
-// readTranscript reads a Claude Code transcript JSONL file and extracts user/assistant turns.
+// readTranscript reads a transcript file (JSON or JSONL) and extracts user/assistant turns.
 func readTranscript(path string) []conversation.Turn {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	// Try parsing as Gemini JSON object first
+	var gemini struct {
+		Model string `json:"model"`
+		Turns []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal(data, &gemini); err == nil && len(gemini.Turns) > 0 {
+		var turns []conversation.Turn
+		for _, t := range gemini.Turns {
+			if t.Content == "" {
+				continue
+			}
+			role := t.Role
+			text := t.Content
+
+			// Truncate very long turns
+			if len(text) > 2000 {
+				text = text[:2000] + "..."
+			}
+
+			// Merge consecutive same-role turns
+			if len(turns) > 0 && turns[len(turns)-1].Role == role {
+				turns[len(turns)-1].Content += "\n" + text
+			} else {
+				turns = append(turns, conversation.Turn{Role: role, Content: text, Model: gemini.Model})
+			}
+		}
+		return turns
+	}
+
+	// Fall back to Claude Code transcript (JSONL)
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -249,8 +287,34 @@ type sessionCost struct {
 	Model             string
 }
 
-// parseTranscriptCost reads a Claude Code transcript JSONL and sums all token usage.
+// parseTranscriptCost reads a transcript (JSON or JSONL) and sums all token usage.
 func parseTranscriptCost(path string) sessionCost {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sessionCost{}
+	}
+
+	// Try parsing as Gemini JSON object first
+	var gemini struct {
+		Model      string `json:"model"`
+		TotalUsage struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		} `json:"totalUsage"`
+	}
+	if err := json.Unmarshal(data, &gemini); err == nil && gemini.TotalUsage.OutputTokens > 0 {
+		return computeCost(sessionCost{
+			InputTokens:       gemini.TotalUsage.InputTokens,
+			OutputTokens:      gemini.TotalUsage.OutputTokens,
+			CacheReadTokens:   gemini.TotalUsage.CacheReadInputTokens,
+			CacheCreateTokens: gemini.TotalUsage.CacheCreationInputTokens,
+			Model:             gemini.Model,
+		})
+	}
+
+	// Fall back to Claude Code transcript (JSONL)
 	f, err := os.Open(path)
 	if err != nil {
 		return sessionCost{}
@@ -290,23 +354,43 @@ func parseTranscriptCost(path string) sessionCost {
 		}
 	}
 
-	// Compute cost based on model pricing
-	// Opus: $15/M input, $75/M output, cache read $1.50/M, cache create $18.75/M
-	// Sonnet: $3/M input, $15/M output, cache read $0.30/M, cache create $3.75/M
+	return computeCost(cost)
+}
+
+// computeCost applies model-specific pricing to the raw token counts.
+func computeCost(cost sessionCost) sessionCost {
+	// Default pricing (Opus)
 	inputRate := 15.0   // per million
 	outputRate := 75.0
 	cacheReadRate := 1.5
 	cacheCreateRate := 18.75
-	if strings.Contains(cost.Model, "sonnet") {
+
+	m := strings.ToLower(cost.Model)
+	if strings.Contains(m, "sonnet") {
 		inputRate = 3.0
 		outputRate = 15.0
 		cacheReadRate = 0.30
 		cacheCreateRate = 3.75
-	} else if strings.Contains(cost.Model, "haiku") {
+	} else if strings.Contains(m, "haiku") {
 		inputRate = 0.25
 		outputRate = 1.25
 		cacheReadRate = 0.025
 		cacheCreateRate = 0.3125
+	} else if strings.Contains(m, "gemini") {
+		// Gemini 1.5 Pro: $3.50/M input, $10.50/M output
+		// Gemini 1.5 Flash: $0.075/M input, $0.30/M output
+		// (Approximate pricing for integration)
+		if strings.Contains(m, "pro") {
+			inputRate = 3.50
+			outputRate = 10.50
+			cacheReadRate = 0.875
+			cacheCreateRate = 3.50
+		} else {
+			inputRate = 0.075
+			outputRate = 0.30
+			cacheReadRate = 0.01875
+			cacheCreateRate = 0.075
+		}
 	}
 
 	cost.CostUSD = float64(cost.InputTokens)/1_000_000*inputRate +

@@ -52,6 +52,12 @@ func DetectAgents() []AgentConfig {
 			ConfigType: "settings_json",
 		},
 		{
+			Name:       "Gemini CLI",
+			ID:         "gemini-cli",
+			ConfigPath: filepath.Join(home, ".gemini", "settings.json"),
+			ConfigType: "gemini_settings_json",
+		},
+		{
 			Name:       "Cursor",
 			ID:         "cursor",
 			ConfigPath: filepath.Join(home, ".cursor", "mcp.json"),
@@ -134,6 +140,8 @@ func ConnectAgent(agent AgentConfig) error {
 		return writeMCPJSON(agent.ConfigPath)
 	case "settings_json":
 		return writeSettingsJSON(agent.ConfigPath)
+	case "gemini_settings_json":
+		return writeGeminiSettingsJSON(agent.ConfigPath)
 	default:
 		return fmt.Errorf("unknown config type: %s", agent.ConfigType)
 	}
@@ -146,6 +154,8 @@ func DisconnectAgent(agent AgentConfig) error {
 		return removeMCPJSON(agent.ConfigPath)
 	case "settings_json":
 		return removeSettingsJSON(agent.ConfigPath)
+	case "gemini_settings_json":
+		return removeGeminiSettingsJSON(agent.ConfigPath)
 	default:
 		return fmt.Errorf("unknown config type: %s", agent.ConfigType)
 	}
@@ -227,6 +237,49 @@ func writeSettingsJSON(path string) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// writeGeminiSettingsJSON merges MCP config and hooks into Gemini CLI's settings.json.
+func writeGeminiSettingsJSON(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
+	config := make(map[string]any)
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &config); err != nil {
+			slog.Warn("unmarshal gemini settings failed", "path", path, "error", err)
+		}
+	}
+
+	// Gemini CLI uses mcpServers at top level
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		servers = make(map[string]any)
+	}
+	servers["openpraxis"] = mcpEntry()
+	config["mcpServers"] = servers
+
+	// Add hooks for automatic conversation capture
+	// Gemini CLI hooks are shell commands that receive JSON on stdin
+	hookEntry := map[string]any{
+		"command": "curl -s -X POST -H 'Content-Type: application/json' -d @- http://127.0.0.1:8765/api/hook",
+		"stdin":   true,
+	}
+
+	hooks, ok := config["hooks"].(map[string]any)
+	if !ok {
+		hooks = make(map[string]any)
+	}
+	hooks["AfterTool"] = []any{hookEntry}
+	hooks["SessionEnd"] = []any{hookEntry}
+	config["hooks"] = hooks
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // removeMCPJSON removes openpraxis from an mcp.json file.
 func removeMCPJSON(path string) error {
 	data, err := os.ReadFile(path)
@@ -253,6 +306,11 @@ func removeSettingsJSON(path string) error {
 	return removeMCPJSON(path) // Same structure
 }
 
+// removeGeminiSettingsJSON removes openpraxis from Gemini CLI settings.json.
+func removeGeminiSettingsJSON(path string) error {
+	return removeMCPJSON(path) // Same structure for mcpServers
+}
+
 func agentInstalled(a AgentConfig) bool {
 	// Check if the agent's config directory exists
 	dir := filepath.Dir(a.ConfigPath)
@@ -264,6 +322,9 @@ func agentInstalled(a AgentConfig) bool {
 	switch a.ID {
 	case "claude-code":
 		_, err := findExecutable("claude")
+		return err == nil
+	case "gemini-cli":
+		_, err := findExecutable("gemini")
 		return err == nil
 	case "cursor":
 		_, err := findExecutable("cursor")

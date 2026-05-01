@@ -766,6 +766,7 @@
             <label class="form-label">Agent</label>
             <select id="tc-agent" class="conv-filter" style="font-size:13px;width:100%;padding:8px">
               <option value="claude-code">Claude Code</option>
+              <option value="gemini-cli">Gemini CLI</option>
               <option value="cursor">Cursor</option>
               <option value="copilot">Copilot</option>
               <option value="custom">Custom</option>

@@ -741,12 +741,25 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// scope and are already folded into knobs.MaxTurns by ResolveAll.
 	maxTurns := knobs.MaxTurns
 
-	args := []string{
-		"-p", prompt,
-		"--output-format", "stream-json",
-		"--verbose",
-		"--max-turns", fmt.Sprintf("%d", maxTurns),
-		"--allowedTools", strings.Join(allowedTools, ","),
+	var bin string
+	var args []string
+
+	if agent == "gemini-cli" {
+		bin = "gemini"
+		args = []string{
+			"-p", prompt,
+			"--output-format", "stream-json",
+			"--allowed-tools", strings.Join(allowedTools, ","),
+		}
+	} else {
+		bin = "claude"
+		args = []string{
+			"-p", prompt,
+			"--output-format", "stream-json",
+			"--verbose",
+			"--max-turns", fmt.Sprintf("%d", maxTurns),
+			"--allowedTools", strings.Join(allowedTools, ","),
+		}
 	}
 
 	// Pass --model when the resolver yields a non-empty model id. Empty
@@ -808,7 +821,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		"component", "runner", "task_id", t.ID,
 		"workdir", workDir, "base_sha", baseSHA)
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = workDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

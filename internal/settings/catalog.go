@@ -54,7 +54,7 @@ func Catalog() []KnobDef {
 		{Key: "timeout_minutes", Type: KnobInt, SliderMin: f(1), SliderMax: f(1440), SliderStep: f(1), Default: 30, Unit: "minutes", Description: "Max wall time per task run"},
 		{Key: "temperature", Type: KnobFloat, SliderMin: f(0), SliderMax: f(2), SliderStep: f(0.05), Default: 0.2, Description: "LLM sampling temperature"},
 		{Key: "reasoning_effort", Type: KnobEnum, EnumValues: []string{"minimal", "low", "medium", "high"}, Default: "medium", Description: "Thinking budget for reasoning models"},
-		{Key: "default_agent", Type: KnobEnum, EnumValues: []string{"claude-code", "codex", "cursor", "windsurf"}, Default: "claude-code", Description: "Agent runtime"},
+		{Key: "default_agent", Type: KnobEnum, EnumValues: []string{"claude-code", "gemini-cli", "codex", "cursor", "windsurf"}, Default: "claude-code", Description: "Agent runtime"},
 		{Key: "default_model", Type: KnobEnum, EnumValues: []string{
 			"",                   // empty = let the agent runtime choose its own default
 			"claude-opus-4-7",    // Opus 4.7 — highest capability, 1M context

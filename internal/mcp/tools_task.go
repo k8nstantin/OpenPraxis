@@ -18,7 +18,7 @@ func (s *Server) registerTaskTools() {
 			mcplib.WithString("description", mcplib.Description("Task description")),
 			mcplib.WithString("schedule", mcplib.Description("Schedule: 'once', '5m', '1h', 'at:ISO8601'. Default: once")),
 			mcplib.WithString("manifest_id", mcplib.Description("Manifest ID to link task to (optional — omit for standalone task)")),
-			mcplib.WithString("agent", mcplib.Description("Agent type: claude-code, cursor, etc. Default: claude-code")),
+			mcplib.WithString("agent", mcplib.Description("Agent type: gemini-cli, claude-code, cursor, etc. Default: claude-code")),
 			mcplib.WithNumber("max_turns", mcplib.Description("DEPRECATED (M4-T14): silently ignored with warn log. Set per-task max_turns via settings_set at task scope instead. Retained for backwards compatibility.")),
 			mcplib.WithString("depends_on", mcplib.Description("Task ID that must complete before this runs")),
 		),
