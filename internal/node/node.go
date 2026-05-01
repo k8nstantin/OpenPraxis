@@ -44,6 +44,10 @@ type Node struct {
 	Templates        *templates.Store
 	TemplatesResolv  *templates.Resolver
 	Comments         *comments.Store
+	// Attachments is the comment-attachment store (UB-2). On-disk files
+	// land under <data_dir>/attachments/<comment_id>/; rows live in the
+	// shared memories.db.
+	Attachments      *comments.AttachmentStore
 	// Relationships is the unified edge store (Praxis Relationships
 	// PR/M1). Lives alongside the existing dep tables during the M2
 	// dual-write phase; becomes the sole source after M3 cutover.
@@ -243,6 +247,15 @@ func New(cfg *config.Config) (*Node, error) {
 	if err := comments.InitSchema(index.DB()); err != nil {
 		return nil, fmt.Errorf("comments.InitSchema: %w", err)
 	}
+	if err := comments.InitAttachmentSchema(index.DB()); err != nil {
+		return nil, fmt.Errorf("comments.InitAttachmentSchema: %w", err)
+	}
+	attachmentRoot := cfg.Storage.DataDir
+	if attachmentRoot == "" {
+		attachmentRoot = "."
+	}
+	attachmentsStore := comments.NewAttachmentStore(index.DB(), attachmentRoot+"/attachments")
+	commentsStore.SetAttachments(attachmentsStore)
 
 	settingsStore := settings.NewStore(index.DB())
 	taskSettingsAdapter := &task.SettingsAdapter{Store: taskStore}
@@ -340,6 +353,7 @@ func New(cfg *config.Config) (*Node, error) {
 		Templates:        templatesStore,
 		TemplatesResolv:  templatesResolver,
 		Comments:         commentsStore,
+		Attachments:      attachmentsStore,
 		Relationships:    relationshipsStore,
 		Schedules:        scheduleStore,
 		Embedder:         embedder,

@@ -117,6 +117,14 @@ func Catalog() []KnobDef {
 		{Key: "frontend_dashboard_v2_settings", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /settings redirects to /dashboard/settings."},
 		{Key: "frontend_dashboard_v2_compliance", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /compliance redirects to /dashboard/compliance."},
 		{Key: "frontend_dashboard_v2_overview", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Per-tab cutover — when true, legacy /overview redirects to /dashboard/overview."},
+		// Comment attachment knobs (UB-2). Default 10 MiB cap matches the
+		// M1 manifest spec; allowlist mirrors the canonical default in
+		// internal/comments/attachments.go (image/*, text/*, plus a small
+		// set of structured document mimes). Override per product /
+		// manifest / task to widen or narrow the policy without a code
+		// change.
+		{Key: "comment_attachment_max_mb", Type: KnobInt, SliderMin: f(1), SliderMax: f(500), SliderStep: f(1), Default: 10, Unit: "MB", Description: "Max comment attachment size in megabytes. Uploads exceeding this cap are rejected with 413."},
+		{Key: "comment_attachment_allowed_mimes", Type: KnobString, Default: "image/,text/,application/pdf,application/json,application/xml,application/zip", Description: "Comma-separated mime allowlist for comment attachments. Entries ending with `/` match by prefix (e.g. `image/` matches `image/png`); others match exactly."},
 	}
 }
 

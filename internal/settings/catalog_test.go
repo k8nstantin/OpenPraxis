@@ -19,7 +19,9 @@ func TestCatalog_HasExpectedKnobCount(t *testing.T) {
 	// product → system resolver.
 	// 30 knobs: 29 existing + host_sampler_tick_seconds (added with the
 	// SystemSampler in the Stats backend chunk).
-	const want = 30
+	// +2 comment attachment knobs (UB-2): comment_attachment_max_mb +
+	// comment_attachment_allowed_mimes.
+	const want = 32
 	got := len(Catalog())
 	if got != want {
 		t.Fatalf("Catalog() returned %d knobs, want %d", got, want)

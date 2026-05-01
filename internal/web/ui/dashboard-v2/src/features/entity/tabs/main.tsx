@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import {
   useEntity,
@@ -13,7 +13,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DescriptionView } from '@/components/description-view'
 import { Gauge } from '@/components/gauge'
-import { MarkdownEditor } from '@/components/markdown-editor'
+import {
+  BlockNoteComposer,
+  type BlockNoteComposerHandle,
+} from '@/components/blocknote-composer'
 
 // Main tab — stats grid + repo card + description editor + revision
 // history. Same Markup ↔ Rendered toggle on description view; Cmd-Enter
@@ -74,34 +77,43 @@ export function MainTab({
   }, [kind, entityId])
 
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [initialDraft, setInitialDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const composerRef = useRef<BlockNoteComposerHandle>(null)
 
   const startEdit = () => {
-    setDraft(
-      ((entity.data as Product | Manifest | undefined)?.description ?? '') as string
-    )
+    const e = entity.data as Product | Manifest | undefined
+    // Manifests use `content` for the spec body; products use `description`.
+    const initial =
+      kind === 'product'
+        ? (e?.description ?? '')
+        : ((e as Manifest | undefined)?.content ?? e?.description ?? '')
+    setInitialDraft(initial)
     setEditing(true)
   }
   const cancel = () => {
     setEditing(false)
-    setDraft('')
+    composerRef.current?.clear()
   }
   const save = async () => {
+    if (!composerRef.current) return
+    setSaving(true)
     try {
-      // Manifests' edit body lives in `content` (the spec text) while
-      // products' lives in `description`. Both store a description-
-      // revision server-side via RecordDescriptionChange; the field
-      // name is the only divergence. Send both — the backend ignores
-      // the irrelevant one.
+      const draft = await composerRef.current.getMarkdown()
+      // Attachment ids uploaded during this edit are orphans —
+      // descriptions don't have a comment_id to claim against. URLs
+      // in the markdown still resolve via /api/attachments/{id}; row
+      // hygiene (orphan cleanup or claim-against-entity) is a follow-up.
       const patch =
         kind === 'product'
           ? { description: draft }
           : { content: draft }
       await update.mutateAsync(patch)
       setEditing(false)
-      setDraft('')
     } catch (e) {
       console.error(e)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -270,16 +282,15 @@ export function MainTab({
             <Skeleton className='h-24 w-full' />
           ) : editing ? (
             <div className='space-y-2'>
-              <MarkdownEditor
-                value={draft}
-                onChange={setDraft}
+              <BlockNoteComposer
+                ref={composerRef}
+                initialMarkdown={initialDraft}
                 onSave={save}
                 onCancel={cancel}
-                autoFocus
                 placeholder={
                   kind === 'product'
-                    ? 'Product description in markdown…'
-                    : 'Manifest spec in markdown…'
+                    ? 'Product description… drop files, paste images, type / for blocks'
+                    : 'Manifest spec… drop files, paste images, type / for blocks'
                 }
               />
               <div className='flex items-center justify-end gap-2'>
@@ -293,7 +304,7 @@ export function MainTab({
                   variant='ghost'
                   size='sm'
                   onClick={cancel}
-                  disabled={update.isPending}
+                  disabled={saving}
                 >
                   Cancel
                 </Button>
@@ -301,9 +312,9 @@ export function MainTab({
                   type='button'
                   size='sm'
                   onClick={save}
-                  disabled={update.isPending}
+                  disabled={saving}
                 >
-                  {update.isPending ? 'Saving…' : 'Save'}
+                  {saving ? 'Saving…' : 'Save'}
                 </Button>
               </div>
             </div>
