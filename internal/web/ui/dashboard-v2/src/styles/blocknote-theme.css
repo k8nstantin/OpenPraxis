@@ -1,0 +1,46 @@
+/* BlockNote → shadcn token bridge.
+ *
+ * BlockNote ships its own --bn-colors-* CSS vars (light + dark via
+ * data-color-scheme). Map them onto our shadcn tokens so the editor
+ * adopts the same background, border, ring, and surface colors as
+ * the rest of Portal V2 instead of the default mantine palette.
+ *
+ * Targets .bn-container[data-color-scheme] (BlockNote 0.49 wraps
+ * every editor in this element). Light + dark inherit because we
+ * remap the same tokens in both modes — shadcn's --background +
+ * --foreground already flip via .dark on <html>.
+ */
+
+.bn-container[data-color-scheme] {
+  --bn-colors-editor-text: var(--foreground);
+  --bn-colors-editor-background: var(--background);
+  --bn-colors-menu-text: var(--foreground);
+  --bn-colors-menu-background: var(--popover);
+  --bn-colors-tooltip-text: var(--popover-foreground);
+  --bn-colors-tooltip-background: var(--popover);
+  --bn-colors-hovered-text: var(--accent-foreground);
+  --bn-colors-hovered-background: var(--accent);
+  --bn-colors-selected-text: var(--primary-foreground);
+  --bn-colors-selected-background: var(--primary);
+  --bn-colors-disabled-text: var(--muted-foreground);
+  --bn-colors-disabled-background: var(--muted);
+  --bn-colors-shadow: var(--border);
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--muted-foreground);
+  --bn-border-radius: var(--radius);
+  --bn-font-family: inherit;
+}
+
+/* The mantine-themed inner editor inherits some focus rings from its
+ * default stylesheet that don't match shadcn — flatten them onto our
+ * --ring token so focused blocks/buttons match the rest of the app. */
+.bn-container [class*="mantine-"]:focus-visible,
+.bn-container [class*="mantine-"][data-focused="true"] {
+  outline-color: var(--ring) !important;
+}
+
+/* Compose surfaces sit inside our existing rounded card; remove the
+ * BlockNote container's inner padding so it lines up flush. */
+.bn-container .bn-editor {
+  padding: 0.5rem 0.75rem;
+}
