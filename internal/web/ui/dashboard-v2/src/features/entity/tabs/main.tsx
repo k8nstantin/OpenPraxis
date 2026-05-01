@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 import {
   useEntity,
   useEntityDescriptionHistory,
@@ -81,13 +81,16 @@ export function MainTab({
   const [saving, setSaving] = useState(false)
   const composerRef = useRef<BlockNoteComposerHandle>(null)
 
+  const e = entity.data as Product | Manifest | undefined
+  const currentText = (
+    kind === 'manifest'
+      ? ((e as Manifest | undefined)?.content ?? e?.description ?? '')
+      : (e?.description ?? '')
+  ).trim()
+  const hasDesc = currentText.length > 0
+
   const startEdit = () => {
-    const e = entity.data as Product | Manifest | undefined
-    const initial =
-      kind === 'manifest'
-        ? ((e as Manifest | undefined)?.content ?? e?.description ?? '')
-        : (e?.description ?? '')
-    setInitialDraft(initial)
+    setInitialDraft(currentText)
     setEditing(true)
   }
   const cancel = () => {
@@ -116,7 +119,6 @@ export function MainTab({
     }
   }
 
-  const e = entity.data as (Product | Manifest) | undefined
   const created = e?.created_at ? new Date(e.created_at) : null
   const updated = e?.updated_at ? new Date(e.updated_at) : null
 
@@ -271,8 +273,17 @@ export function MainTab({
                 className='h-7 px-2 text-xs'
                 onClick={startEdit}
               >
-                <Pencil className='mr-1 h-3 w-3' />
-                Edit
+                {hasDesc ? (
+                  <>
+                    <Pencil className='mr-1 h-3 w-3' />
+                    Edit
+                  </>
+                ) : (
+                  <>
+                    <Plus className='mr-1 h-3 w-3' />
+                    Add Description
+                  </>
+                )}
               </Button>
             </div>
           ) : null}
