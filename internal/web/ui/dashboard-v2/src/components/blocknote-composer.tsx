@@ -159,12 +159,6 @@ export function BlockNoteComposer({
   const editor = useCreateBlockNote({
     schema: opSchema,
     uploadFile,
-    dictionary: {
-      placeholders: {
-        default: placeholder ?? "Type '/' for blocks, '@' to mention…",
-        emptyDocument: undefined,
-      },
-    } as never,
   })
 
   const hydratedRef = useRef(false)
