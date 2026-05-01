@@ -16,11 +16,20 @@ import (
 // once on the shared DB handle. The Store also assumes the DB was opened with
 // WAL mode + busy_timeout=5000 per visceral rule #10.
 type Store struct {
-	db *sql.DB
+	db          *sql.DB
+	attachments *AttachmentStore
 }
 
 // NewStore wraps an existing DB handle. The caller retains ownership of the DB.
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
+
+// SetAttachments wires an AttachmentStore so Store.Delete cascades to
+// comment_attachments rows + on-disk files. Optional — nil is a no-op
+// at delete time, preserving the M1 store's behavior for callers that
+// don't care about attachments yet.
+func (s *Store) SetAttachments(a *AttachmentStore) {
+	s.attachments = a
+}
 
 // Exported sentinel errors so M2's API boundary (MCP + HTTP) can match with
 // errors.Is. Comment type validation is deliberately deferred to M1-T3; Add
@@ -167,8 +176,15 @@ func (s *Store) Edit(ctx context.Context, id, body string) error {
 	return nil
 }
 
-// Delete is a hard delete and is idempotent.
+// Delete is a hard delete and is idempotent. Cascades to comment
+// attachments (soft-delete row + remove on-disk file) when an
+// AttachmentStore has been wired via SetAttachments. Cascade errors
+// are non-fatal — the comment row deletion is the source of truth and
+// orphan attachment rows are recoverable by a separate sweeper.
 func (s *Store) Delete(ctx context.Context, id string) error {
+	if s.attachments != nil {
+		_ = s.attachments.DeleteByComment(ctx, id)
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM comments WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("comments: delete: %w", err)

@@ -652,6 +652,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	// /settings prefix without colliding (different verbs / suffixes).
 	registerSettingsExecRoutes(api, n)
 	registerCommentsRoutesFromNode(api, n)
+	registerAttachmentRoutes(api, n)
 	registerDescriptionRoutes(api, n)
 	registerTemplateRoutes(api, n)
 	registerScheduleRoutes(api, n)
