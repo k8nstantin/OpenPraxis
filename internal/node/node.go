@@ -53,6 +53,12 @@ type Node struct {
 	// fields off the task row; a follow-up cuts it over to read here.
 	// This PR persists schedules so the dashboard surfaces them.
 	Schedules        *schedule.Store
+	// ScheduleRunner consumes the schedules table — registers each
+	// current+enabled row against an in-memory robfig/cron/v3 ticker
+	// and dispatches by entity_kind on fire. Wired in cmd/serve.go
+	// after the node is built so the dispatcher map can capture
+	// references to n.Tasks etc.
+	ScheduleRunner   *schedule.Runner
 	runner           *task.Runner
 	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine

@@ -17,6 +17,7 @@ import (
 	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/peer"
+	"github.com/k8nstantin/OpenPraxis/internal/schedule"
 	"github.com/k8nstantin/OpenPraxis/internal/setup"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/web"
@@ -297,6 +298,23 @@ var serveCmd = &cobra.Command{
 		scheduler.SetResolver(n.SettingsResolver)
 		scheduler.Start()
 		defer scheduler.Stop()
+
+		// Schedules consumer — registers every current+enabled row in
+		// the schedules table against an in-memory robfig/cron/v3 ticker.
+		// Dispatches by entity_kind: today only `task`; product/manifest
+		// dispatchers slot in here when their fire semantics are defined.
+		// HTTP handlers in handlers_schedule.go call ScheduleRunner.Reload
+		// after every Create/Close so the in-memory cron stays in sync.
+		scheduleRunner := schedule.NewRunner(n.Schedules, map[string]schedule.DispatchFunc{
+			"task": func(ctx context.Context, entityID string, scheduleID int64) error {
+				now := time.Now().UTC().Format(time.RFC3339)
+				return n.Tasks.UpdateSchedule(entityID, "once", now)
+			},
+		})
+		n.ScheduleRunner = scheduleRunner
+		if err := scheduleRunner.Start(ctx); err != nil {
+			slog.Error("schedule runner start failed", "error", err)
+		}
 
 		// Cross-process action watcher — applies pause/resume/cancel signals
 		// written by other binaries (MCP) to tasks this runner owns.

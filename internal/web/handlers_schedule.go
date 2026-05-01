@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -224,6 +225,15 @@ func apiSchedulesCreate(n *node.Node) http.HandlerFunc {
 			writeScheduleError(w, code, err.Error(), status)
 			return
 		}
+		// Sync the in-memory cron with the DB so the new row fires on
+		// the next tick. Best-effort: log + continue if the runner is
+		// not yet wired (test harness path).
+		if n.ScheduleRunner != nil {
+			if rerr := n.ScheduleRunner.Reload(r.Context()); rerr != nil {
+				slog.Warn("schedule.Runner: reload after create failed",
+					"schedule_id", row.ID, "error", rerr)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(row)
@@ -252,6 +262,12 @@ func apiScheduleClose(n *node.Node) http.HandlerFunc {
 		if err := n.Schedules.Close(r.Context(), id, reason, by); err != nil {
 			writeScheduleError(w, "internal", err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if n.ScheduleRunner != nil {
+			if rerr := n.ScheduleRunner.Reload(r.Context()); rerr != nil {
+				slog.Warn("schedule.Runner: reload after close failed",
+					"schedule_id", id, "error", rerr)
+			}
 		}
 		writeJSON(w, map[string]any{"ok": true, "id": id})
 	}
