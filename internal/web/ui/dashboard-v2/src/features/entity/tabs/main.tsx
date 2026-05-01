@@ -83,11 +83,10 @@ export function MainTab({
 
   const startEdit = () => {
     const e = entity.data as Product | Manifest | undefined
-    // Manifests use `content` for the spec body; products use `description`.
     const initial =
-      kind === 'product'
-        ? (e?.description ?? '')
-        : ((e as Manifest | undefined)?.content ?? e?.description ?? '')
+      kind === 'manifest'
+        ? ((e as Manifest | undefined)?.content ?? e?.description ?? '')
+        : (e?.description ?? '')
     setInitialDraft(initial)
     setEditing(true)
   }
@@ -105,9 +104,9 @@ export function MainTab({
       // in the markdown still resolve via /api/attachments/{id}; row
       // hygiene (orphan cleanup or claim-against-entity) is a follow-up.
       const patch =
-        kind === 'product'
-          ? { description: draft }
-          : { content: draft }
+        kind === 'manifest'
+          ? { content: draft }
+          : { description: draft }
       await update.mutateAsync(patch)
       setEditing(false)
     } catch (e) {
@@ -135,19 +134,18 @@ export function MainTab({
         : 'text-emerald-500'
 
   const description =
-    kind === 'product'
-      ? (e as Product | undefined)?.description
-      : // Manifest's description-of-record is the spec body in `content`;
-        // `description` is just a one-liner summary. Show the spec.
-        ((e as Manifest | undefined)?.content ??
-          (e as Manifest | undefined)?.description)
+    kind === 'manifest'
+      ? // Manifests store the spec body in `content`; `description` is
+        // just a one-liner summary. Show the full spec.
+        ((e as Manifest | undefined)?.content ?? e?.description)
+      : e?.description
 
   const descriptionHTML =
-    kind === 'product'
-      ? ((e as Record<string, unknown> | undefined)?.['description_html'] as
+    kind === 'manifest'
+      ? ((e as Record<string, unknown> | undefined)?.['content_html'] as
           | string
           | undefined)
-      : ((e as Record<string, unknown> | undefined)?.['content_html'] as
+      : ((e as Record<string, unknown> | undefined)?.['description_html'] as
           | string
           | undefined)
 
