@@ -17,7 +17,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { MarkdownEditor } from '@/components/markdown-editor'
+import { cn } from '@/lib/utils'
+import {
+  MarkdownComposer,
+  usePendingAttachments,
+} from '@/components/markdown-composer'
+import { CommentAttachments } from '@/components/comment-attachments'
+import { uploadAttachment } from '@/lib/queries/attachments'
+import { useQueryClient } from '@tanstack/react-query'
+import { attachmentKeys } from '@/lib/queries/attachments'
 
 const TYPE_LABEL: Record<string, string> = {
   execution_review: 'Execution Review',
@@ -33,6 +41,12 @@ const COMPOSE_TYPES: Array<keyof typeof TYPE_LABEL> = [
   'user_note',
   'decision',
   'agent_note',
+  // description_revision is the "post as description" path. The
+  // existing entity-detail flow patches the description column
+  // directly; posting via this dropdown also writes a comment row
+  // with type=description_revision so the operator gets an audit
+  // trail without losing the canonical column edit.
+  'description_revision',
 ]
 
 function fmtTime(ts: number | string): string {
@@ -124,20 +138,39 @@ export function CommentsTab({
 
   const [composing, setComposing] = useState(false)
   const [mode, setMode] = useDescMode()
+  const attachments = usePendingAttachments()
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const qc = useQueryClient()
   const open = () => setComposing(true)
   const close = () => {
     setComposing(false)
     setComposeBody('')
+    attachments.clear()
+    setUploadError(null)
   }
   const post = async () => {
     const body = composeBody.trim()
-    if (!body) return
+    if (!body && attachments.pending.length === 0) return
+    setUploadError(null)
     try {
-      await create.mutateAsync({
+      const created = await create.mutateAsync({
         author: 'operator',
         type: composeType,
-        body,
+        body: body || '(attachment only)',
       })
+      // Upload pending attachments serially. Failure on any one
+      // surfaces the message and leaves the comment row intact —
+      // operator can re-attach via a follow-up comment.
+      for (const p of attachments.pending) {
+        try {
+          await uploadAttachment(created.id, p.file, 'operator')
+        } catch (err) {
+          setUploadError(
+            err instanceof Error ? err.message : String(err)
+          )
+        }
+      }
+      qc.invalidateQueries({ queryKey: attachmentKeys.byComment(created.id) })
       close()
     } catch (e) {
       console.error(e)
@@ -204,19 +237,26 @@ export function CommentsTab({
       {composing ? (
         <Card className='gap-0 py-0'>
           <CardContent className='space-y-2 px-3 py-2'>
-            <MarkdownEditor
+            <MarkdownComposer
               value={composeBody}
               onChange={setComposeBody}
               onSave={post}
               onCancel={close}
+              pending={attachments.pending}
+              onAddPending={attachments.add}
+              onRemovePending={attachments.remove}
               compact
               autoFocus
-              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to cancel)'
+              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to cancel). Drop files or paste a screenshot to attach.'
             />
             <div className='flex items-center justify-end gap-2'>
               {create.isError ? (
                 <span className='mr-auto text-xs text-rose-400'>
                   Post failed: {String(create.error)}
+                </span>
+              ) : uploadError ? (
+                <span className='mr-auto text-xs text-rose-400'>
+                  Attachment failed: {uploadError}
                 </span>
               ) : null}
               <Select
@@ -249,9 +289,16 @@ export function CommentsTab({
                 type='button'
                 size='sm'
                 onClick={post}
-                disabled={create.isPending || !composeBody.trim()}
+                disabled={
+                  create.isPending ||
+                  (!composeBody.trim() && attachments.pending.length === 0)
+                }
               >
-                {create.isPending ? 'Posting…' : 'Post'}
+                {create.isPending
+                  ? 'Posting…'
+                  : composeType === 'description_revision'
+                    ? 'Post as Description'
+                    : 'Post'}
               </Button>
             </div>
           </CardContent>
@@ -275,37 +322,51 @@ export function CommentsTab({
             </div>
           ) : (
             <div className='divide-y'>
-              {visible.map((c) => (
-                <div key={c.id} className='space-y-1 p-3 text-sm'>
-                  <div className='flex items-center justify-between gap-2'>
-                    <div className='flex items-center gap-2'>
-                      <code className='font-mono text-[11px]'>
-                        {c.author.slice(0, 16)}
-                      </code>
-                      <Badge variant='outline' className='text-[10px]'>
-                        {TYPE_LABEL[c.type] ?? c.type}
-                      </Badge>
+              {visible.map((c) => {
+                const isDesc = c.type === 'description_revision'
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      'space-y-1 p-3 text-sm',
+                      isDesc &&
+                        'border-l-2 border-emerald-400/60 bg-emerald-400/5'
+                    )}
+                  >
+                    <div className='flex items-center justify-between gap-2'>
+                      <div className='flex items-center gap-2'>
+                        <code className='font-mono text-[11px]'>
+                          {c.author.slice(0, 16)}
+                        </code>
+                        <Badge
+                          variant={isDesc ? 'default' : 'outline'}
+                          className='text-[10px]'
+                        >
+                          {TYPE_LABEL[c.type] ?? c.type}
+                        </Badge>
+                      </div>
+                      <span className='text-muted-foreground text-xs'>
+                        {fmtTime(c.created_at)}
+                      </span>
                     </div>
-                    <span className='text-muted-foreground text-xs'>
-                      {fmtTime(c.created_at)}
-                    </span>
+                    {mode === 'rendered' &&
+                    (c as { body_html?: string }).body_html ? (
+                      <div
+                        className='md-body text-sm'
+                        dangerouslySetInnerHTML={{
+                          __html:
+                            (c as { body_html?: string }).body_html ?? '',
+                        }}
+                      />
+                    ) : (
+                      <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
+                        {c.body}
+                      </pre>
+                    )}
+                    <CommentAttachments commentId={c.id} />
                   </div>
-                  {mode === 'rendered' &&
-                  (c as { body_html?: string }).body_html ? (
-                    <div
-                      className='md-body text-sm'
-                      dangerouslySetInnerHTML={{
-                        __html:
-                          (c as { body_html?: string }).body_html ?? '',
-                      }}
-                    />
-                  ) : (
-                    <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
-                      {c.body}
-                    </pre>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
