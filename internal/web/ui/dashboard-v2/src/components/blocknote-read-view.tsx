@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
-import { opSchema } from './blocknote-schema'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 
@@ -21,7 +20,7 @@ export function BlockNoteReadView({
   markdown: string
   className?: string
 }) {
-  const editor = useCreateBlockNote({ schema: opSchema })
+  const editor = useCreateBlockNote()
 
   useEffect(() => {
     let cancelled = false
