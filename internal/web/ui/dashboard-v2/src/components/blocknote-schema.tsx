@@ -164,9 +164,9 @@ export const ProductCard = makeCardSpec('product')
 export const opSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
-    taskCard: TaskCard,
-    manifestCard: ManifestCard,
-    productCard: ProductCard,
+    taskCard: TaskCard(),
+    manifestCard: ManifestCard(),
+    productCard: ProductCard(),
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
