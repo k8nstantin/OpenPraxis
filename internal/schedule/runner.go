@@ -204,10 +204,15 @@ func (r *Runner) makeJob(id int64, kind, entityID string) func() {
 }
 
 // buildSchedule chooses the cron.Schedule implementation for a row.
-// Non-empty cron_expr → standard cron parser. Empty → one-shot adapter
-// firing at run_at exactly once.
+// cron_expr="" or "once" → one-shot adapter firing at run_at exactly
+// once. Any other value → standard 5-field cron parser.
+//
+// The task store writes schedule="once" which propagates to the
+// schedules table as cron_expr="once"; the original code only checked
+// for empty string and tried to parse "once" as a cron expression,
+// producing a WARN log on every Reload and silently dropping the entry.
 func buildSchedule(row *Schedule) (cron.Schedule, error) {
-	if row.CronExpr != "" {
+	if row.CronExpr != "" && row.CronExpr != "once" {
 		// Use the standard 5-field cron parser (minute hour dom month dow).
 		// Robfig defaults to a 6-field parser with seconds; standard is
 		// what the schema implies and what UIs typically show.
@@ -220,9 +225,9 @@ func buildSchedule(row *Schedule) (cron.Schedule, error) {
 		}
 		return s, nil
 	}
-	// One-shot.
+	// One-shot — cron_expr is "" or the sentinel "once".
 	if row.RunAt == "" {
-		return nil, errors.New("buildSchedule: empty cron_expr requires run_at")
+		return nil, errors.New("buildSchedule: one-shot schedule requires run_at")
 	}
 	t, err := parseRunAt(row.RunAt)
 	if err != nil {
