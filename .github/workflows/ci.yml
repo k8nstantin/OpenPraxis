@@ -28,38 +28,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Node toolchain for the React dashboards. Both dist trees are
-      # embedded via go:embed (handler.go: ui/dashboard/dist,
-      # handler_v2.go: ui/dashboard-v2/dist) — both MUST build before
+      # Node toolchain for Portal V2 (the only React frontend after the
+      # legacy /dashboard route was retired). Embedded via go:embed
+      # (handler_v2.go: ui/dashboard-v2/dist) — must build before
       # `go build` or CI ships stale assets.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            internal/web/ui/dashboard/package-lock.json
             internal/web/ui/dashboard-v2/package-lock.json
 
-      - name: npm ci (dashboard)
-        working-directory: internal/web/ui/dashboard
-        run: npm ci
-
-      - name: tsc --noEmit (dashboard, strict TS gate)
-        working-directory: internal/web/ui/dashboard
-        run: npm run check
-
-      - name: npm test (dashboard vitest)
-        working-directory: internal/web/ui/dashboard
-        run: npm test
-
-      - name: npm run build (dashboard)
-        working-directory: internal/web/ui/dashboard
-        run: npm run build
-
-      # Portal V2 (dashboard-v2). PR #286 shipped a TS regression in
-      # dependencies.tsx / dep-picker.tsx that the Go pipeline missed
-      # entirely because the only frontend gate ran against the legacy
-      # dashboard. Adding tsc --noEmit + vite build here closes that hole.
       - name: npm ci (dashboard-v2)
         working-directory: internal/web/ui/dashboard-v2
         run: npm ci
