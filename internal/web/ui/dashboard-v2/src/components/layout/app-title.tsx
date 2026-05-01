@@ -19,14 +19,21 @@ export function AppTitle() {
           className='gap-0 py-0 hover:bg-transparent active:bg-transparent'
           asChild
         >
-          <div>
+          <div className='flex items-center gap-2'>
             <Link
               to='/'
               onClick={() => setOpenMobile(false)}
-              className='grid flex-1 text-start text-sm leading-tight'
+              className='flex flex-1 items-center gap-2 text-start text-sm leading-tight'
             >
-              <span className='truncate font-bold'>Shadcn-Admin</span>
-              <span className='truncate text-xs'>Vite + ShadcnUI</span>
+              <img
+                src='/images/openpraxis-icon.png'
+                alt='OpenPraxis'
+                className='h-8 w-8 shrink-0 rounded-md'
+              />
+              <div className='grid flex-1 leading-tight'>
+                <span className='truncate font-bold'>OpenPraxis</span>
+                <span className='text-muted-foreground truncate text-xs'>Portal V2</span>
+              </div>
             </Link>
             <ToggleSidebar />
           </div>
