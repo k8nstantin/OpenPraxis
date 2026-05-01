@@ -21,6 +21,7 @@ import {
   BlockNoteComposer,
   type BlockNoteComposerHandle,
 } from '@/components/blocknote-composer'
+import { BlockNoteReadView } from '@/components/blocknote-read-view'
 import { CommentAttachments } from '@/components/comment-attachments'
 import { claimAttachment } from '@/lib/queries/attachments'
 
@@ -309,15 +310,8 @@ export function CommentsTab({
                       {fmtTime(c.created_at)}
                     </span>
                   </div>
-                  {mode === 'rendered' &&
-                  (c as { body_html?: string }).body_html ? (
-                    <div
-                      className='md-body text-sm'
-                      dangerouslySetInnerHTML={{
-                        __html:
-                          (c as { body_html?: string }).body_html ?? '',
-                      }}
-                    />
+                  {mode === 'rendered' && c.body ? (
+                    <BlockNoteReadView markdown={c.body} />
                   ) : (
                     <pre className='font-mono text-xs whitespace-pre-wrap break-words'>
                       {c.body}

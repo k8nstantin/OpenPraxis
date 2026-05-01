@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { BlockNoteReadView } from '@/components/blocknote-read-view'
 
 const STORAGE_KEY = 'descMode'
 
@@ -39,11 +40,14 @@ function writeMode(m: Mode): void {
 // flips together.
 export function DescriptionView({
   raw,
-  rendered,
+  rendered: _rendered,
   className,
   emptyLabel = 'No description set.',
 }: {
   raw: string | undefined
+  // rendered (server-side body_html) is no longer used — BlockNote's
+  // read-only view re-renders directly from markdown so the visual
+  // matches compose 1:1. Kept in the prop signature for callers.
   rendered: string | undefined
   className?: string
   emptyLabel?: string
@@ -69,9 +73,8 @@ export function DescriptionView({
     window.dispatchEvent(new CustomEvent('desc-mode-change', { detail: m }))
   }
 
-  const isEmpty = !raw && !rendered
   const r = raw ?? ''
-  const html = rendered ?? ''
+  const isEmpty = !r.trim()
 
   return (
     <div className={cn('w-full', className)}>
@@ -102,13 +105,7 @@ export function DescriptionView({
           {r}
         </pre>
       ) : (
-        <div
-          className='md-body text-sm'
-          // Server-rendered HTML from the goldmark pipeline (Portal A
-          // sanitizes via bluemonday before responding); inline render
-          // is safe here because the source is the same backend.
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <BlockNoteReadView markdown={r} />
       )}
     </div>
   )
