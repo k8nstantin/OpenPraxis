@@ -495,3 +495,65 @@ func timed(label string, body func() error) error {
 }
 
 var _ = timed // suppress unused warning until the runner picks it up
+
+// ListAllCurrent returns every CURRENT, ENABLED schedule across all
+// entities whose RunsSoFar has not yet hit MaxRuns. Drives the
+// in-memory cron registration on Runner.Reload.
+//
+// Hot path: filtered by the partial index `idx_sched_due_current` so
+// the scan is bounded to current+enabled rows. No tick-time row filter
+// — the cron library owns the "is this fire-due" decision in memory
+// against each row's parsed cron expr / one-shot run_at.
+func (s *Store) ListAllCurrent(ctx context.Context) ([]*Schedule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+rowColumns+` FROM schedules
+		 WHERE valid_to = ''
+		   AND enabled = 1
+		   AND (max_runs = 0 OR runs_so_far < max_runs)
+		 ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all current: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*Schedule, 0, 16)
+	for rows.Next() {
+		row, err := scanSchedule(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan current: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// MarkFired increments runs_so_far for the given schedule id. If
+// max_runs > 0 and the new runs_so_far reaches max_runs, also flips
+// enabled to 0 so the next Reload skips it.
+//
+// One-shot schedules (cron_expr='') typically have max_runs=1 and
+// self-disable on the first MarkFired. Recurring (cron_expr non-empty)
+// schedules with max_runs=0 fire indefinitely.
+func (s *Store) MarkFired(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("schedule: MarkFired requires positive id, got %d", id)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE schedules
+		 SET runs_so_far = runs_so_far + 1,
+		     enabled = CASE
+		         WHEN max_runs > 0 AND runs_so_far + 1 >= max_runs THEN 0
+		         ELSE enabled
+		     END
+		 WHERE id = ? AND valid_to = ''`,
+		id)
+	if err != nil {
+		return fmt.Errorf("mark fired: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Already closed or id invalid — surface as a soft warning so
+		// the consumer can ignore it without bubbling.
+		slog.Debug("schedule MarkFired: zero rows affected", "id", id)
+	}
+	return nil
+}
