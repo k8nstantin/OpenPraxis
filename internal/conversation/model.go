@@ -11,7 +11,7 @@ type Conversation struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`        // Auto-generated or user-provided
 	Summary     string    `json:"summary"`       // AI-generated or first few lines
-	Agent       string    `json:"agent"`         // claude-code, cursor, copilot, etc.
+	Agent       string    `json:"agent"`         // gemini-cli, claude-code, cursor, copilot, etc.
 	Project     string    `json:"project"`       // Project context
 	Tags        []string  `json:"tags"`
 	Turns       []Turn    `json:"turns"`

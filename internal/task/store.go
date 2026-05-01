@@ -23,7 +23,7 @@ type Task struct {
 	// Store.UpdateStatus, which validates transitions and rejects
 	// illegal moves.
 	Status      string    `json:"status"`
-	Agent       string    `json:"agent"`      // agent type: claude-code, cursor, etc.
+	Agent       string    `json:"agent"`      // agent type: gemini-cli, claude-code, cursor, etc.
 	SourceNode  string    `json:"source_node"`
 	CreatedBy   string    `json:"created_by"` // session or dashboard
 	DependsOn   string    `json:"depends_on"`    // task ID that must complete before this runs
