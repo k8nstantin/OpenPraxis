@@ -7,11 +7,15 @@ const STORAGE_KEY = 'descMode'
 type Mode = 'markup' | 'rendered'
 
 function readMode(): Mode {
+  // Default to 'rendered' so markdown content (description, comment
+  // bodies, watcher findings) renders out of the box. Operator can
+  // toggle to 'markup' for raw-source view; the choice persists in
+  // localStorage and broadcasts via `desc-mode-change`.
   try {
     const v = localStorage.getItem(STORAGE_KEY)
-    return v === 'rendered' ? 'rendered' : 'markup'
+    return v === 'markup' ? 'markup' : 'rendered'
   } catch {
-    return 'markup'
+    return 'rendered'
   }
 }
 function writeMode(m: Mode): void {
