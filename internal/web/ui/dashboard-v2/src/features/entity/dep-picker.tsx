@@ -13,12 +13,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-// Search-picker over a list of {id, marker, title, status} rows. Used
-// by the Dependencies editor's Add buttons — same picker for products
-// and manifests, the candidate set is filtered upstream.
+// Search-picker over a list of {id, title, status} rows. Used by the
+// Dependencies editor's Add buttons — same picker for products and
+// manifests, the candidate set is filtered upstream.
+//
+// `marker` is the legacy 12-char shorthand. Post-#286 the API stopped
+// shipping it; callers may still pass `undefined`. Optional here so the
+// filter path can't throw on a missing value.
 export interface PickerRow {
   id: string
-  marker: string
+  marker?: string
   title: string
   status: string
 }
@@ -57,7 +61,8 @@ export function DepPicker({
     return rows.filter(
       (r) =>
         r.title.toLowerCase().includes(q) ||
-        r.marker.toLowerCase().includes(q)
+        r.id.toLowerCase().includes(q) ||
+        (r.marker ?? '').toLowerCase().includes(q)
     )
   }, [rows, query])
 
