@@ -136,6 +136,49 @@ func TestAttachmentStore_SoftDeleteRemovesFile(t *testing.T) {
 	}
 }
 
+func TestAttachmentStore_OrphanThenClaim(t *testing.T) {
+	cs, as, root := newAttachStore(t)
+	ctx := context.Background()
+
+	a, err := as.InsertOrphan(ctx, "alice", "draft.png", "image/png", []byte("PNG"))
+	if err != nil {
+		t.Fatalf("insert orphan: %v", err)
+	}
+	if a.CommentID != "" {
+		t.Errorf("orphan should have empty comment_id, got %q", a.CommentID)
+	}
+	if !strings.Contains(a.StoragePath, "_pending") {
+		t.Errorf("orphan storage_path should include _pending, got %q", a.StoragePath)
+	}
+	if _, err := os.Stat(a.StoragePath); err != nil {
+		t.Errorf("orphan file missing: %v", err)
+	}
+	if !strings.HasPrefix(a.StoragePath, root) {
+		t.Errorf("orphan path %q not under root %q", a.StoragePath, root)
+	}
+
+	c, _ := cs.Add(ctx, TargetTask, "task-claim", "alice", TypeUserNote, "real comment")
+	claimed, err := as.Claim(ctx, a.ID, c.ID)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.CommentID != c.ID {
+		t.Errorf("claim should set comment_id=%q, got %q", c.ID, claimed.CommentID)
+	}
+	got, err := as.ListByComment(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != a.ID {
+		t.Fatalf("list after claim: %+v", got)
+	}
+	// Re-claiming an already-claimed row returns ErrAttachmentNotFound
+	// (no live orphan rows match).
+	if _, err := as.Claim(ctx, a.ID, c.ID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Errorf("expected ErrAttachmentNotFound on double-claim, got %v", err)
+	}
+}
+
 func TestStoreDelete_CascadesAttachments(t *testing.T) {
 	cs, as, _ := newAttachStore(t)
 	ctx := context.Background()

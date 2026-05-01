@@ -146,17 +146,53 @@ func DefaultAllowedMimes() []string {
 	return out
 }
 
+// pendingDir is the on-disk directory for orphan attachments — uploaded
+// during compose before a comment id exists. Claim() rebinds them to a
+// real comment without moving the bytes; storage_path is stable.
+const pendingDir = "_pending"
+
 // Insert writes a new attachment row + persists the bytes on disk under
 // rootDir/<comment_id>/<id>__<filename>. Caller is responsible for
 // validating commentID exists, mime type is allowed, and size <= cap;
 // Insert performs a sanity check on the filename only.
 func (s *AttachmentStore) Insert(ctx context.Context, commentID, uploadedBy, filename, mimeType string, data []byte) (AttachmentRow, error) {
+	if commentID == "" {
+		return AttachmentRow{}, fmt.Errorf("comments: comment_id required")
+	}
+	return s.insertAt(ctx, commentID, commentID, uploadedBy, filename, mimeType, data)
+}
+
+// InsertOrphan writes an attachment row with an empty comment_id, used
+// by the BlockNote composer to upload during compose before the comment
+// is posted. Bytes land in rootDir/_pending/<id>__<filename>. Call Claim
+// to bind the row to a comment after the post lands.
+func (s *AttachmentStore) InsertOrphan(ctx context.Context, uploadedBy, filename, mimeType string, data []byte) (AttachmentRow, error) {
+	return s.insertAt(ctx, "", pendingDir, uploadedBy, filename, mimeType, data)
+}
+
+// Claim binds an orphan attachment (comment_id == "") to a real
+// commentID. Returns ErrAttachmentNotFound when no orphan row matched.
+func (s *AttachmentStore) Claim(ctx context.Context, id, commentID string) (AttachmentRow, error) {
+	if commentID == "" {
+		return AttachmentRow{}, fmt.Errorf("comments: comment_id required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE comment_attachments SET comment_id = ?
+		 WHERE id = ? AND comment_id = '' AND deleted_at = 0`,
+		commentID, id)
+	if err != nil {
+		return AttachmentRow{}, fmt.Errorf("comments: claim attachment: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return AttachmentRow{}, ErrAttachmentNotFound
+	}
+	return s.Get(ctx, id)
+}
+
+func (s *AttachmentStore) insertAt(ctx context.Context, commentID, dirName, uploadedBy, filename, mimeType string, data []byte) (AttachmentRow, error) {
 	clean := SanitizeFilename(filename)
 	if clean == "" {
 		return AttachmentRow{}, ErrEmptyFilename
-	}
-	if commentID == "" {
-		return AttachmentRow{}, fmt.Errorf("comments: comment_id required")
 	}
 
 	id, err := uuid.NewV7()
@@ -165,7 +201,7 @@ func (s *AttachmentStore) Insert(ctx context.Context, commentID, uploadedBy, fil
 	}
 	idStr := id.String()
 
-	dir := filepath.Join(s.rootDir, commentID)
+	dir := filepath.Join(s.rootDir, dirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return AttachmentRow{}, fmt.Errorf("comments: mkdir: %w", err)
 	}

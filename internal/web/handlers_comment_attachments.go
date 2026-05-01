@@ -280,6 +280,129 @@ func serveAttachment(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// uploadOrphanAttachment handles POST /api/attachments. Multipart upload
+// with no comment_id required — used by the BlockNote composer's
+// uploadFile hook so the operator sees the image inline while typing,
+// before the comment row exists. The returned id is held by the editor
+// and Claimed when the comment lands.
+func uploadOrphanAttachment(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.Attachments == nil {
+			writeAttachError(w, "internal", "attachment store unavailable", http.StatusInternalServerError)
+			return
+		}
+		maxMB := resolveAttachmentMaxMB(r, n)
+		maxBytes := int64(maxMB) * 1024 * 1024
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes+(1<<20))
+		if err := r.ParseMultipartForm(maxBytes); err != nil {
+			if strings.Contains(err.Error(), "request body too large") {
+				writeAttachError(w, "too_large",
+					fmt.Sprintf("attachment exceeds %d MB", maxMB),
+					http.StatusRequestEntityTooLarge)
+				return
+			}
+			writeAttachError(w, "invalid_multipart", err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		uploadedBy := r.URL.Query().Get("author")
+		if uploadedBy == "" {
+			uploadedBy = r.FormValue("author")
+		}
+
+		files := r.MultipartForm.File["file"]
+		if len(files) == 0 {
+			files = r.MultipartForm.File["files"]
+		}
+		if len(files) == 0 {
+			writeAttachError(w, "no_file", "no file part in multipart form", http.StatusBadRequest)
+			return
+		}
+
+		allowed := resolveAllowedMimes(r, n)
+		out := make([]attachmentView, 0, len(files))
+		for _, fh := range files {
+			if fh.Size > maxBytes {
+				writeAttachError(w, "too_large",
+					fmt.Sprintf("file %q (%d bytes) exceeds %d MB cap",
+						fh.Filename, fh.Size, maxMB),
+					http.StatusRequestEntityTooLarge)
+				return
+			}
+			mime := fh.Header.Get("Content-Type")
+			if !comments.MimeAllowed(mime, allowed) {
+				writeAttachError(w, "mime_denied",
+					fmt.Sprintf("mime %q not in allowlist", mime),
+					http.StatusUnsupportedMediaType)
+				return
+			}
+			f, err := fh.Open()
+			if err != nil {
+				writeAttachError(w, "internal", err.Error(), http.StatusInternalServerError)
+				return
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				writeAttachError(w, "internal", err.Error(), http.StatusInternalServerError)
+				return
+			}
+			a, err := n.Attachments.InsertOrphan(r.Context(), uploadedBy, fh.Filename, mime, data)
+			if err != nil {
+				writeAttachError(w, "internal", err.Error(), http.StatusInternalServerError)
+				return
+			}
+			out = append(out, toAttachmentView(a))
+		}
+		writeJSON(w, map[string]any{"attachments": out})
+	}
+}
+
+// claimAttachment handles POST /api/attachments/{id}/claim. Body:
+// {"comment_id": "..."}. Binds an orphan attachment row to a real
+// comment after the comment is posted. 404 when the row isn't an orphan
+// (already bound) or doesn't exist.
+func claimAttachment(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		if id == "" || n.Attachments == nil {
+			writeAttachError(w, "empty_id", "attachment id required", http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			CommentID string `json:"comment_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeAttachError(w, "invalid_json", err.Error(), http.StatusBadRequest)
+			return
+		}
+		if body.CommentID == "" {
+			writeAttachError(w, "empty_id", "comment_id required", http.StatusBadRequest)
+			return
+		}
+		if n.Comments != nil {
+			if _, err := n.Comments.Get(r.Context(), body.CommentID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeAttachError(w, "not_found", "comment not found", http.StatusNotFound)
+					return
+				}
+				writeAttachError(w, "internal", err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		a, err := n.Attachments.Claim(r.Context(), id, body.CommentID)
+		if err != nil {
+			if errors.Is(err, comments.ErrAttachmentNotFound) {
+				writeAttachError(w, "not_found", "orphan attachment not found", http.StatusNotFound)
+				return
+			}
+			writeAttachError(w, "internal", err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"attachment": toAttachmentView(a)})
+	}
+}
+
 // deleteAttachment handles DELETE /api/attachments/{id}.
 func deleteAttachment(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -303,6 +426,8 @@ func deleteAttachment(n *node.Node) http.HandlerFunc {
 func registerAttachmentRoutes(api *mux.Router, n *node.Node) {
 	api.HandleFunc("/comments/{commentId}/attachments", uploadAttachment(n)).Methods("POST")
 	api.HandleFunc("/comments/{commentId}/attachments", listAttachments(n)).Methods("GET")
+	api.HandleFunc("/attachments", uploadOrphanAttachment(n)).Methods("POST")
+	api.HandleFunc("/attachments/{id}/claim", claimAttachment(n)).Methods("POST")
 	api.HandleFunc("/attachments/{id}", serveAttachment(n)).Methods("GET")
 	api.HandleFunc("/attachments/{id}", deleteAttachment(n)).Methods("DELETE")
 }

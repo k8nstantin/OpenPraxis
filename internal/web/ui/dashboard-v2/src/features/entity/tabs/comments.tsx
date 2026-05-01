@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useCreateEntityComment,
   useEntityComments,
@@ -17,7 +17,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { MarkdownEditor } from '@/components/markdown-editor'
+import {
+  BlockNoteComposer,
+  type BlockNoteComposerHandle,
+} from '@/components/blocknote-composer'
+import { CommentAttachments } from '@/components/comment-attachments'
+import { claimAttachment } from '@/lib/queries/attachments'
 
 const TYPE_LABEL: Record<string, string> = {
   execution_review: 'Execution Review',
@@ -94,9 +99,9 @@ export function CommentsTab({
   const comments = useEntityComments(kind, entityId)
   const create = useCreateEntityComment(kind, entityId)
   const [filter, setFilter] = useState<string>('all')
-  const [composeBody, setComposeBody] = useState('')
   const [composeType, setComposeType] =
     useState<keyof typeof TYPE_LABEL>('user_note')
+  const composerRef = useRef<BlockNoteComposerHandle>(null)
 
   // Hide internal change-log records that the Dependencies tab posts
   // (agent_notes wrapped in <dependency_revision>) — they live in the
@@ -123,24 +128,40 @@ export function CommentsTab({
   }, [real, filter])
 
   const [composing, setComposing] = useState(false)
+  const [posting, setPosting] = useState(false)
   const [mode, setMode] = useDescMode()
   const open = () => setComposing(true)
   const close = () => {
     setComposing(false)
-    setComposeBody('')
+    composerRef.current?.clear()
   }
   const post = async () => {
-    const body = composeBody.trim()
-    if (!body) return
+    if (!composerRef.current) return
+    const body = (await composerRef.current.getMarkdown()).trim()
+    const attachmentIds = composerRef.current.getAttachmentIDs()
+    if (!body && attachmentIds.length === 0) return
+    setPosting(true)
     try {
-      await create.mutateAsync({
+      const created = (await create.mutateAsync({
         author: 'operator',
         type: composeType,
         body,
-      })
+      })) as { id?: string } | undefined
+      const newId = created?.id
+      if (newId && attachmentIds.length > 0) {
+        await Promise.all(
+          attachmentIds.map((aid) =>
+            claimAttachment(aid, newId).catch((err) => {
+              console.error('attachment claim failed', aid, err)
+            })
+          )
+        )
+      }
       close()
     } catch (e) {
       console.error(e)
+    } finally {
+      setPosting(false)
     }
   }
 
@@ -204,14 +225,11 @@ export function CommentsTab({
       {composing ? (
         <Card className='gap-0 py-0'>
           <CardContent className='space-y-2 px-3 py-2'>
-            <MarkdownEditor
-              value={composeBody}
-              onChange={setComposeBody}
+            <BlockNoteComposer
+              ref={composerRef}
               onSave={post}
               onCancel={close}
-              compact
-              autoFocus
-              placeholder='Add a comment in markdown… (Cmd-Enter to post, Esc to cancel)'
+              placeholder='Add a comment… drop files, paste images, type / for blocks (Cmd-Enter to post)'
             />
             <div className='flex items-center justify-end gap-2'>
               {create.isError ? (
@@ -241,7 +259,7 @@ export function CommentsTab({
                 variant='ghost'
                 size='sm'
                 onClick={close}
-                disabled={create.isPending}
+                disabled={posting}
               >
                 Cancel
               </Button>
@@ -249,9 +267,9 @@ export function CommentsTab({
                 type='button'
                 size='sm'
                 onClick={post}
-                disabled={create.isPending || !composeBody.trim()}
+                disabled={posting}
               >
-                {create.isPending ? 'Posting…' : 'Post'}
+                {posting ? 'Posting…' : 'Post'}
               </Button>
             </div>
           </CardContent>
@@ -304,6 +322,7 @@ export function CommentsTab({
                       {c.body}
                     </pre>
                   )}
+                  <CommentAttachments commentId={c.id} />
                 </div>
               ))}
             </div>
