@@ -43,11 +43,15 @@ function fmtTime(ts: number | string): string {
 
 type Mode = 'markup' | 'rendered'
 function readMode(): Mode {
+  // Default to 'rendered' — comment bodies are markdown that should
+  // render by default. Operator can opt into 'markup' (raw source)
+  // via the toggle; localStorage + the desc-mode-change event keep
+  // this in sync with description-view.tsx.
   try {
     const v = localStorage.getItem('descMode')
-    return v === 'rendered' ? 'rendered' : 'markup'
+    return v === 'markup' ? 'markup' : 'rendered'
   } catch {
-    return 'markup'
+    return 'rendered'
   }
 }
 function useDescMode(): [Mode, (m: Mode) => void] {
