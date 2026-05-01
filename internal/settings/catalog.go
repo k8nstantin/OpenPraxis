@@ -60,7 +60,11 @@ func Catalog() []KnobDef {
 		        "claude-opus-4-7",    // Opus 4.7 — highest capability, 1M context
 		        "claude-sonnet-4-6",  // Sonnet 4.6 — balanced
 		        "claude-haiku-4-5",   // Haiku 4.5 — fast / cheap
+		        "gemini-3-pro",
+		        "gemini-3-flash",
+		        "gemini-3-ultra",
 		        "gemini-2.5-pro",
+
 		        "gemini-2.5-flash",
 		        "gemini-2.0-pro-exp-02-05",
 		        "gemini-2.0-flash-exp",
