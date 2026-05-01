@@ -56,12 +56,15 @@ func Catalog() []KnobDef {
 		{Key: "reasoning_effort", Type: KnobEnum, EnumValues: []string{"minimal", "low", "medium", "high"}, Default: "medium", Description: "Thinking budget for reasoning models"},
 		{Key: "default_agent", Type: KnobEnum, EnumValues: []string{"claude-code", "gemini-cli", "codex", "cursor", "windsurf"}, Default: "claude-code", Description: "Agent runtime"},
 		{Key: "default_model", Type: KnobEnum, EnumValues: []string{
-			"",                   // empty = let the agent runtime choose its own default
-			"claude-opus-4-7",    // Opus 4.7 — highest capability, 1M context
-			"claude-sonnet-4-6",  // Sonnet 4.6 — balanced
-			"claude-haiku-4-5",   // Haiku 4.5 — fast / cheap
-		}, Default: "", Description: "Model ID passed to the agent as --model. Empty = agent default."},
-		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
+		        "",                   // empty = let the agent runtime choose its own default
+		        "claude-opus-4-7",    // Opus 4.7 — highest capability, 1M context
+		        "claude-sonnet-4-6",  // Sonnet 4.6 — balanced
+		        "claude-haiku-4-5",   // Haiku 4.5 — fast / cheap
+		        "gemini-2.5-pro",
+		        "gemini-2.5-flash",
+		        "gemini-2.0-pro-exp-02-05",
+		        "gemini-2.0-flash-exp",
+		}, Default: "", Description: "Model ID passed to the agent as --model. Empty = agent default."},		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
 		{Key: "approval_mode", Type: KnobEnum, EnumValues: []string{"auto", "manual", "on-failure"}, Default: "auto", Description: "Codex approval mode"},
 		// Prompt-context knobs — resolve via the same task → manifest →
 		// product → system inheritance chain as every other knob. Defaults
