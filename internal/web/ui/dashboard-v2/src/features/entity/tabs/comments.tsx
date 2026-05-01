@@ -85,10 +85,11 @@ function useDescMode(): [Mode, (m: Mode) => void] {
   return [mode, broadcast]
 }
 
-// Comments tab — full thread + compose. Same MarkdownEditor used
-// across description-edit. Cmd-Enter posts; Escape clears. Generic
-// over /api/products/{id}/comments and /api/manifests/{id}/comments —
-// same response shape, same compose payload.
+// Comments tab — full thread + compose. Uses BlockNoteComposer (the
+// same editor that drives description-edit on the Main tab). Cmd-Enter
+// posts; Escape clears. Generic over /api/products/{id}/comments and
+// /api/manifests/{id}/comments — same response shape, same compose
+// payload.
 export function CommentsTab({
   kind,
   entityId,
