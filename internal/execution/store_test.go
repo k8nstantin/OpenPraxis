@@ -165,6 +165,26 @@ func TestListByEntity_order(t *testing.T) {
 	}
 }
 
+func TestLookupModel_known(t *testing.T) {
+	info := LookupModel("claude-opus-4-7")
+	if info.Provider != "anthropic" {
+		t.Errorf("Provider: got %q want %q", info.Provider, "anthropic")
+	}
+	if info.ContextWindowSize != 1_000_000 {
+		t.Errorf("ContextWindowSize: got %d want %d", info.ContextWindowSize, 1_000_000)
+	}
+}
+
+func TestLookupModel_unknown(t *testing.T) {
+	info := LookupModel("some-future-model-xyz")
+	if info.Provider != "unknown" {
+		t.Errorf("Provider: got %q want %q", info.Provider, "unknown")
+	}
+	if info.ContextWindowSize != 200_000 {
+		t.Errorf("ContextWindowSize: got %d want %d", info.ContextWindowSize, 200_000)
+	}
+}
+
 func TestInsertSample_and_list(t *testing.T) {
 	db := openTestDB(t)
 	if err := InitSchema(db); err != nil {
