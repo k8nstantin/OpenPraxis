@@ -14,6 +14,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
+	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/peer"
@@ -216,6 +217,13 @@ var serveCmd = &cobra.Command{
 		// Backfill cost_usd for existing runs that have output but no cost recorded
 		if backfilled, err := n.Tasks.BackfillCosts(); err == nil && backfilled > 0 {
 			slog.Info("backfilled cost data", "runs", backfilled)
+		}
+
+		// Backfill execution_log from task_runs (one-shot, idempotent).
+		if migrated, err := executionlog.BackfillFromTaskRuns(ctx, n.Index.DB()); err != nil {
+			slog.Warn("execution_log backfill failed", "error", err)
+		} else if migrated > 0 {
+			slog.Info("execution_log: backfilled rows from task_runs", "count", migrated)
 		}
 
 		// Post-task subsystem torn out per operator request 2026-04-30.
