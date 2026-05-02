@@ -12,7 +12,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
 	"github.com/k8nstantin/OpenPraxis/internal/embedding"
-	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/idea"
 	"github.com/k8nstantin/OpenPraxis/internal/manifest"
 	"github.com/k8nstantin/OpenPraxis/internal/marker"
@@ -64,9 +63,6 @@ type Node struct {
 	// after the node is built so the dispatcher map can capture
 	// references to n.Tasks etc.
 	ScheduleRunner   *schedule.Runner
-	// ExecutionLog is the unified run-history store (EL/M1). Replaces
-	// task_runs + task_run_host_samples in EL/M5.
-	ExecutionLog     *executionlog.Store
 	runner           *task.Runner
 	hostSampler      *task.HostSampler
 	Embedder         *embedding.Engine
@@ -339,11 +335,6 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init schedule store: %w", err)
 	}
 
-	if err := executionlog.InitSchema(index.DB()); err != nil {
-		return nil, fmt.Errorf("init execution_log schema: %w", err)
-	}
-	executionStore := executionlog.NewStore(index.DB())
-
 	n := &Node{
 		Config:           cfg,
 		Store:            store,
@@ -365,7 +356,6 @@ func New(cfg *config.Config) (*Node, error) {
 		Attachments:      attachmentsStore,
 		Relationships:    relationshipsStore,
 		Schedules:        scheduleStore,
-		ExecutionLog:     executionStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
