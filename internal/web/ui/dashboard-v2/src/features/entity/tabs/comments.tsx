@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useCreateEntityComment,
   useEntityComments,
+  useUpdateEntity,
   type EntityKind,
 } from '@/lib/queries/entity'
 import type { Comment } from '@/lib/types'
@@ -27,7 +28,7 @@ import { claimAttachment } from '@/lib/queries/attachments'
 
 const TYPE_LABEL: Record<string, string> = {
   execution_review: 'Execution Review',
-  description_revision: 'Description Revision',
+  description_revision: 'Description',
   agent_note: 'Agent Note',
   user_note: 'Note',
   watcher_finding: 'Watcher Finding',
@@ -35,8 +36,13 @@ const TYPE_LABEL: Record<string, string> = {
   link: 'Link',
 }
 
+// Compose-time picker. `description_revision` posts an audit row AND
+// PATCHes the entity's stored description / content (legacy field stays
+// the source of truth — see post() below). Order: Note first so the
+// dropdown's default option is the most common case.
 const COMPOSE_TYPES: Array<keyof typeof TYPE_LABEL> = [
   'user_note',
+  'description_revision',
   'decision',
   'agent_note',
 ]
@@ -100,6 +106,7 @@ export function CommentsTab({
 }) {
   const comments = useEntityComments(kind, entityId)
   const create = useCreateEntityComment(kind, entityId)
+  const update = useUpdateEntity(kind, entityId)
   const [filter, setFilter] = useState<string>('all')
   const [composeType, setComposeType] =
     useState<keyof typeof TYPE_LABEL>('user_note')
@@ -158,6 +165,20 @@ export function CommentsTab({
             })
           )
         )
+      }
+      // Description-as-comment: keep the entity's stored description /
+      // content field as the source of truth. Post the comment row as a
+      // versioned audit trail, then PATCH the canonical field so the
+      // Main tab's DescriptionView reflects the new body. Manifests use
+      // `content` for the spec body; products + tasks use `description`.
+      if (composeType === 'description_revision' && body) {
+        const patch =
+          kind === 'manifest' ? { content: body } : { description: body }
+        try {
+          await update.mutateAsync(patch)
+        } catch (err) {
+          console.error('description PATCH after comment post failed', err)
+        }
       }
       close()
     } catch (e) {
@@ -231,7 +252,11 @@ export function CommentsTab({
               ref={composerRef}
               onSave={post}
               onCancel={close}
-              placeholder='Add a comment… drop files, paste images, type / for blocks (Cmd-Enter to post)'
+              placeholder={
+                composeType === 'description_revision'
+                  ? 'Write the description-of-record… drop files, paste images, type / for blocks (Cmd-Enter to post)'
+                  : 'Add a comment… drop files, paste images, type / for blocks (Cmd-Enter to post)'
+              }
             />
             <div className='flex items-center justify-end gap-2'>
               {create.isError ? (
@@ -271,7 +296,13 @@ export function CommentsTab({
                 onClick={post}
                 disabled={posting}
               >
-                {posting ? 'Posting…' : 'Post'}
+                {posting
+                  ? composeType === 'description_revision'
+                    ? 'Saving…'
+                    : 'Posting…'
+                  : composeType === 'description_revision'
+                    ? 'Post as Description'
+                    : 'Post'}
               </Button>
             </div>
           </CardContent>
@@ -296,13 +327,27 @@ export function CommentsTab({
           ) : (
             <div className='divide-y'>
               {visible.map((c) => (
-                <div key={c.id} className='space-y-1 p-3 text-sm'>
+                <div
+                  key={c.id}
+                  className={
+                    c.type === 'description_revision'
+                      ? 'space-y-1 border-l-2 border-emerald-500/60 bg-emerald-500/5 p-3 text-sm'
+                      : 'space-y-1 p-3 text-sm'
+                  }
+                >
                   <div className='flex items-center justify-between gap-2'>
                     <div className='flex items-center gap-2'>
                       <code className='font-mono text-[11px]'>
                         {c.author.slice(0, 16)}
                       </code>
-                      <Badge variant='outline' className='text-[10px]'>
+                      <Badge
+                        variant={
+                          c.type === 'description_revision'
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                        className='text-[10px]'
+                      >
                         {TYPE_LABEL[c.type] ?? c.type}
                       </Badge>
                     </div>
