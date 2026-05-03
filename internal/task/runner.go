@@ -12,7 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
@@ -40,6 +43,15 @@ type RunningTask struct {
 	// Model is the model id reported by the first assistant event — used to
 	// pick a pricing table and for calibration after the run.
 	Model string `json:"model"`
+	// ExecLogID is the execution_log row id minted at run start (EL/M2-T1).
+	// Empty when the runner was constructed without an execution_log store
+	// wired via SetExecutionLog. Subsequent updates (TTFB, completion,
+	// cancellation) target this id.
+	ExecLogID string `json:"exec_log_id,omitempty"`
+	// ttfbOnce guards the TTFB stamp so it lands on the very first
+	// type=assistant event of the run and never re-fires on subsequent
+	// assistant events (Claude Code emits many per logical message).
+	ttfbOnce sync.Once
 	// usageByMessage tracks the last-seen usage per message id so we can
 	// dedupe the repeated assistant events Claude Code emits while a single
 	// logical message streams. Not serialized; live-estimate only.
@@ -99,6 +111,70 @@ type Runner struct {
 	// are skipped (tests + pre-wire code paths). Wired via
 	// SetHostSampler from cmd/serve.go at boot.
 	hostSampler *HostSampler
+
+	// execLog is the unified-run-history store (EL/M2). Wired via
+	// SetExecutionLog. Nil → the runner skips the execution_log writes
+	// entirely, preserving pre-EL/M2 behavior for tests + harnesses
+	// that don't open a sqlite-backed store.
+	execLog *executionlog.Store
+}
+
+// SetExecutionLog wires the execution_log store onto the runner. The runner
+// inserts a row at run start (status=running) and updates it at completion.
+// Nil disables the feature — existing test harnesses that build a Runner
+// without a sqlite-backed store continue to work.
+func (r *Runner) SetExecutionLog(s *executionlog.Store) { r.execLog = s }
+
+// recordExecLogStart inserts the at-start execution_log row for a freshly
+// spawned task and stamps the new id onto rt.ExecLogID. The function is the
+// single write point for the run-start path so the test harness can exercise
+// it without spawning a subprocess. Errors are logged and swallowed — a
+// failure to write history must not abort a live run.
+func (r *Runner) recordExecLogStart(ctx context.Context, rt *RunningTask, t *Task, workDir string) {
+	if r == nil || r.execLog == nil || rt == nil || t == nil {
+		return
+	}
+	info := executionlog.LookupModel(rt.Model)
+	r.mu.RLock()
+	parallelCount := len(r.running)
+	r.mu.RUnlock()
+	row := executionlog.Row{
+		ID:               uuid.New().String(),
+		EntityKind:       executionlog.KindTask,
+		EntityID:         t.ID,
+		Trigger:          t.Schedule,
+		NodeID:           r.sourceNode,
+		Status:           "running",
+		StartedAt:        rt.StartedAt.UnixMilli(),
+		Model:            rt.Model,
+		Provider:         info.Provider,
+		ModelContextSize: info.ContextWindowSize,
+		AgentRuntime:     t.Agent,
+		ParallelTasks:    parallelCount,
+		WorktreePath:     workDir,
+	}
+	if err := r.execLog.Insert(ctx, row); err != nil {
+		slog.Warn("execution_log: insert run-start row failed",
+			"component", "runner", "task_id", t.ID, "error", err)
+		return
+	}
+	rt.ExecLogID = row.ID
+}
+
+// recordExecLogTTFB stamps `ttfb_ms` on the execution_log row at the moment
+// the first assistant event lands in the stream-reader goroutine. Single
+// write-point so the test exercises the helper directly without spawning a
+// subprocess. Errors are logged + swallowed — a failure to record TTFB must
+// not abort the live run.
+func (r *Runner) recordExecLogTTFB(ctx context.Context, rt *RunningTask) {
+	if r == nil || r.execLog == nil || rt == nil || rt.ExecLogID == "" {
+		return
+	}
+	ttfbMS := time.Since(rt.StartedAt).Milliseconds()
+	if err := r.execLog.UpdateCompletion(ctx, rt.ExecLogID, map[string]any{"ttfb_ms": ttfbMS}); err != nil {
+		slog.Warn("execution_log: update ttfb failed",
+			"component", "runner", "exec_log_id", rt.ExecLogID, "error", err)
+	}
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
@@ -863,6 +939,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		slog.Error("save runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
 
+	// EL/M2-T1: record the run-start row in execution_log. Nil store → no-op.
+	r.recordExecLogStart(ctx, rt, t, workDir)
+
 	if r.onEvent != nil {
 		r.onEvent("task_started", map[string]string{
 			"task_id": t.ID, "title": t.Title, "manifest": manifestTitle,
@@ -934,6 +1013,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				eventType, _ := event["type"].(string)
 
 				if eventType == "assistant" {
+					// EL/M2-T2: stamp TTFB on the first assistant event of
+					// the run. sync.Once guarantees one-shot semantics —
+					// Claude Code re-emits assistant events for every chunk
+					// of a streaming message, so the unguarded path would
+					// thrash UpdateCompletion.
+					rt.ttfbOnce.Do(func() {
+						r.recordExecLogTTFB(ctx, rt)
+					})
 					// Extract tool_use blocks from assistant message
 					if msg, ok := event["message"].(map[string]any); ok {
 						if content, ok := msg["content"].([]any); ok {
