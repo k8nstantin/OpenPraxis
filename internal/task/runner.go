@@ -12,7 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
@@ -40,6 +43,11 @@ type RunningTask struct {
 	// Model is the model id reported by the first assistant event — used to
 	// pick a pricing table and for calibration after the run.
 	Model string `json:"model"`
+	// ExecLogID is the execution_log row id minted at run start (EL/M2-T1).
+	// Empty when the runner was constructed without an execution_log store
+	// wired via SetExecutionLog. Subsequent updates (TTFB, completion,
+	// cancellation) target this id.
+	ExecLogID string `json:"exec_log_id,omitempty"`
 	// usageByMessage tracks the last-seen usage per message id so we can
 	// dedupe the repeated assistant events Claude Code emits while a single
 	// logical message streams. Not serialized; live-estimate only.
@@ -99,6 +107,54 @@ type Runner struct {
 	// are skipped (tests + pre-wire code paths). Wired via
 	// SetHostSampler from cmd/serve.go at boot.
 	hostSampler *HostSampler
+
+	// execLog is the unified-run-history store (EL/M2). Wired via
+	// SetExecutionLog. Nil → the runner skips the execution_log writes
+	// entirely, preserving pre-EL/M2 behavior for tests + harnesses
+	// that don't open a sqlite-backed store.
+	execLog *executionlog.Store
+}
+
+// SetExecutionLog wires the execution_log store onto the runner. The runner
+// inserts a row at run start (status=running) and updates it at completion.
+// Nil disables the feature — existing test harnesses that build a Runner
+// without a sqlite-backed store continue to work.
+func (r *Runner) SetExecutionLog(s *executionlog.Store) { r.execLog = s }
+
+// recordExecLogStart inserts the at-start execution_log row for a freshly
+// spawned task and stamps the new id onto rt.ExecLogID. The function is the
+// single write point for the run-start path so the test harness can exercise
+// it without spawning a subprocess. Errors are logged and swallowed — a
+// failure to write history must not abort a live run.
+func (r *Runner) recordExecLogStart(ctx context.Context, rt *RunningTask, t *Task, workDir string) {
+	if r == nil || r.execLog == nil || rt == nil || t == nil {
+		return
+	}
+	info := executionlog.LookupModel(rt.Model)
+	r.mu.RLock()
+	parallelCount := len(r.running)
+	r.mu.RUnlock()
+	row := executionlog.Row{
+		ID:               uuid.New().String(),
+		EntityKind:       executionlog.KindTask,
+		EntityID:         t.ID,
+		Trigger:          t.Schedule,
+		NodeID:           r.sourceNode,
+		Status:           "running",
+		StartedAt:        rt.StartedAt.UnixMilli(),
+		Model:            rt.Model,
+		Provider:         info.Provider,
+		ModelContextSize: info.ContextWindowSize,
+		AgentRuntime:     t.Agent,
+		ParallelTasks:    parallelCount,
+		WorktreePath:     workDir,
+	}
+	if err := r.execLog.Insert(ctx, row); err != nil {
+		slog.Warn("execution_log: insert run-start row failed",
+			"component", "runner", "task_id", t.ID, "error", err)
+		return
+	}
+	rt.ExecLogID = row.ID
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
@@ -862,6 +918,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	if err := r.store.SaveRuntimeState(t.ID, t.Title, manifestTitle, t.Agent, cmd.Process.Pid, false, 0, 0, "", rt.StartedAt); err != nil {
 		slog.Error("save runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
+
+	// EL/M2-T1: record the run-start row in execution_log. Nil store → no-op.
+	r.recordExecLogStart(ctx, rt, t, workDir)
 
 	if r.onEvent != nil {
 		r.onEvent("task_started", map[string]string{
