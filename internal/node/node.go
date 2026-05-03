@@ -430,6 +430,12 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	if n.TemplatesResolv != nil {
 		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
+	// EL/M2-T1: hand the unified execution_log store to the runner so
+	// every run start writes a row. Nil is safe — the runner's helper
+	// is a no-op when the store is not wired.
+	if n.ExecutionLog != nil {
+		n.runner.SetExecutionLog(n.ExecutionLog)
+	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
 	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
 	// attributes each sample to every currently-running task. Data lands
@@ -440,6 +446,13 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	n.hostSampler = task.NewHostSampler(tick)
 	n.hostSampler.Start(context.Background())
 	n.runner.SetHostSampler(n.hostSampler)
+	// EL/M2-T3: hand the same execution_log store to the sampler so the
+	// per-tick fanout also writes rows into execution_log_samples for
+	// every attached task whose run was registered via the runner's
+	// post-Attach RegisterExecLogRun call.
+	if n.ExecutionLog != nil {
+		n.hostSampler.SetExecLogStore(n.ExecutionLog)
+	}
 	return n.runner
 }
 

@@ -17,6 +17,8 @@ import (
 	gpload "github.com/shirou/gopsutil/v3/load"
 	gpmem "github.com/shirou/gopsutil/v3/mem"
 	gpnet "github.com/shirou/gopsutil/v3/net"
+
+	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 )
 
 // HostMetricsSample is one CPU/RSS reading of the serve process. The
@@ -76,6 +78,13 @@ type HostSampler struct {
 	pid      int
 	stopCh   chan struct{}
 	started  bool
+
+	// EL/M2-T3: per-tick fan-out also writes a row into
+	// execution_log_samples for any attached task that has been
+	// registered with an execution_log run id. Both fields are nil/empty
+	// pre-wire and the per-tick path no-ops on them.
+	execStore  *executionlog.Store
+	execRunIDs map[string]string
 }
 
 // NewHostSampler returns a sampler that polls every interval. interval
@@ -85,11 +94,38 @@ func NewHostSampler(interval time.Duration) *HostSampler {
 		interval = 5 * time.Second
 	}
 	return &HostSampler{
-		attached: make(map[string]*attachedTask),
-		interval: interval,
-		pid:      os.Getpid(),
-		stopCh:   make(chan struct{}),
+		attached:   make(map[string]*attachedTask),
+		interval:   interval,
+		pid:        os.Getpid(),
+		stopCh:     make(chan struct{}),
+		execRunIDs: make(map[string]string),
 	}
+}
+
+// SetExecLogStore wires the unified execution_log store onto the sampler so
+// the per-tick fanout can also append a row to execution_log_samples for
+// every attached task that has been registered via RegisterExecLogRun.
+// Nil is safe — the fanout simply skips the execution_log write.
+func (s *HostSampler) SetExecLogStore(store *executionlog.Store) {
+	s.mu.Lock()
+	s.execStore = store
+	s.mu.Unlock()
+}
+
+// RegisterExecLogRun associates an attached task with the execution_log
+// row id minted at run start (EL/M2-T1). Only attached tasks with a
+// registered run id participate in the per-tick execution_log_samples
+// write. Re-registering the same taskID overwrites the prior id.
+func (s *HostSampler) RegisterExecLogRun(taskID, execLogID string) {
+	if taskID == "" || execLogID == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.execRunIDs == nil {
+		s.execRunIDs = make(map[string]string)
+	}
+	s.execRunIDs[taskID] = execLogID
+	s.mu.Unlock()
 }
 
 // Start launches the poll loop. Idempotent — the second call is a no-op.
@@ -144,15 +180,55 @@ func (s *HostSampler) loop(ctx context.Context) {
 // fanout snaps host CPU/RSS into each attached task's sample buffer,
 // enriching per-task fields from the Attach-time callback. Host values
 // are identical across all attached tasks in one tick.
+//
+// EL/M2-T3: in the same pass, append a row to execution_log_samples for
+// every attached task that has been registered via RegisterExecLogRun.
+// The execution_log write is best-effort — failures are logged at warn
+// and never block the in-memory buffer that backs the legacy
+// task_run_host_samples flush on Detach.
 func (s *HostSampler) fanout(hostOnly HostMetricsSample) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, at := range s.attached {
+	store := s.execStore
+	type pendingExecSample struct {
+		runID string
+		smp   executionlog.Sample
+	}
+	var pending []pendingExecSample
+	for taskID, at := range s.attached {
 		sample := hostOnly
 		if at.statFn != nil {
 			sample.CostUSD, sample.Turns, sample.Actions = at.statFn()
 		}
 		at.samples = append(at.samples, sample)
+		if store != nil {
+			if runID, ok := s.execRunIDs[taskID]; ok && runID != "" {
+				pending = append(pending, pendingExecSample{
+					runID: runID,
+					smp: executionlog.Sample{
+						RunID:      runID,
+						TS:         sample.TS.UnixMilli(),
+						CPUPct:     sample.CPUPct,
+						RSSMB:      sample.RSSMB,
+						DiskUsedGB: sample.DiskUsedGB,
+						CostUSD:    sample.CostUSD,
+						Turns:      sample.Turns,
+						Actions:    sample.Actions,
+					},
+				})
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	if store == nil || len(pending) == 0 {
+		return
+	}
+	ctx := context.Background()
+	for _, p := range pending {
+		if err := store.InsertSample(ctx, p.smp); err != nil {
+			slog.Warn("execution_log_samples insert failed",
+				"component", "host_sampler", "run_id", p.runID, "error", err)
+		}
 	}
 }
 
@@ -176,6 +252,7 @@ func (s *HostSampler) Detach(taskID string) ([]HostMetricsSample, HostMetrics) {
 	s.mu.Lock()
 	at := s.attached[taskID]
 	delete(s.attached, taskID)
+	delete(s.execRunIDs, taskID)
 	s.mu.Unlock()
 	if at == nil {
 		return nil, HostMetrics{}

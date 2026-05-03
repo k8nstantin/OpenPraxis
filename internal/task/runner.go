@@ -12,7 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
@@ -40,6 +43,11 @@ type RunningTask struct {
 	// Model is the model id reported by the first assistant event — used to
 	// pick a pricing table and for calibration after the run.
 	Model string `json:"model"`
+	// ExecLogID is the execution_log row id minted at run start (EL/M2-T1).
+	// Empty when the runner was constructed without an execution_log store
+	// wired via SetExecutionLog. Subsequent updates (TTFB, completion,
+	// cancellation) target this id.
+	ExecLogID string `json:"exec_log_id,omitempty"`
 	// usageByMessage tracks the last-seen usage per message id so we can
 	// dedupe the repeated assistant events Claude Code emits while a single
 	// logical message streams. Not serialized; live-estimate only.
@@ -99,6 +107,198 @@ type Runner struct {
 	// are skipped (tests + pre-wire code paths). Wired via
 	// SetHostSampler from cmd/serve.go at boot.
 	hostSampler *HostSampler
+
+	// execLog is the unified-run-history store (EL/M2). Wired via
+	// SetExecutionLog. Nil → the runner skips the execution_log writes
+	// entirely, preserving pre-EL/M2 behavior for tests + harnesses
+	// that don't open a sqlite-backed store.
+	execLog *executionlog.Store
+}
+
+// SetExecutionLog wires the execution_log store onto the runner. The runner
+// inserts a row at run start (status=running) and updates it at completion.
+// Nil disables the feature — existing test harnesses that build a Runner
+// without a sqlite-backed store continue to work.
+func (r *Runner) SetExecutionLog(s *executionlog.Store) { r.execLog = s }
+
+// recordExecLogStart inserts the at-start execution_log row for a freshly
+// spawned task and stamps the new id onto rt.ExecLogID. The function is the
+// single write point for the run-start path so the test harness can exercise
+// it without spawning a subprocess. Errors are logged and swallowed — a
+// failure to write history must not abort a live run.
+func (r *Runner) recordExecLogStart(ctx context.Context, rt *RunningTask, t *Task, workDir string) {
+	if r == nil || r.execLog == nil || rt == nil || t == nil {
+		return
+	}
+	info := executionlog.LookupModel(rt.Model)
+	r.mu.RLock()
+	parallelCount := len(r.running)
+	r.mu.RUnlock()
+	row := executionlog.Row{
+		ID:               uuid.New().String(),
+		EntityKind:       executionlog.KindTask,
+		EntityID:         t.ID,
+		Trigger:          t.Schedule,
+		NodeID:           r.sourceNode,
+		Status:           "running",
+		StartedAt:        rt.StartedAt.UnixMilli(),
+		Model:            rt.Model,
+		Provider:         info.Provider,
+		ModelContextSize: info.ContextWindowSize,
+		AgentRuntime:     t.Agent,
+		ParallelTasks:    parallelCount,
+		WorktreePath:     workDir,
+	}
+	if err := r.execLog.Insert(ctx, row); err != nil {
+		slog.Warn("execution_log: insert run-start row failed",
+			"component", "runner", "task_id", t.ID, "error", err)
+		return
+	}
+	rt.ExecLogID = row.ID
+}
+
+// completionInput bundles the loose locals the runner pulls together at the
+// end of a task run so recordExecLogCompletion stays a single readable call.
+type completionInput struct {
+	status      string
+	reason      string
+	exitCode    int
+	costUSD     float64
+	numTurns    int
+	usage       Usage
+	output      string
+	hostMetrics HostMetrics
+	workDir     string
+	baseSHA     string
+}
+
+// recordExecLogCompletion writes the EL/M2 completion-side fields onto the
+// execution_log row started by recordExecLogStart. Best-effort: a nil store
+// or empty rt.ExecLogID is a no-op (test/pre-wire harnesses); insertion or
+// update errors are logged at warn and swallowed so the task_runs source-of-
+// truth path is unaffected. All values are pulled from the runner's locals
+// at completion plus a small `git -C workDir` walk for the worktree churn
+// fields (branch / commit_sha / commits / lines / files). pr_number stays 0
+// — no current code path knows it; M3+ will fill it from a PR-watcher.
+func (r *Runner) recordExecLogCompletion(ctx context.Context, rt *RunningTask, in completionInput) {
+	if r == nil || r.execLog == nil || rt == nil || rt.ExecLogID == "" {
+		return
+	}
+
+	derived := executionlog.ComputeDerived(executionlog.DerivedInput{
+		InputTokens:       int(in.usage.InputTokens),
+		OutputTokens:      int(in.usage.OutputTokens),
+		CacheReadTokens:   int(in.usage.CacheReadTokens),
+		CacheCreateTokens: int(in.usage.CacheCreationTokens),
+		CostUSD:           in.costUSD,
+		Turns:             in.numTurns,
+		Actions:           rt.Actions,
+		Model:             rt.Model,
+	})
+
+	now := time.Now().UnixMilli()
+	durMS := time.Since(rt.StartedAt).Milliseconds()
+	if durMS < 0 {
+		durMS = 0
+	}
+
+	churn := gitChurn(in.workDir, in.baseSHA)
+
+	exit := in.exitCode
+	fields := map[string]any{
+		"status":              in.status,
+		"terminal_reason":     in.reason,
+		"completed_at":        now,
+		"duration_ms":         durMS,
+		"exit_code":           &exit,
+		"input_tokens":        int(in.usage.InputTokens),
+		"output_tokens":       int(in.usage.OutputTokens),
+		"cache_read_tokens":   int(in.usage.CacheReadTokens),
+		"cache_create_tokens": int(in.usage.CacheCreationTokens),
+		"cost_usd":            in.costUSD,
+		"turns":               in.numTurns,
+		"actions":             rt.Actions,
+		"last_output":         in.output,
+		"pricing_version":     PricingVersion,
+		"cache_hit_rate_pct":  derived.CacheHitRatePct,
+		"context_window_pct":  derived.ContextWindowPct,
+		"cost_per_turn":       derived.CostPerTurn,
+		"cost_per_action":     derived.CostPerAction,
+		"tokens_per_turn":     derived.TokensPerTurn,
+		"cache_savings_usd":   derived.CacheSavingsUSD,
+		"peak_cpu_pct":        in.hostMetrics.PeakCPUPct,
+		"avg_cpu_pct":         in.hostMetrics.AvgCPUPct,
+		"peak_rss_mb":         in.hostMetrics.PeakRSSMB,
+		"avg_rss_mb":          in.hostMetrics.AvgRSSMB,
+		"branch":              churn.branch,
+		"commit_sha":          churn.commitSHA,
+		"commits":             churn.commits,
+		"lines_added":         churn.linesAdded,
+		"lines_removed":       churn.linesRemoved,
+		"files_changed":       churn.filesChanged,
+	}
+	if err := r.execLog.UpdateCompletion(ctx, rt.ExecLogID, fields); err != nil {
+		slog.Warn("execution_log: update completion failed",
+			"component", "runner", "task_id", rt.TaskID, "error", err)
+	}
+}
+
+// gitChurnResult is the parsed worktree state recorded on completion.
+type gitChurnResult struct {
+	branch       string
+	commitSHA    string
+	commits      int
+	linesAdded   int
+	linesRemoved int
+	filesChanged int
+}
+
+// gitChurn shells out four cheap `git -C workDir` commands to capture the
+// per-run code-change footprint. Mirrors the algorithm in
+// internal/watcher/watcher.go.RunGitGate but folds the four reads into one
+// helper so the runner can stamp them onto execution_log without pulling in
+// the watcher package. Empty workDir or baseSHA returns a zero result
+// (test harness path; the caller writes zeroes which is the "unknown" code
+// that downstream charts already handle).
+func gitChurn(workDir, baseSHA string) gitChurnResult {
+	var out gitChurnResult
+	if workDir == "" {
+		return out
+	}
+	if b, err := exec.Command("git", "-C", workDir, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		out.branch = strings.TrimSpace(string(b))
+	}
+	if b, err := exec.Command("git", "-C", workDir, "rev-parse", "HEAD").Output(); err == nil {
+		out.commitSHA = strings.TrimSpace(string(b))
+	}
+	if baseSHA == "" {
+		return out
+	}
+	if b, err := exec.Command("git", "-C", workDir, "rev-list", "--count", baseSHA+"..HEAD").Output(); err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(b)), "%d", &out.commits)
+	}
+	// `git diff --shortstat A..HEAD` → " 3 files changed, 42 insertions(+), 7 deletions(-)"
+	if b, err := exec.Command("git", "-C", workDir, "diff", "--shortstat", baseSHA+"..HEAD").Output(); err == nil {
+		parseShortstat(strings.TrimSpace(string(b)), &out.filesChanged, &out.linesAdded, &out.linesRemoved)
+	}
+	return out
+}
+
+// parseShortstat extracts files/insertions/deletions from `git diff
+// --shortstat` output. Tolerant of the all-deletions and all-insertions
+// shapes ("1 file changed, 5 deletions(-)" with no insertions clause).
+func parseShortstat(s string, files, added, removed *int) {
+	for _, part := range strings.Split(s, ",") {
+		p := strings.TrimSpace(part)
+		switch {
+		case strings.Contains(p, "file"):
+			fmt.Sscanf(p, "%d", files)
+		case strings.Contains(p, "insertion"):
+			fmt.Sscanf(p, "%d", added)
+		case strings.Contains(p, "deletion"):
+			fmt.Sscanf(p, "%d", removed)
+		}
+	}
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
@@ -863,6 +1063,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		slog.Error("save runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
 
+	// EL/M2-T1: record the run-start row in execution_log. Nil store → no-op.
+	r.recordExecLogStart(ctx, rt, t, workDir)
+
 	if r.onEvent != nil {
 		r.onEvent("task_started", map[string]string{
 			"task_id": t.ID, "title": t.Title, "manifest": manifestTitle,
@@ -883,6 +1086,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
 			return rtRef.CumulativeCostUSD, len(rtRef.usageByMessage), rtRef.Actions
 		})
+		// EL/M2-T3: associate the attached task with the execution_log
+		// run id minted by recordExecLogStart so the per-tick fanout
+		// also writes a row into execution_log_samples. Empty
+		// ExecLogID (no exec store wired, or the start-row insert
+		// failed) is a deliberate no-op on the sampler side.
+		if rt.ExecLogID != "" {
+			r.hostSampler.RegisterExecLogRun(t.ID, rt.ExecLogID)
+		}
 	}
 
 	// Read output in background
@@ -1139,6 +1350,26 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			}
 		}
 
+		// Detach host sampler unconditionally so the rolled-up metrics are
+		// available to BOTH the legacy task_runs.RecordHostMetrics path AND
+		// the EL/M2 execution_log UPDATE below. Detach is a no-op on a nil
+		// sampler / unattached task.
+		var (
+			hostSamples []HostMetricsSample
+			hostMetrics HostMetrics
+		)
+		if r.hostSampler != nil {
+			hostSamples, hostMetrics = r.hostSampler.Detach(t.ID)
+		}
+
+		// Capture the post-Wait exit code while cmd is still in scope. -1
+		// means "unknown" (process never started or wait failed before the
+		// kernel reaped it).
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+
 		// Record the run with history — always use real status, not "scheduled"
 		runID, err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model)
 		if err != nil {
@@ -1147,11 +1378,28 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			// Host CPU/RSS samples accumulated during the run → persist them
 			// alongside the run row. Failure here is not fatal — loss of
 			// host metrics must not fail task completion.
-			samples, metrics := r.hostSampler.Detach(t.ID)
-			if err := r.store.RecordHostMetrics(runID, samples, metrics); err != nil {
+			if err := r.store.RecordHostMetrics(runID, hostSamples, hostMetrics); err != nil {
 				slog.Warn("record host metrics failed", "component", "runner", "task_id", t.ID, "error", err)
 			}
 		}
+
+		// EL/M2-T4: dual-write the same completion data into execution_log.
+		// Best-effort — failures log and swallow so task_runs remains the
+		// source of truth during the dual-write window. Worktree git stats
+		// are computed against baseSHA before the defer above clears the
+		// directory.
+		r.recordExecLogCompletion(bgCtx, rt, completionInput{
+			status:      status,
+			reason:      reason,
+			exitCode:    exitCode,
+			costUSD:     costUSD,
+			numTurns:    numTurns,
+			usage:       finalUsage,
+			output:      output,
+			hostMetrics: hostMetrics,
+			workDir:     workDir,
+			baseSHA:     baseSHA,
+		})
 
 		// Post-completion execution-review gate. Successful completions must
 		// carry at least one agent-authored execution_review comment on the
