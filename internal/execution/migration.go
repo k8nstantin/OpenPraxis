@@ -141,7 +141,7 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			ToolCallsJSON:     "{}",
 			LastOutput:        tr.output,
 		}
-		ComputeDerived(&r)
+		applyDerivedToRow(&r)
 
 		_, err := tx.ExecContext(ctx, `INSERT INTO execution_log (
 			id, entity_kind, entity_id, run_number, trigger, node_id, status,
@@ -188,8 +188,13 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 	return inserted, nil
 }
 
-// ComputeDerived fills in ratio/derived fields on r from its raw counters.
-func ComputeDerived(r *Row) {
+// applyDerivedToRow fills the derived ratio fields on r in place. The
+// backfill path uses this so it can write a complete row in a single INSERT
+// — the runner uses the public ComputeDerived(DerivedInput) DerivedOutput
+// instead, since it builds a partial UPDATE map. This helper trusts
+// r.ModelContextSize (the backfill resolves it from LookupModel before
+// calling) instead of re-looking up by model id.
+func applyDerivedToRow(r *Row) {
 	if r.DurationMS == 0 && r.CompletedAt > r.StartedAt {
 		r.DurationMS = r.CompletedAt - r.StartedAt
 	}
@@ -212,6 +217,10 @@ func ComputeDerived(r *Row) {
 	if r.Actions > 0 {
 		r.CostPerAction = r.CostUSD / float64(r.Actions)
 	}
+
+	rates := defaultRates(r.Model)
+	r.CacheSavingsUSD = float64(r.CacheReadTokens) *
+		(rates.InputPerMTok - rates.CacheReadPerMTok) / 1_000_000
 }
 
 func terminalReason(status string) string {
