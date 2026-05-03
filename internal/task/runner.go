@@ -48,6 +48,10 @@ type RunningTask struct {
 	// wired via SetExecutionLog. Subsequent updates (TTFB, completion,
 	// cancellation) target this id.
 	ExecLogID string `json:"exec_log_id,omitempty"`
+	// ttfbOnce guards the TTFB stamp so it lands on the very first
+	// type=assistant event of the run and never re-fires on subsequent
+	// assistant events (Claude Code emits many per logical message).
+	ttfbOnce sync.Once
 	// usageByMessage tracks the last-seen usage per message id so we can
 	// dedupe the repeated assistant events Claude Code emits while a single
 	// logical message streams. Not serialized; live-estimate only.
@@ -155,6 +159,22 @@ func (r *Runner) recordExecLogStart(ctx context.Context, rt *RunningTask, t *Tas
 		return
 	}
 	rt.ExecLogID = row.ID
+}
+
+// recordExecLogTTFB stamps `ttfb_ms` on the execution_log row at the moment
+// the first assistant event lands in the stream-reader goroutine. Single
+// write-point so the test exercises the helper directly without spawning a
+// subprocess. Errors are logged + swallowed — a failure to record TTFB must
+// not abort the live run.
+func (r *Runner) recordExecLogTTFB(ctx context.Context, rt *RunningTask) {
+	if r == nil || r.execLog == nil || rt == nil || rt.ExecLogID == "" {
+		return
+	}
+	ttfbMS := time.Since(rt.StartedAt).Milliseconds()
+	if err := r.execLog.UpdateCompletion(ctx, rt.ExecLogID, map[string]any{"ttfb_ms": ttfbMS}); err != nil {
+		slog.Warn("execution_log: update ttfb failed",
+			"component", "runner", "exec_log_id", rt.ExecLogID, "error", err)
+	}
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
@@ -993,6 +1013,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				eventType, _ := event["type"].(string)
 
 				if eventType == "assistant" {
+					// EL/M2-T2: stamp TTFB on the first assistant event of
+					// the run. sync.Once guarantees one-shot semantics —
+					// Claude Code re-emits assistant events for every chunk
+					// of a streaming message, so the unguarded path would
+					// thrash UpdateCompletion.
+					rt.ttfbOnce.Do(func() {
+						r.recordExecLogTTFB(ctx, rt)
+					})
 					// Extract tool_use blocks from assistant message
 					if msg, ok := event["message"].(map[string]any); ok {
 						if content, ok := msg["content"].([]any); ok {
