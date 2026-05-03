@@ -942,6 +942,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
 			return rtRef.CumulativeCostUSD, len(rtRef.usageByMessage), rtRef.Actions
 		})
+		// EL/M2-T3: associate the attached task with the execution_log
+		// run id minted by recordExecLogStart so the per-tick fanout
+		// also writes a row into execution_log_samples. Empty
+		// ExecLogID (no exec store wired, or the start-row insert
+		// failed) is a deliberate no-op on the sampler side.
+		if rt.ExecLogID != "" {
+			r.hostSampler.RegisterExecLogRun(t.ID, rt.ExecLogID)
+		}
 	}
 
 	// Read output in background

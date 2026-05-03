@@ -446,6 +446,13 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	n.hostSampler = task.NewHostSampler(tick)
 	n.hostSampler.Start(context.Background())
 	n.runner.SetHostSampler(n.hostSampler)
+	// EL/M2-T3: hand the same execution_log store to the sampler so the
+	// per-tick fanout also writes rows into execution_log_samples for
+	// every attached task whose run was registered via the runner's
+	// post-Attach RegisterExecLogRun call.
+	if n.ExecutionLog != nil {
+		n.hostSampler.SetExecLogStore(n.ExecutionLog)
+	}
 	return n.runner
 }
 
