@@ -137,11 +137,33 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
   )
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, children, range, onRange }: {
+  title: string
+  children: React.ReactNode
+  range?: RangeDays
+  onRange?: (r: RangeDays) => void
+}) {
   return (
     <Card>
       <CardHeader className='pb-1 pt-3'>
-        <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>{title}</CardTitle>
+        <div className='flex items-center justify-between'>
+          <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>{title}</CardTitle>
+          {onRange && (
+            <div className='inline-flex rounded border bg-muted/30 p-0.5 text-[10px]'>
+              {RANGES.map(r => (
+                <button key={r.days} type='button'
+                  onClick={() => onRange(r.days)}
+                  className={cn('rounded px-2 py-0.5 transition-colors',
+                    range === r.days
+                      ? 'bg-primary/20 text-foreground font-semibold'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </CardHeader>
       <CardContent className='pb-3'>{children}</CardContent>
     </Card>
@@ -154,7 +176,7 @@ function Empty() {
 
 // ── Tab: Runs ─────────────────────────────────────────────────────────────
 
-function RunsTab({ data }: { data: StatsHistory }) {
+function RunsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
   const runs = padDays(data.runs, d => ({ day: d, completed: 0, failed: 0, avg_dur_sec: 0, max_dur_sec: 0, avg_run_number: 0 }))
   const days = runs.map(d => d.day.slice(5)) // MM-DD
   const completed = runs.map(d => d.completed)
@@ -173,7 +195,7 @@ function RunsTab({ data }: { data: StatsHistory }) {
         <Card><CardContent className='pt-4'><Kpi label='Errors' value={String(t.total_errors)} accent={t.total_errors > 0 ? 'text-rose-400' : undefined} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily runs — completed vs failed'>
+        <ChartCard title='Daily runs — completed vs failed' range={range} onRange={onRange}>
           {data.runs.length ? <EChart height={180} option={{
             grid: { left: 32, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -217,7 +239,7 @@ function RunsTab({ data }: { data: StatsHistory }) {
 
 // ── Tab: Efficiency ───────────────────────────────────────────────────────
 
-function EfficiencyTab({ data }: { data: StatsHistory }) {
+function EfficiencyTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
   const eff  = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
   const days = eff.map(d => d.day.slice(5))
   const t = data.totals
@@ -231,7 +253,7 @@ function EfficiencyTab({ data }: { data: StatsHistory }) {
         <Card><CardContent className='pt-4'><Kpi label='Total errors' value={String(t.total_errors)} accent={t.total_errors > 10 ? 'text-rose-400' : undefined} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Avg turns per run'>
+        <ChartCard title='Avg turns per run' range={range} onRange={onRange}>
           {eff.length ? <EChart height={180} option={{
             grid: { left: 36, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis' },
@@ -292,7 +314,7 @@ function EfficiencyTab({ data }: { data: StatsHistory }) {
 
 // ── Tab: Tokens ───────────────────────────────────────────────────────────
 
-function TokensTab({ data }: { data: StatsHistory }) {
+function TokensTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
   const tok  = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
   const days = tok.map(d => d.day.slice(5))
   const t = data.totals
@@ -307,7 +329,7 @@ function TokensTab({ data }: { data: StatsHistory }) {
         <Card><CardContent className='pt-4'><Kpi label='Total tokens' value={fmt(totalAll)} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily token volumes (stacked)'>
+        <ChartCard title='Daily token volumes (stacked)' range={range} onRange={onRange}>
           {tok.length ? <EChart height={180} option={{
             grid: { left: 40, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -355,7 +377,7 @@ function TokensTab({ data }: { data: StatsHistory }) {
 
 // ── Tab: Productivity ─────────────────────────────────────────────────────
 
-function ProductivityTab({ data, range }: { data: StatsHistory; range: RangeDays }) {
+function ProductivityTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
   const git = useGitHistory(range)
   const merged = mergeProductivity(data.productivity, git.data?.daily ?? [])
   const prod = padDays(merged.length ? merged : data.productivity, d => ({ day: d, lines_added: 0, lines_removed: 0, files_changed: 0, commits: 0, tests_run: 0, tests_passed: 0, tests_failed: 0, prs_opened: 0 }))
@@ -388,7 +410,7 @@ function ProductivityTab({ data, range }: { data: StatsHistory; range: RangeDays
       )}
       {hasData && (
         <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-          <ChartCard title='Lines added / removed per day'>
+          <ChartCard title='Lines added / removed per day' range={range} onRange={onRange}>
             <EChart height={180} option={{
               grid: { left: 40, right: 8, top: 8, bottom: 24 },
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -432,7 +454,7 @@ function ProductivityTab({ data, range }: { data: StatsHistory; range: RangeDays
 
 // ── Tab: Agents ───────────────────────────────────────────────────────────
 
-function AgentsTab({ data }: { data: StatsHistory }) {
+function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
   const modelColors: Record<string, string> = {
     'claude-opus-4-7': '#f43f5e', 'claude-sonnet-4-6': '#a78bfa',
     'claude-haiku-4-5': '#38bdf8', 'unknown': '#71717a',
@@ -508,11 +530,11 @@ export function StatsPage() {
               <TabsTrigger value='productivity'>Productivity</TabsTrigger>
               <TabsTrigger value='agents'>Agents</TabsTrigger>
             </TabsList>
-            <TabsContent value='runs'         className='mt-4'><RunsTab         data={data} /></TabsContent>
-            <TabsContent value='efficiency'   className='mt-4'><EfficiencyTab   data={data} /></TabsContent>
-            <TabsContent value='tokens'       className='mt-4'><TokensTab       data={data} /></TabsContent>
-            <TabsContent value='productivity' className='mt-4'><ProductivityTab data={data} range={range} /></TabsContent>
-            <TabsContent value='agents'       className='mt-4'><AgentsTab       data={data} /></TabsContent>
+            <TabsContent value='runs'         className='mt-4'><RunsTab         data={data} range={range} onRange={setRange} /></TabsContent>
+            <TabsContent value='efficiency'   className='mt-4'><EfficiencyTab   data={data} range={range} onRange={setRange} /></TabsContent>
+            <TabsContent value='tokens'       className='mt-4'><TokensTab       data={data} range={range} onRange={setRange} /></TabsContent>
+            <TabsContent value='productivity' className='mt-4'><ProductivityTab data={data} range={range} onRange={setRange} /></TabsContent>
+            <TabsContent value='agents'       className='mt-4'><AgentsTab       data={data} range={range} onRange={setRange} /></TabsContent>
           </Tabs>
         ) : null}
       </Main>
