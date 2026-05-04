@@ -516,6 +516,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/stats/overview", apiStatsOverview(n)).Methods("GET")
 	api.HandleFunc("/stats/charts", apiStatsCharts(n)).Methods("GET")
 	api.HandleFunc("/stats/git", apiGitProductivity(n)).Methods("GET")
+	api.HandleFunc("/stats/history", apiStatsHistory(n)).Methods("GET")
 	api.HandleFunc("/run-stats", apiRunStats(n)).Methods("GET")
 	api.HandleFunc("/system-stats", apiSystemStats(n)).Methods("GET")
 	api.HandleFunc("/schedules/templates", apiScheduleTemplates()).Methods("GET")
