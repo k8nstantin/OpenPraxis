@@ -32,7 +32,7 @@ func TestInitSchema_idempotent(t *testing.T) {
 	}
 }
 
-func TestInsert_and_get(t *testing.T) {
+func TestInsert_and_listByRun(t *testing.T) {
 	db := openTestDB(t)
 	if err := InitSchema(db); err != nil {
 		t.Fatal(err)
@@ -41,82 +41,88 @@ func TestInsert_and_get(t *testing.T) {
 	ctx := context.Background()
 	exitCode := 0
 	prNum := 42
+	runUID := "run-uid-001"
 	in := Row{
-		ID:                "test-run-001",
-		EntityKind:        KindTask,
-		EntityID:          "task-abc",
-		RunNumber:         1,
-		Trigger:           "manual",
-		NodeID:            "node-x",
-		Status:            "completed",
-		TerminalReason:    "success",
-		StartedAt:         1000,
-		CompletedAt:       2000,
-		DurationMS:        1000,
-		TTFBMS:            50,
-		ExitCode:          &exitCode,
-		Error:             "",
-		CancelledAt:       0,
-		CancelledBy:       "",
-		Provider:          "anthropic",
-		Model:             "claude-sonnet-4-6",
-		ModelContextSize:  200000,
-		AgentRuntime:      "claude-code",
-		AgentVersion:      "1.2.3",
-		PricingVersion:    "v2",
-		InputTokens:       100,
-		OutputTokens:      200,
-		CacheReadTokens:   50,
-		CacheCreateTokens: 30,
-		ReasoningTokens:   10,
-		ToolUseTokens:     5,
-		CostUSD:           0.005,
-		EstimatedCostUSD:  0.006,
-		CacheSavingsUSD:   0.001,
-		CacheHitRatePct:   33.3,
-		ContextWindowPct:  0.5,
-		CostPerTurn:       0.0025,
-		CostPerAction:     0.001,
-		TokensPerTurn:     150.0,
-		Turns:             2,
-		Actions:           5,
-		Errors:            0,
-		Compactions:       1,
-		ParallelTasks:     0,
-		ToolCallsJSON:     `{"Read":3}`,
-		LinesAdded:        10,
-		LinesRemoved:      2,
-		FilesChanged:      1,
-		Commits:           1,
-		PRNumber:          &prNum,
-		Branch:            "feat/x",
-		CommitSHA:         "abc123",
-		WorktreePath:      "/tmp/wt",
-		PeakCPUPct:        80.0,
-		AvgCPUPct:         40.0,
-		PeakRSSMB:         512.0,
-		AvgRSSMB:          256.0,
-		DiskUsedGB:        1.5,
-		LastOutput:        "done",
+		ID:                 "test-row-001",
+		RunUID:             runUID,
+		EntityUID:          "task-abc",
+		Event:              EventCompleted,
+		RunNumber:          1,
+		Trigger:            "manual",
+		NodeID:             "node-x",
+		TerminalReason:     "success",
+		StartedAt:          1000,
+		CompletedAt:        2000,
+		DurationMS:         1000,
+		TTFBMS:             50,
+		ExitCode:           &exitCode,
+		Error:              "",
+		CancelledAt:        0,
+		CancelledBy:        "",
+		Provider:           "anthropic",
+		Model:              "claude-sonnet-4-6",
+		ModelContextSize:   200000,
+		AgentRuntime:       "claude-code",
+		AgentVersion:       "1.2.3",
+		PricingVersion:     "v2",
+		InputTokens:        100,
+		OutputTokens:       200,
+		CacheReadTokens:    50,
+		CacheCreateTokens:  30,
+		ReasoningTokens:    10,
+		ToolUseTokens:      5,
+		CostUSD:            0.005,
+		EstimatedCostUSD:   0.006,
+		CacheSavingsUSD:    0.001,
+		CacheHitRatePct:    33.3,
+		ContextWindowPct:   0.5,
+		CostPerTurn:        0.0025,
+		CostPerAction:      0.001,
+		TokensPerTurn:      150.0,
+		Turns:              2,
+		Actions:            5,
+		Errors:             0,
+		Compactions:        1,
+		ParallelTasks:      0,
+		ToolCallsJSON:      `{"Read":3}`,
+		LinesAdded:         10,
+		LinesRemoved:       2,
+		FilesChanged:       1,
+		Commits:            1,
+		PRNumber:           &prNum,
+		Branch:             "feat/x",
+		CommitSHA:          "abc123",
+		WorktreePath:       "/tmp/wt",
+		CPUPct:             12.5,
+		RSSMB:              128.0,
+		DiskUsedGB:         1.5,
+		PeakCPUPct:         80.0,
+		AvgCPUPct:          40.0,
+		PeakRSSMB:          512.0,
+		AvgRSSMB:           256.0,
+		CreatedBy:          "test",
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := s.Insert(ctx, in); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	got, err := s.Get(ctx, in.ID)
+
+	rows, err := s.ListByRun(ctx, runUID)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("ListByRun: %v", err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	got := rows[0]
 	if got.ID != in.ID {
 		t.Errorf("ID: got %q want %q", got.ID, in.ID)
 	}
-	if got.EntityKind != in.EntityKind {
-		t.Errorf("EntityKind: got %q want %q", got.EntityKind, in.EntityKind)
+	if got.EntityUID != in.EntityUID {
+		t.Errorf("EntityUID: got %q want %q", got.EntityUID, in.EntityUID)
 	}
-	if got.EntityID != in.EntityID {
-		t.Errorf("EntityID: got %q want %q", got.EntityID, in.EntityID)
-	}
-	if got.Status != in.Status {
-		t.Errorf("Status: got %q want %q", got.Status, in.Status)
+	if got.Event != in.Event {
+		t.Errorf("Event: got %q want %q", got.Event, in.Event)
 	}
 	if got.CostUSD != in.CostUSD {
 		t.Errorf("CostUSD: got %v want %v", got.CostUSD, in.CostUSD)
@@ -130,8 +136,51 @@ func TestInsert_and_get(t *testing.T) {
 	if got.ToolCallsJSON != in.ToolCallsJSON {
 		t.Errorf("ToolCallsJSON: got %q want %q", got.ToolCallsJSON, in.ToolCallsJSON)
 	}
-	if got.LastOutput != in.LastOutput {
-		t.Errorf("LastOutput: got %q want %q", got.LastOutput, in.LastOutput)
+	if got.CPUPct != in.CPUPct {
+		t.Errorf("CPUPct: got %v want %v", got.CPUPct, in.CPUPct)
+	}
+}
+
+func TestLatestByRun(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	ctx := context.Background()
+	runUID := "run-latest-test"
+
+	for i, event := range []string{EventStarted, EventSample, EventCompleted} {
+		r := Row{
+			ID:        fmt.Sprintf("row-%d", i),
+			RunUID:    runUID,
+			EntityUID: "entity-1",
+			Event:     event,
+			CreatedAt: time.Now().Add(time.Duration(i) * time.Millisecond).UTC().Format(time.RFC3339Nano),
+		}
+		if err := s.Insert(ctx, r); err != nil {
+			t.Fatalf("Insert %d: %v", i, err)
+		}
+	}
+
+	latest, err := s.LatestByRun(ctx, runUID)
+	if err != nil {
+		t.Fatalf("LatestByRun: %v", err)
+	}
+	if latest.Event != EventCompleted {
+		t.Errorf("expected latest event %q, got %q", EventCompleted, latest.Event)
+	}
+}
+
+func TestLatestByRun_notFound(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	_, err := s.LatestByRun(context.Background(), "no-such-run")
+	if err != ErrRunNotFound {
+		t.Errorf("expected ErrRunNotFound, got %v", err)
 	}
 }
 
@@ -142,27 +191,62 @@ func TestListByEntity_order(t *testing.T) {
 	}
 	s := NewStore(db)
 	ctx := context.Background()
-	for i, ts := range []int64{100, 300, 200} {
+	base := time.Now().UTC()
+	for i, offset := range []time.Duration{0, 200 * time.Millisecond, 100 * time.Millisecond} {
 		r := Row{
 			ID:        fmt.Sprintf("run-%d", i),
-			EntityKind: KindTask,
-			EntityID:  "entity-1",
-			StartedAt: ts,
+			RunUID:    fmt.Sprintf("run-%d", i),
+			EntityUID: "entity-1",
+			Event:     EventCompleted,
+			CreatedAt: base.Add(offset).Format(time.RFC3339Nano),
 		}
 		if err := s.Insert(ctx, r); err != nil {
 			t.Fatalf("Insert %d: %v", i, err)
 		}
 	}
-	rows, err := s.ListByEntity(ctx, KindTask, "entity-1", 10)
+	rows, err := s.ListByEntity(ctx, "entity-1", 10)
 	if err != nil {
 		t.Fatalf("ListByEntity: %v", err)
 	}
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	// started_at DESC: 300, 200, 100
-	if rows[0].StartedAt != 300 || rows[1].StartedAt != 200 || rows[2].StartedAt != 100 {
-		t.Errorf("wrong order: %v %v %v", rows[0].StartedAt, rows[1].StartedAt, rows[2].StartedAt)
+	// created_at DESC: offset 200ms, 100ms, 0ms
+	if rows[0].ID != "run-1" || rows[1].ID != "run-2" || rows[2].ID != "run-0" {
+		t.Errorf("wrong order: %v %v %v", rows[0].ID, rows[1].ID, rows[2].ID)
+	}
+}
+
+func TestInsertOutput_and_listOutput(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	ctx := context.Background()
+	runUID := "out-run-1"
+	for _, tc := range []struct {
+		seq   int
+		chunk string
+	}{
+		{2, "second"},
+		{0, "first"},
+		{1, "middle"},
+	} {
+		if err := s.InsertOutput(ctx, runUID, tc.chunk, tc.seq, "test"); err != nil {
+			t.Fatalf("InsertOutput seq=%d: %v", tc.seq, err)
+		}
+	}
+	chunks, err := s.ListOutput(ctx, runUID)
+	if err != nil {
+		t.Fatalf("ListOutput: %v", err)
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(chunks))
+	}
+	// seq ASC: 0, 1, 2
+	if chunks[0].Chunk != "first" || chunks[1].Chunk != "middle" || chunks[2].Chunk != "second" {
+		t.Errorf("wrong order: %v %v %v", chunks[0].Chunk, chunks[1].Chunk, chunks[2].Chunk)
 	}
 }
 
@@ -186,34 +270,15 @@ func TestLookupModel_unknown(t *testing.T) {
 	}
 }
 
-func TestInsertSample_and_list(t *testing.T) {
+func TestEmptyEntityUID_rejected(t *testing.T) {
 	db := openTestDB(t)
 	if err := InitSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	s := NewStore(db)
-	ctx := context.Background()
-	for _, sm := range []Sample{
-		{RunID: "r1", TS: 200, CPUPct: 50, RSSMB: 256},
-		{RunID: "r1", TS: 100, CPUPct: 30, RSSMB: 128},
-	} {
-		if err := s.InsertSample(ctx, sm); err != nil {
-			t.Fatalf("InsertSample: %v", err)
-		}
-	}
-	samples, err := s.ListSamples(ctx, "r1")
-	if err != nil {
-		t.Fatalf("ListSamples: %v", err)
-	}
-	if len(samples) != 2 {
-		t.Fatalf("expected 2 samples, got %d", len(samples))
-	}
-	// ts ASC: 100, 200
-	if samples[0].TS != 100 || samples[1].TS != 200 {
-		t.Errorf("wrong order: %v %v", samples[0].TS, samples[1].TS)
-	}
-	if samples[0].CPUPct != 30 {
-		t.Errorf("CPUPct: got %v want 30", samples[0].CPUPct)
+	err := s.Insert(context.Background(), Row{RunUID: "r", Event: EventStarted})
+	if err != ErrEmptyEntityID {
+		t.Errorf("expected ErrEmptyEntityID, got %v", err)
 	}
 }
 
@@ -343,7 +408,7 @@ func TestBackfill_field_mapping(t *testing.T) {
 	}
 
 	s := NewStore(db)
-	rows, err := s.ListByEntity(ctx, KindTask, "task-xyz", 10)
+	rows, err := s.ListByEntity(ctx, "task-xyz", 10)
 	if err != nil {
 		t.Fatalf("ListByEntity: %v", err)
 	}
@@ -352,17 +417,14 @@ func TestBackfill_field_mapping(t *testing.T) {
 	}
 	r := rows[0]
 
-	if r.EntityKind != KindTask {
-		t.Errorf("EntityKind: got %q want %q", r.EntityKind, KindTask)
+	if r.EntityUID != "task-xyz" {
+		t.Errorf("EntityUID: got %q want task-xyz", r.EntityUID)
 	}
-	if r.EntityID != "task-xyz" {
-		t.Errorf("EntityID: got %q want task-xyz", r.EntityID)
+	if r.Event != EventCompleted {
+		t.Errorf("Event: got %q want %q", r.Event, EventCompleted)
 	}
 	if r.RunNumber != 3 {
 		t.Errorf("RunNumber: got %d want 3", r.RunNumber)
-	}
-	if r.Status != "completed" {
-		t.Errorf("Status: got %q want completed", r.Status)
 	}
 	if r.TerminalReason != "success" {
 		t.Errorf("TerminalReason: got %q want success", r.TerminalReason)

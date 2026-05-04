@@ -2,8 +2,10 @@ package node
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
@@ -11,13 +13,12 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
+	"github.com/k8nstantin/OpenPraxis/internal/delusion"
 	"github.com/k8nstantin/OpenPraxis/internal/embedding"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
-	"github.com/k8nstantin/OpenPraxis/internal/idea"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
 	"github.com/k8nstantin/OpenPraxis/internal/marker"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/schedule"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
@@ -28,15 +29,14 @@ import (
 
 // Node is the central orchestrator that wires all components together.
 type Node struct {
-	Config           *config.Config
-	Store            *memory.Store
-	Index            *memory.Index
-	Conversations    *conversation.Store
-	Markers          *marker.Store
-	Actions          *action.Store
-	Products         *product.Store
-	Manifests        *manifest.Store
-	Ideas            *idea.Store
+	Config        *config.Config
+	Store         *memory.Store
+	Index         *memory.Index
+	Conversations *conversation.Store
+	Markers       *marker.Store
+	Actions       *action.Store
+	Entities      *entity.Store
+	// Tasks is still needed by the task runner — TODO: migrate to entity store
 	Tasks            *task.Store
 	ChatSessions     *chat.SessionStore
 	Watcher          *watcher.Store
@@ -48,29 +48,43 @@ type Node struct {
 	// Attachments is the comment-attachment store (UB-2). On-disk files
 	// land under <data_dir>/attachments/<comment_id>/; rows live in the
 	// shared memories.db.
-	Attachments      *comments.AttachmentStore
+	Attachments *comments.AttachmentStore
 	// Relationships is the unified edge store (Praxis Relationships
 	// PR/M1). Lives alongside the existing dep tables during the M2
 	// dual-write phase; becomes the sole source after M3 cutover.
-	Relationships    *relationships.Store
+	Relationships *relationships.Store
 	// Schedules is the central SCD-2 store for entity firing schedules
 	// (PR/M-Schedule/M1). The runner currently still reads scheduling
 	// fields off the task row; a follow-up cuts it over to read here.
 	// This PR persists schedules so the dashboard surfaces them.
-	Schedules        *schedule.Store
+	Schedules *schedule.Store
 	// ScheduleRunner consumes the schedules table — registers each
 	// current+enabled row against an in-memory robfig/cron/v3 ticker
 	// and dispatches by entity_kind on fire. Wired in cmd/serve.go
 	// after the node is built so the dispatcher map can capture
 	// references to n.Tasks etc.
-	ScheduleRunner   *schedule.Runner
+	ScheduleRunner *schedule.Runner
 	// ExecutionLog is the unified run-history store (EL/M1). Replaces
 	// task_runs + task_run_host_samples in EL/M5.
-	ExecutionLog     *executionlog.Store
-	runner           *task.Runner
-	hostSampler      *task.HostSampler
-	Embedder         *embedding.Engine
-	StartedAt        time.Time
+	ExecutionLog *executionlog.Store
+	runner       *task.Runner
+	hostSampler  *task.HostSampler
+	Embedder     *embedding.Engine
+	StartedAt    time.Time
+
+	// transcriptPaths stores session_id → live transcript file path so
+	// the 5s MCP sampler and PostToolUse hook can parse cumulative data.
+	transcriptMu    sync.RWMutex
+	transcriptPaths map[string]string
+
+	// sessionRunUIDs maps session_id → execution_log run_uid.
+	// Set when an MCP session connects; read by the PostToolUse hook.
+	sessionRunUIDMu  sync.RWMutex
+	sessionRunUIDs   map[string]string
+
+	// sessionLastSample throttles PostToolUse hook writes to execution_log.
+	sessionSampleMu   sync.Mutex
+	sessionLastSample map[string]time.Time
 }
 
 // New creates and initializes a Node.
@@ -101,37 +115,24 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init action store: %w", err)
 	}
 
-	ideaStore, err := idea.NewStore(index.DB())
+	entityStore, err := entity.NewStore(index.DB())
 	if err != nil {
-		return nil, fmt.Errorf("init idea store: %w", err)
+		return nil, fmt.Errorf("init entity store: %w", err)
+	}
+	if _, err := entityStore.MigrateFromLegacy(context.Background()); err != nil {
+		return nil, fmt.Errorf("migrate entities: %w", err)
 	}
 
-	productStore, err := product.NewStore(index.DB())
-	if err != nil {
-		return nil, fmt.Errorf("init product store: %w", err)
-	}
-
-	manifestStore, err := manifest.NewStore(index.DB())
-	if err != nil {
-		return nil, fmt.Errorf("init manifest store: %w", err)
+	// Ensure the delusions table exists (schema lives in internal/delusion,
+	// previously owned by internal/manifest).
+	if err := delusion.InitSchema(index.DB()); err != nil {
+		return nil, fmt.Errorf("init delusion schema: %w", err)
 	}
 
 	taskStore, err := task.NewStore(index.DB())
 	if err != nil {
 		return nil, fmt.Errorf("init task store: %w", err)
 	}
-	// Wire the manifest store as the readiness checker so task.Create
-	// seeds tasks in 'waiting' when their manifest has unsatisfied deps.
-	// Typed as task.ManifestReadinessChecker — manifest.Store satisfies
-	// the interface via IsSatisfied(ctx, manifestID).
-	taskStore.SetManifestChecker(manifestStore)
-	// Product-tier readiness check. product.Store satisfies
-	// task.ProductReadinessChecker via IsSatisfied. A task whose
-	// containing manifest belongs to a product with open product-level
-	// deps gets seeded in 'waiting' with a product-prefix block_reason,
-	// distinct from manifest- and task-level blockers so each tier's
-	// propagation walker only flips its own tasks.
-	taskStore.SetProductChecker(productStore)
 
 	// Review comments wiring (#93). comments.Store is the durable
 	// home for review_rejection + review_approval comments; task.Store
@@ -144,95 +145,6 @@ func New(cfg *config.Config) (*Node, error) {
 		&taskReviewWriteAdapter{s: commentsStore},
 		&taskReviewReadAdapter{s: commentsStore},
 	)
-
-	// Wire the terminal-transition handler: when a manifest moves from
-	// non-terminal (draft/open) → terminal (closed/archive), walk its
-	// dependents and activate waiting tasks in any newly-satisfied
-	// downstream manifest. This is what makes the dependency chain
-	// self-advance without an operator-in-the-loop — the core thesis
-	// of autonomous-agent workstreams.
-	//
-	// Both closures are injected (rather than imported) so task
-	// doesn't depend on manifest, preserving the one-way package
-	// direction. depsFor flattens ListDependents' Dep rows to id
-	// strings; satisfiedFor drops the blocker list the core walker
-	// doesn't need.
-	// Dep removal: when an operator removes a manifest→manifest edge,
-	// any waiting tasks in the source manifest that were blocked by
-	// a manifest-level dep are rehabbed to 'pending' — Option B, per
-	// issue #74 design comment. Pending (not scheduled) keeps an
-	// accidental click from auto-spending; operator arms explicitly.
-	// We only flip when the manifest is now fully satisfied; if other
-	// deps still block it, waiting tasks stay put.
-	manifestStore.SetDepRemovedHandler(func(ctx context.Context, manifestID string) {
-		ok, _, err := manifestStore.IsSatisfied(ctx, manifestID)
-		if err != nil || !ok {
-			return
-		}
-		_, _ = taskStore.FlipManifestBlockedTasks(ctx, manifestID, task.StatusPending)
-	})
-
-	manifestStore.SetTerminalTransitionHandler(func(ctx context.Context, manifestID string) {
-		depsFor := func(ctx context.Context, m string) ([]string, error) {
-			deps, err := manifestStore.ListDependents(ctx, m)
-			if err != nil {
-				return nil, err
-			}
-			ids := make([]string, 0, len(deps))
-			for _, d := range deps {
-				ids = append(ids, d.ID)
-			}
-			return ids, nil
-		}
-		satisfiedFor := func(ctx context.Context, m string) (bool, error) {
-			ok, _, err := manifestStore.IsSatisfied(ctx, m)
-			return ok, err
-		}
-		if _, err := taskStore.PropagateManifestClosed(ctx, manifestID, depsFor, satisfiedFor); err != nil {
-			// Log but don't surface — the manifest close already
-			// succeeded; activation failure is recoverable by firing
-			// tasks manually or by the next close retriggering.
-			_ = err // keep the handler pure; no slog here to avoid import churn in node.go
-		}
-	})
-
-	// Product-tier dep removal rehab (symmetric to manifest above).
-	// When an operator removes a product dep, if the product is now
-	// satisfied, flip its product-blocked tasks from waiting → pending
-	// (Option B — operator arms manually so an accidental click
-	// doesn't auto-spend).
-	productStore.SetDepRemovedHandler(func(ctx context.Context, productID string) {
-		ok, _, err := productStore.IsSatisfied(ctx, productID)
-		if err != nil || !ok {
-			return
-		}
-		_, _ = taskStore.FlipProductBlockedTasks(ctx, productID, task.StatusPending)
-	})
-
-	// Product close propagation. Closing a product walks its
-	// dependents; for each newly-satisfied dependent product, flip
-	// its product-blocked tasks to scheduled so the chain self-
-	// advances.
-	productStore.SetTerminalTransitionHandler(func(ctx context.Context, productID string) {
-		depsFor := func(ctx context.Context, pid string) ([]string, error) {
-			deps, err := productStore.ListDependents(ctx, pid)
-			if err != nil {
-				return nil, err
-			}
-			ids := make([]string, 0, len(deps))
-			for _, d := range deps {
-				ids = append(ids, d.ID)
-			}
-			return ids, nil
-		}
-		satisfiedFor := func(ctx context.Context, pid string) (bool, error) {
-			ok, _, err := productStore.IsSatisfied(ctx, pid)
-			return ok, err
-		}
-		if _, err := taskStore.PropagateProductClosed(ctx, productID, depsFor, satisfiedFor); err != nil {
-			_ = err
-		}
-	})
 
 	chatStore, err := chat.NewSessionStore(index.DB())
 	if err != nil {
@@ -263,7 +175,12 @@ func New(cfg *config.Config) (*Node, error) {
 
 	settingsStore := settings.NewStore(index.DB())
 	taskSettingsAdapter := &task.SettingsAdapter{Store: taskStore}
-	manifestSettingsAdapter := &manifest.SettingsAdapter{Store: manifestStore}
+	// Manifest settings adapter uses the relationships + entity stores to
+	// walk manifest → product scope without importing internal/manifest.
+	manifestSettingsAdapter := &entityManifestSettingsAdapter{
+		entities: entityStore,
+		rels:     nil, // wired after relationships store is constructed below
+	}
 	settingsResolver := settings.NewResolver(settingsStore, taskSettingsAdapter, manifestSettingsAdapter)
 
 	// RC/M1: prompt_templates substrate. Schema + system seed run every
@@ -273,7 +190,12 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init templates schema: %w", err)
 	}
 	templatesStore := templates.NewStore(index.DB())
-	templatesResolver := templates.NewResolver(templatesStore, &taskTemplatesScopeAdapter{tasks: taskStore, manifests: manifestStore}, nil)
+	templatesScopeAdapter := &taskTemplatesScopeAdapter{
+		tasks:    taskStore,
+		entities: entityStore,
+		rels:     nil, // wired after relationships store is constructed below
+	}
+	templatesResolver := templates.NewResolver(templatesStore, templatesScopeAdapter, nil)
 
 	// M4-T14: one-time migration of legacy tasks.max_turns column values into
 	// settings rows at task scope, followed by dropping the column. Both are
@@ -314,12 +236,8 @@ func New(cfg *config.Config) (*Node, error) {
 	if err := relationships.DropOwnershipColumns(context.Background(), index.DB()); err != nil {
 		return nil, fmt.Errorf("drop legacy ownership columns: %w", err)
 	}
-	// Wire the relationships store into the legacy dep stores so their
-	// Add/Remove/List methods read + write the unified table while
-	// keeping their existing call signatures. Callers across web/mcp
-	// don't need to change.
-	productStore.SetRelationshipsBackend(relationshipsStore)
-	manifestStore.SetRelationshipsBackend(relationshipsStore)
+	// Wire the relationships store into the task dep store so its
+	// Add/Remove/List methods read + write the unified table.
 	taskStore.SetRelationshipsBackend(relationshipsStore)
 	// Re-fire the task SCD backfill now that the relationships backend
 	// is wired — task.NewStore ran the backfill before the wiring,
@@ -330,6 +248,11 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("backfill task dep SCD: %w", err)
 	}
 
+	// Wire the relationships store into the settings + templates scope
+	// adapters now that it's available.
+	manifestSettingsAdapter.rels = relationshipsStore
+	templatesScopeAdapter.rels = relationshipsStore
+
 	// Central SCD-2 schedules table. Migration is idempotent
 	// (CREATE TABLE / INDEX IF NOT EXISTS). Same DB handle as every
 	// other store so schedules live in memories.db alongside tasks /
@@ -337,6 +260,9 @@ func New(cfg *config.Config) (*Node, error) {
 	scheduleStore, err := schedule.New(index.DB())
 	if err != nil {
 		return nil, fmt.Errorf("init schedule store: %w", err)
+	}
+	if _, err := scheduleStore.CloseStaleOneShots(context.Background()); err != nil {
+		return nil, fmt.Errorf("close stale schedules: %w", err)
 	}
 
 	if err := executionlog.InitSchema(index.DB()); err != nil {
@@ -351,9 +277,7 @@ func New(cfg *config.Config) (*Node, error) {
 		Conversations:    convStore,
 		Markers:          markerStore,
 		Actions:          actionStore,
-		Products:         productStore,
-		Manifests:        manifestStore,
-		Ideas:            ideaStore,
+		Entities:         entityStore,
 		Tasks:            taskStore,
 		ChatSessions:     chatStore,
 		Watcher:          watcherStore,
@@ -379,15 +303,22 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("seed prompt templates: %w", err)
 	}
 
+	// Drop legacy tables after ALL stores are initialized so no store
+	// init can re-create a table we just dropped.
+	if _, err := entity.DropLegacyTables(context.Background(), index.DB()); err != nil {
+		return nil, fmt.Errorf("drop legacy tables: %w", err)
+	}
+
 	return n, nil
 }
 
 // taskTemplatesScopeAdapter translates a task id into its manifest and
-// product ids for the templates resolver. Kept here (not in the
-// templates package) so templates stays free of a task/manifest import.
+// product ids for the templates resolver. Uses the entity + relationships
+// stores to avoid importing internal/manifest.
 type taskTemplatesScopeAdapter struct {
-	tasks     *task.Store
-	manifests *manifest.Store
+	tasks    *task.Store
+	entities *entity.Store
+	rels     *relationships.Store
 }
 
 func (a *taskTemplatesScopeAdapter) ManifestAndProductForTask(ctx context.Context, taskID string) (string, string, error) {
@@ -400,13 +331,45 @@ func (a *taskTemplatesScopeAdapter) ManifestAndProductForTask(ctx context.Contex
 	}
 	manifestID := t.ManifestID
 	var productID string
-	if manifestID != "" && a.manifests != nil {
-		m, err := a.manifests.Get(manifestID)
-		if err == nil && m != nil {
-			productID = m.ProjectID
+	if manifestID != "" && a.rels != nil {
+		// Walk incoming "owns" edges to find the product that owns this manifest.
+		edges, err := a.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns)
+		if err == nil {
+			for _, e := range edges {
+				if e.SrcKind == relationships.KindProduct {
+					productID = e.SrcID
+					break
+				}
+			}
 		}
 	}
 	return manifestID, productID, nil
+}
+
+// entityManifestSettingsAdapter satisfies settings.ManifestLookup by looking
+// up the product that owns a manifest via the relationships edge store.
+// Replaces manifest.SettingsAdapter without importing internal/manifest.
+type entityManifestSettingsAdapter struct {
+	entities *entity.Store
+	rels     *relationships.Store
+}
+
+func (a *entityManifestSettingsAdapter) GetManifestForSettings(ctx context.Context, manifestID string) (settings.ManifestRec, error) {
+	if a == nil || a.rels == nil {
+		return settings.ManifestRec{ID: manifestID}, nil
+	}
+	edges, err := a.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns)
+	if err != nil {
+		return settings.ManifestRec{}, fmt.Errorf("manifest settings adapter: list incoming: %w", err)
+	}
+	var productID string
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindProduct {
+			productID = e.SrcID
+			break
+		}
+	}
+	return settings.ManifestRec{ID: manifestID, ProductID: productID}, nil
 }
 
 // InitRunner creates and sets the task Runner using the Node's own stores.
@@ -430,11 +393,16 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	if n.TemplatesResolv != nil {
 		n.runner.SetTemplateResolver(n.TemplatesResolv)
 	}
+	// Wire the unified execution log so the runner records started/sample/
+	// completed/failed events in execution_log instead of the legacy
+	// task_runs + task_run_host_samples tables.
+	if n.ExecutionLog != nil {
+		n.runner.SetExecutionLog(n.ExecutionLog)
+	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
 	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
 	// attributes each sample to every currently-running task. Data lands
-	// on task_run_host_samples for the Run Stats card overlay + on
-	// task_runs rollup columns for list views. The sampler is a single
+	// in execution_log as EventSample rows. The sampler is a single
 	// shared instance on the node — one-at-boot is fine.
 	tick := resolveHostSamplerTick(n.SettingsStore)
 	n.hostSampler = task.NewHostSampler(tick)
@@ -637,6 +605,132 @@ func (n *Node) PeerID() string {
 	return n.Config.Node.PeerID()
 }
 
+// LiveSessionCost holds current cumulative token/turn metrics parsed from
+// a live transcript. Populated every 5s by the MCP sampler.
+// Cost is intentionally excluded — costs come from actual billing data only.
+type LiveSessionCost struct {
+	InputTokens       int
+	OutputTokens      int
+	CacheReadTokens   int
+	CacheCreateTokens int
+	Model             string
+	Turns             int // number of conversation turns (assistant responses)
+	Actions           int // number of tool calls extracted from transcript
+}
+
+// ParseLiveTranscript reads the transcript file at path and returns the
+// current cumulative cost/token data. Called by the MCP sampler every
+// host_sampler_tick_seconds to populate sample rows with full metrics.
+// Returns zero-value LiveSessionCost on any error.
+var ParseLiveTranscript func(path string) LiveSessionCost
+
+// SetSessionRunUID stores the execution_log run_uid for a session.
+// Called by the MCP server when an agent connects.
+func (n *Node) SetSessionRunUID(sessionID, runUID string) {
+	if sessionID == "" || runUID == "" {
+		return
+	}
+	n.sessionRunUIDMu.Lock()
+	if n.sessionRunUIDs == nil {
+		n.sessionRunUIDs = make(map[string]string)
+	}
+	n.sessionRunUIDs[sessionID] = runUID
+	n.sessionRunUIDMu.Unlock()
+}
+
+// GetSessionRunUID returns the execution_log run_uid for a session, or "".
+func (n *Node) GetSessionRunUID(sessionID string) string {
+	n.sessionRunUIDMu.RLock()
+	defer n.sessionRunUIDMu.RUnlock()
+	if n.sessionRunUIDs == nil {
+		return ""
+	}
+	return n.sessionRunUIDs[sessionID]
+}
+
+// ShouldWriteSample returns true if enough time (interval) has passed since
+// the last execution_log sample for this session. Updates the last-sample
+// time atomically so concurrent callers only write one row.
+func (n *Node) ShouldWriteSample(sessionID string, interval time.Duration) bool {
+	n.sessionSampleMu.Lock()
+	defer n.sessionSampleMu.Unlock()
+	if n.sessionLastSample == nil {
+		n.sessionLastSample = make(map[string]time.Time)
+	}
+	if time.Since(n.sessionLastSample[sessionID]) < interval {
+		return false
+	}
+	n.sessionLastSample[sessionID] = time.Now()
+	return true
+}
+
+// SetTranscriptPath stores the live transcript path for a session so the
+// 5s sampler can parse current token/cost data mid-session.
+func (n *Node) SetTranscriptPath(sessionID, path string) {
+	if sessionID == "" || path == "" {
+		return
+	}
+	n.transcriptMu.Lock()
+	if n.transcriptPaths == nil {
+		n.transcriptPaths = make(map[string]string)
+	}
+	n.transcriptPaths[sessionID] = path
+	n.transcriptMu.Unlock()
+}
+
+// GetTranscriptPath returns the live transcript path for a session, or "".
+func (n *Node) GetTranscriptPath(sessionID string) string {
+	n.transcriptMu.RLock()
+	defer n.transcriptMu.RUnlock()
+	if n.transcriptPaths == nil {
+		return ""
+	}
+	return n.transcriptPaths[sessionID]
+}
+
+// AgentForSession looks up the agent name (e.g. "Claude Code", "cursor") for a
+// given session_id. Checks the MCP sessions store using UUID prefix matching.
+// Returns "" if the session is not found — callers should leave agent_runtime
+// empty rather than hardcoding a value.
+func (n *Node) AgentForSession(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	// Try exact match first, then prefix match.
+	rows, err := n.Index.DB().QueryContext(context.Background(),
+		`SELECT agent FROM sessions WHERE uuid = ? OR uuid LIKE ? LIMIT 1`,
+		sessionID, sessionID[:min(8, len(sessionID))]+"%")
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var agent string
+		if err := rows.Scan(&agent); err == nil {
+			return agent
+		}
+	}
+	return ""
+}
+
+// LatestSystemSample returns the most recent CPU% and RSS(MB) from
+// system_host_samples. Used by the MCP session sampler to populate
+// host metrics on interactive session sample rows. Returns 0,0 on
+// any error so callers can safely ignore a missing table.
+func (n *Node) LatestSystemSample() (cpuPct, rssMB float64) {
+	row := n.Index.DB().QueryRow(
+		`SELECT cpu_pct, mem_used_mb FROM system_host_samples ORDER BY ts DESC LIMIT 1`)
+	_ = row.Scan(&cpuPct, &rssMB)
+	return cpuPct, rssMB
+}
+
+// DB returns the shared *sql.DB used by all stores on this node.
+// Callers that need direct SQL access (e.g. legacy system_host_samples
+// queries) use this rather than reaching into a specific store.
+func (n *Node) DB() *sql.DB {
+	return n.Index.DB()
+}
+
 // migrateSourceNodeToUUID normalizes all source_node columns from hostname (or empty) to UUID.
 // This is idempotent — once all rows match the UUID, the UPDATE WHERE clauses match zero rows.
 func (n *Node) migrateSourceNodeToUUID() {
@@ -710,30 +804,30 @@ func (n *Node) ReindexMemories(ids []string) {
 	}
 }
 
-// ResolveProductID validates a product UUID by ensuring the product
-// exists, returning the canonical ID. Empty input returns empty.
+// ResolveProductID validates a product UUID by ensuring it exists in the
+// entity store, returning the canonical ID. Empty input returns empty.
 func (n *Node) ResolveProductID(productID string) (string, error) {
 	if productID == "" {
 		return "", nil
 	}
-	p, err := n.Products.Get(productID)
-	if err != nil || p == nil {
+	e, err := n.Entities.Get(productID)
+	if err != nil || e == nil {
 		return "", fmt.Errorf("product not found: %s", productID)
 	}
-	return p.ID, nil
+	return e.EntityUID, nil
 }
 
-// ResolveManifestID validates a manifest UUID by ensuring the manifest
-// exists, returning the canonical ID. Empty input returns empty.
+// ResolveManifestID validates a manifest UUID by ensuring it exists in the
+// entity store, returning the canonical ID. Empty input returns empty.
 func (n *Node) ResolveManifestID(manifestID string) (string, error) {
 	if manifestID == "" {
 		return "", nil
 	}
-	m, err := n.Manifests.Get(manifestID)
-	if err != nil || m == nil {
+	e, err := n.Entities.Get(manifestID)
+	if err != nil || e == nil {
 		return "", fmt.Errorf("manifest not found: %s", manifestID)
 	}
-	return m.ID, nil
+	return e.EntityUID, nil
 }
 
 // ResolveScopeID validates a settings/comment scope_id by ensuring the
@@ -748,18 +842,12 @@ func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
 		return "", nil
 	}
 	switch scopeType {
-	case "product":
-		p, err := n.Products.Get(scopeID)
-		if err != nil || p == nil {
-			return "", fmt.Errorf("product not found: %s", scopeID)
+	case "product", "manifest":
+		e, err := n.Entities.Get(scopeID)
+		if err != nil || e == nil {
+			return "", fmt.Errorf("%s not found: %s", scopeType, scopeID)
 		}
-		return p.ID, nil
-	case "manifest":
-		m, err := n.Manifests.Get(scopeID)
-		if err != nil || m == nil {
-			return "", fmt.Errorf("manifest not found: %s", scopeID)
-		}
-		return m.ID, nil
+		return e.EntityUID, nil
 	case "task":
 		if n.Tasks == nil {
 			return scopeID, nil
@@ -777,9 +865,9 @@ func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
 }
 
 // ResolveManifestDependsOn validates a comma-separated list of manifest IDs
-// against the manifests store. selfID is the manifest being created/updated
-// (empty for create). Validates existence, rejects self-dependency, and
-// detects circular dependencies. Every entry must be a full UUID.
+// against the entity store. selfID is the manifest being created/updated
+// (empty for create). Validates existence and rejects self-dependency.
+// Every entry must be a full UUID.
 func (n *Node) ResolveManifestDependsOn(raw, selfID string) (string, error) {
 	if raw == "" {
 		return "", nil
@@ -791,49 +879,22 @@ func (n *Node) ResolveManifestDependsOn(raw, selfID string) (string, error) {
 		if p == "" {
 			continue
 		}
-		m, err := n.Manifests.Get(p)
+		e, err := n.Entities.Get(p)
 		if err != nil {
 			return "", fmt.Errorf("resolve manifest dependency %q: %v", p, err)
 		}
-		if m == nil {
+		if e == nil {
 			return "", fmt.Errorf("manifest dependency not found: %s", p)
 		}
-		if selfID != "" && m.ID == selfID {
+		if selfID != "" && e.EntityUID == selfID {
 			return "", fmt.Errorf("manifest cannot depend on itself")
 		}
-		// Check for circular dependency: if the dependency transitively depends on selfID
-		if selfID != "" {
-			if n.hasTransitiveDependency(m.ID, selfID, make(map[string]bool)) {
-				return "", fmt.Errorf("circular dependency: %s transitively depends on this manifest", m.ID)
-			}
-		}
-		resolved = append(resolved, m.ID)
+		resolved = append(resolved, e.EntityUID)
 	}
 	return strings.Join(resolved, ","), nil
 }
 
-// hasTransitiveDependency checks if fromID transitively depends on targetID.
-func (n *Node) hasTransitiveDependency(fromID, targetID string, visited map[string]bool) bool {
-	if visited[fromID] {
-		return false
-	}
-	visited[fromID] = true
-	m, _ := n.Manifests.Get(fromID)
-	if m == nil {
-		return false
-	}
-	for _, dep := range m.ParseDependsOn() {
-		if dep == targetID {
-			return true
-		}
-		if n.hasTransitiveDependency(dep, targetID, visited) {
-			return true
-		}
-	}
-	return false
-}
-
-// ResolveDependsOnTitles resolves a comma-separated depends_on string to a list of manifest titles.
+// ResolveDependsOnTitles resolves a comma-separated depends_on string to a list of entity titles.
 func (n *Node) ResolveDependsOnTitles(dependsOn string) []string {
 	if dependsOn == "" {
 		return nil
@@ -845,9 +906,9 @@ func (n *Node) ResolveDependsOnTitles(dependsOn string) []string {
 		if p == "" {
 			continue
 		}
-		m, _ := n.Manifests.Get(p)
-		if m != nil {
-			titles = append(titles, m.Title)
+		e, _ := n.Entities.Get(p)
+		if e != nil {
+			titles = append(titles, e.Title)
 		} else {
 			titles = append(titles, p) // fallback to ID if not found
 		}
@@ -855,42 +916,52 @@ func (n *Node) ResolveDependsOnTitles(dependsOn string) []string {
 	return titles
 }
 
-// CheckManifestDeps returns true if all dependency manifests for the given manifest are closed/archive.
-// Implements task.ManifestDepChecker interface for scheduler blocking.
+// CheckManifestDeps returns true if all dependency manifests for the given
+// manifest are closed or archived. Uses the relationships store to walk
+// the depends_on edges.
 func (n *Node) CheckManifestDeps(manifestID string) (bool, string) {
-	m, err := n.Manifests.Get(manifestID)
-	if err != nil || m == nil {
-		return true, "" // manifest not found — don't block
+	if n.Relationships == nil {
+		return true, ""
 	}
-	deps := m.ParseDependsOn()
-	if len(deps) == 0 {
-		return true, "" // no dependencies
+	ctx := context.Background()
+	// List outgoing depends_on edges from this manifest.
+	edges, err := n.Relationships.ListOutgoing(ctx, manifestID, relationships.EdgeDependsOn)
+	if err != nil || len(edges) == 0 {
+		return true, ""
 	}
-	for _, depID := range deps {
-		dep, err := n.Manifests.Get(depID)
+	for _, e := range edges {
+		dep, err := n.Entities.Get(e.DstID)
 		if err != nil || dep == nil {
 			continue // missing dependency — don't block on phantom
 		}
-		if dep.Status != "closed" && dep.Status != "archive" {
-			// Canonical format — matches the prefix FlipManifestBlockedTasks
-			// filters on in task.Store. Diverging from this means the
-			// close-propagation walker (#78) can't see the task and the
-			// dep chain won't auto-advance.
-			return false, fmt.Sprintf("manifest not satisfied — blocked by: %s (%s)", depID, dep.Title)
+		if dep.Status != "closed" && dep.Status != "archived" {
+			return false, fmt.Sprintf("manifest not satisfied — blocked by: %s (%s)", e.DstID, dep.Title)
 		}
 	}
 	return true, ""
 }
 
-// ValidateArchiveProduct checks that all linked manifests are "archive" before allowing a product to be archived.
+// ValidateArchiveProduct checks that all linked manifests are archived before
+// allowing a product to be archived. Uses relationships to find owned manifests.
 func (n *Node) ValidateArchiveProduct(productID string) error {
-	manifests, err := n.Manifests.ListByProject(productID, 1000)
+	if n.Relationships == nil {
+		return nil
+	}
+	ctx := context.Background()
+	edges, err := n.Relationships.ListOutgoing(ctx, productID, relationships.EdgeOwns)
 	if err != nil {
 		return fmt.Errorf("check manifests: %w", err)
 	}
-	for _, m := range manifests {
-		if m.Status != "archive" {
-			return fmt.Errorf("cannot archive product: manifest [%s] %s is still '%s' — archive all manifests first", m.ID, m.Title, m.Status)
+	for _, e := range edges {
+		if e.DstKind != relationships.KindManifest {
+			continue
+		}
+		m, _ := n.Entities.Get(e.DstID)
+		if m == nil {
+			continue
+		}
+		if m.Status != "archived" {
+			return fmt.Errorf("cannot archive product: manifest [%s] %s is still '%s' — archive all manifests first", m.EntityUID, m.Title, m.Status)
 		}
 	}
 	return nil

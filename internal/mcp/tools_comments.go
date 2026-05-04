@@ -70,30 +70,18 @@ func (s *Server) resolveCommentTarget(target comments.TargetType, raw string) (s
 			return "", fmt.Errorf("target task not found: %s", raw)
 		}
 		return t.ID, nil
-	case comments.TargetManifest:
-		if s.node.Manifests == nil {
+	case comments.TargetManifest, comments.TargetProduct:
+		if s.node.Entities == nil {
 			return raw, nil
 		}
-		m, err := s.node.Manifests.Get(raw)
+		e, err := s.node.Entities.Get(raw)
 		if err != nil {
-			return "", fmt.Errorf("resolve target manifest %q: %w", raw, err)
+			return "", fmt.Errorf("resolve target %s %q: %w", target, raw, err)
 		}
-		if m == nil {
-			return "", fmt.Errorf("target manifest not found: %s", raw)
+		if e == nil {
+			return "", fmt.Errorf("target %s not found: %s", target, raw)
 		}
-		return m.ID, nil
-	case comments.TargetProduct:
-		if s.node.Products == nil {
-			return raw, nil
-		}
-		p, err := s.node.Products.Get(raw)
-		if err != nil {
-			return "", fmt.Errorf("resolve target product %q: %w", raw, err)
-		}
-		if p == nil {
-			return "", fmt.Errorf("target product not found: %s", raw)
-		}
-		return p.ID, nil
+		return e.EntityUID, nil
 	}
 	return raw, nil
 }

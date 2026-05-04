@@ -12,7 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
+	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
@@ -32,10 +36,6 @@ type RunningTask struct {
 	Actions   int       `json:"actions"`
 	Lines     int       `json:"lines"`
 	LastLine  string    `json:"last_line"`
-	// CumulativeCostUSD tracks running cost parsed from stream-json events.
-	// Updated by the reader goroutine as each event arrives so the mid-run
-	// cost cap has a live value to compare against.
-	CumulativeCostUSD float64  `json:"cumulative_cost_usd"`
 	Output            []string `json:"-"` // ring buffer, not serialized
 	// Model is the model id reported by the first assistant event — used to
 	// pick a pricing table and for calibration after the run.
@@ -99,12 +99,42 @@ type Runner struct {
 	// are skipped (tests + pre-wire code paths). Wired via
 	// SetHostSampler from cmd/serve.go at boot.
 	hostSampler *HostSampler
+
+	// entityStore is the SCD-2 entity store used for status updates
+	// alongside the legacy task store. Nil → entity status updates are
+	// skipped (pre-wire code paths).
+	entityStore *entity.Store
+
+	// executionLog is the unified run-history store. When non-nil, each
+	// completed run is also recorded here alongside the legacy task_runs
+	// table.
+	executionLog *execution.Store
+
+	// commentsStore is used to fetch the latest description_revision
+	// comment for a task when building the prompt. Nil → falls back to
+	// task.Description from the tasks row.
+	commentsStore *comments.Store
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
 // called at spawn, Detach at completion; the accumulated samples land
 // on task_run_host_samples + summary columns on task_runs.
 func (r *Runner) SetHostSampler(hs *HostSampler) { r.hostSampler = hs }
+
+// SetEntityStore wires the SCD-2 entity store onto the runner so status
+// transitions are recorded in both the legacy tasks table and the entity
+// store. Call once at startup before any Execute call.
+func (r *Runner) SetEntityStore(es *entity.Store) { r.entityStore = es }
+
+// SetExecutionLog wires the unified execution log store onto the runner.
+// When set, each completed run is appended to execution_log alongside the
+// legacy task_runs table.
+func (r *Runner) SetExecutionLog(el *execution.Store) { r.executionLog = el }
+
+// SetCommentsStore wires the comments store onto the runner so the prompt
+// builder can fetch the latest description_revision for a task. When nil,
+// the runner uses task.Description from the tasks row directly.
+func (r *Runner) SetCommentsStore(cs *comments.Store) { r.commentsStore = cs }
 
 // SetTemplateResolver wires the RC/M1 prompt-template resolver onto
 // the runner. Nil disables scope-aware resolution — the runner uses the
@@ -490,8 +520,6 @@ type runtimeKnobs struct {
 	DefaultModel    string
 	Temperature     float64
 	ReasoningEffort string
-	MaxCostUSD      float64
-	DailyBudget     float64
 	RetryOnFailure  int
 	ApprovalMode    string
 	AllowedTools    []string
@@ -525,12 +553,6 @@ func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) 
 	}
 	if k.ReasoningEffort, err = resolvedStr(all["reasoning_effort"].Value); err != nil {
 		return k, fmt.Errorf("reasoning_effort: %w", err)
-	}
-	if k.MaxCostUSD, err = resolvedFloat(all["max_cost_usd"].Value); err != nil {
-		return k, fmt.Errorf("max_cost_usd: %w", err)
-	}
-	if k.DailyBudget, err = resolvedFloat(all["daily_budget_usd"].Value); err != nil {
-		return k, fmt.Errorf("daily_budget_usd: %w", err)
 	}
 	if k.RetryOnFailure, err = resolvedInt(all["retry_on_failure"].Value); err != nil {
 		return k, fmt.Errorf("retry_on_failure: %w", err)
@@ -629,7 +651,7 @@ func shouldRetry(status, reason string, attempts, cap int) bool {
 // missing) won't improve with a rerun and would just burn cost.
 func isTransientFailure(reason string) bool {
 	switch reason {
-	case "max_turns", "deliverable_missing", "cost_cap", "daily_budget":
+	case "max_turns", "deliverable_missing":
 		return false
 	case "timeout", "build_fail", "process_error":
 		return true
@@ -640,26 +662,6 @@ func isTransientFailure(reason string) bool {
 	}
 }
 
-// extractCostFromEvent pulls total_cost_usd or cost_usd from a single
-// stream-json line. Returns (cost, true) if found, (0, false) otherwise.
-// Used in the mid-run cost-tracking loop — we want to accumulate as cost is
-// reported rather than waiting for the terminal result event.
-func extractCostFromEvent(line string) (float64, bool) {
-	var event struct {
-		TotalCostUSD float64 `json:"total_cost_usd"`
-		CostUSD      float64 `json:"cost_usd"`
-	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
-		return 0, false
-	}
-	if event.TotalCostUSD > 0 {
-		return event.TotalCostUSD, true
-	}
-	if event.CostUSD > 0 {
-		return event.CostUSD, true
-	}
-	return 0, false
-}
 
 // Execute spawns an autonomous agent for a task.
 func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules string) error {
@@ -691,20 +693,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	knobs, err := decodeRuntimeKnobs(all)
 	if err != nil {
 		return fmt.Errorf("decode knobs: %w", err)
-	}
-
-	// Pre-spawn daily-budget check: per-product cumulative cost since
-	// start-of-day UTC. If already over the cap, refuse to spawn at all —
-	// costs the current run zero and surfaces the block to the scheduler.
-	if knobs.DailyBudget > 0 && scope.ProductID != "" {
-		startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
-		spent, sumErr := r.store.SumCostSince(scope.ProductID, startOfDay)
-		if sumErr != nil {
-			slog.Warn("daily budget lookup failed, allowing dispatch",
-				"component", "runner", "product_id", scope.ProductID, "error", sumErr)
-		} else if spent >= knobs.DailyBudget {
-			return fmt.Errorf("daily budget exceeded for product %s: $%.2f >= $%.2f", scope.ProductID, spent, knobs.DailyBudget)
-		}
 	}
 
 	// Build the prompt
@@ -766,13 +754,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// default leaves the agent on its own default model.
 	if knobs.DefaultModel != "" {
 		args = append(args, "--model", knobs.DefaultModel)
-	}
-
-	// max_cost_usd: Claude Code supports --max-budget-usd natively, which
-	// gives us process-side enforcement in addition to the stream-loop
-	// fallback below. Only pass when > 0 so "no cap" stays the default.
-	if knobs.MaxCostUSD > 0 && agent == "claude-code" {
-		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", knobs.MaxCostUSD))
 	}
 
 	// reasoning_effort: map catalog values (minimal/low/medium/high) onto
@@ -857,10 +838,32 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	if err := r.store.UpdateStatus(t.ID, "running"); err != nil {
 		slog.Error("update status to running failed", "component", "runner", "task_id", t.ID, "error", err)
 	}
+	if r.entityStore != nil {
+		if e, _ := r.entityStore.Get(t.ID); e != nil {
+			if uerr := r.entityStore.Update(t.ID, e.Title, entity.StatusActive, e.Tags, "runner", "task started"); uerr != nil {
+				slog.Warn("entity store: update to active failed", "component", "runner", "task_id", t.ID, "error", uerr)
+			}
+		}
+	}
 
-	// Persist runtime state to SQLite — survives restarts
-	if err := r.store.SaveRuntimeState(t.ID, t.Title, manifestTitle, t.Agent, cmd.Process.Pid, false, 0, 0, "", rt.StartedAt); err != nil {
-		slog.Error("save runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
+	// Generate a stable run UID (UUID v7) that ties the started, sample,
+	// and completed/failed rows in execution_log together. Generated here
+	// so the goroutine closes over it.
+	runUID := uuid.Must(uuid.NewV7()).String()
+
+	// Record the started event in execution_log so crash-recovery can
+	// see which tasks were in-flight at the time of the crash.
+	if r.executionLog != nil {
+		startRow := execution.Row{
+			RunUID:    runUID,
+			EntityUID: t.ID,
+			Event:     execution.EventStarted,
+			StartedAt: rt.StartedAt.UnixMilli(),
+			CreatedBy: "runner",
+		}
+		if err := r.executionLog.Insert(bgCtx, startRow); err != nil {
+			slog.Warn("execution_log: insert started event failed", "component", "runner", "task_id", t.ID, "error", err)
+		}
 	}
 
 	if r.onEvent != nil {
@@ -881,12 +884,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// same 5s cadence — powers the Run Stats 5-aligned sparklines.
 		rtRef := rt
 		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
-			return rtRef.CumulativeCostUSD, len(rtRef.usageByMessage), rtRef.Actions
+			return 0, len(rtRef.usageByMessage), rtRef.Actions
 		})
 	}
 
 	// Read output in background
-	maxCostCap := knobs.MaxCostUSD
 	retryCap := knobs.RetryOnFailure
 	go func() {
 		defer func() {
@@ -910,10 +912,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// Track pending tool_use blocks to pair with tool_result
 		pendingTools := make(map[string]pendingToolCall) // keyed by tool_use ID
 
-		// costCapExceeded is set when the mid-run kill fires. The post-Wait
-		// classification uses it to pick the correct failure reason and
-		// suppress retry (cost-cap hits are non-transient).
-		var costCapExceeded bool
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -1014,43 +1012,12 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			// read mid-run if we relied on it alone. Instead, each assistant
 			// event carries message.usage (input/output/cache tokens); we
 			// dedupe by message.id (Claude Code re-emits the same message as
-			// the response streams) and multiply by the model's calibrated
-			// rates. The authoritative total_cost_usd still wins when the
-			// result event arrives — it snaps rt.CumulativeCostUSD to the
-			// exact billed value before the run is recorded.
+			// Track model from assistant events for metadata.
 			if event != nil {
-				if id, model, u, ok := parseAssistantUsage(event); ok {
+				if _, model, _, ok := parseAssistantUsage(event); ok {
 					if rt.Model == "" && model != "" {
 						rt.Model = model
 					}
-					if id != "" {
-						rt.usageByMessage[id] = u
-					}
-					var total Usage
-					for _, mu := range rt.usageByMessage {
-						total = total.Add(mu)
-					}
-					mult := r.store.GetModelMultiplier(rt.Model)
-					est := EstimateCost(rt.Model, mult, total)
-					if est > rt.CumulativeCostUSD {
-						rt.CumulativeCostUSD = est
-					}
-				}
-			}
-			// Still accept an authoritative total_cost_usd if the stream
-			// emits one (future Claude Code versions may send it earlier).
-			if c, ok := extractCostFromEvent(line); ok {
-				if c > rt.CumulativeCostUSD {
-					rt.CumulativeCostUSD = c
-				}
-			}
-			if maxCostCap > 0 && rt.CumulativeCostUSD > maxCostCap && !costCapExceeded {
-				costCapExceeded = true
-				slog.Warn("killing task: cost cap exceeded",
-					"component", "runner", "task_id", t.ID,
-					"cap_usd", maxCostCap, "cost_usd", rt.CumulativeCostUSD)
-				if cmd.Process != nil {
-					_ = cmd.Process.Signal(syscall.SIGTERM)
 				}
 			}
 
@@ -1081,11 +1048,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			reason string
 		)
 		switch {
-		case costCapExceeded:
-			status = "failed"
-			reason = "cost_cap"
-			slog.Warn("task stopped by cost cap", "component", "runner", "task_id", t.ID,
-				"actions", rt.Actions, "lines", rt.Lines, "cost_usd", rt.CumulativeCostUSD)
 		case detectMaxTurns(output):
 			status = "completed"
 			reason = "max_turns"
@@ -1107,14 +1069,8 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				"actions", rt.Actions, "lines", rt.Lines)
 		}
 
-		// Parse final cost from the terminal result event. Prefer that over
-		// rt.CumulativeCostUSD for the run-history row because the result
-		// event includes post-turn billing adjustments the stream events
-		// may miss.
-		costUSD, numTurns := ParseCostFromOutput(output)
-		if costUSD == 0 && rt.CumulativeCostUSD > 0 {
-			costUSD = rt.CumulativeCostUSD
-		}
+		_, numTurns := ParseCostFromOutput(output)
+		costUSD := float64(0)
 
 		// Compute final per-token usage from stream-json (preferred) or
 		// the summed per-message usage we tracked during the run. Used
@@ -1139,18 +1095,80 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			}
 		}
 
-		// Record the run with history — always use real status, not "scheduled"
-		runID, err := r.store.RecordRun(t.ID, output, status, rt.Actions, rt.Lines, costUSD, numTurns, rt.StartedAt, finalUsage, rt.Model)
-		if err != nil {
-			slog.Error("record run failed", "component", "runner", "task_id", t.ID, "error", err)
-		} else if r.hostSampler != nil {
-			// Host CPU/RSS samples accumulated during the run → persist them
-			// alongside the run row. Failure here is not fatal — loss of
-			// host metrics must not fail task completion.
-			samples, metrics := r.hostSampler.Detach(t.ID)
-			if err := r.store.RecordHostMetrics(runID, samples, metrics); err != nil {
-				slog.Warn("record host metrics failed", "component", "runner", "task_id", t.ID, "error", err)
+		// Record the completed/failed run in execution_log and update the
+		// tasks row (run_count, last_run_at, last_output, status).
+		r.store.updateTaskRunStats(t.ID, output, status)
+
+		if r.executionLog != nil {
+			completedAtMS := time.Now().UnixMilli()
+			durationMS := completedAtMS - rt.StartedAt.UnixMilli()
+			if durationMS < 0 {
+				durationMS = 0
 			}
+			terminalEvent := execution.EventCompleted
+			terminalReason := reason
+			if status == "failed" {
+				terminalEvent = execution.EventFailed
+			}
+			modelInfo := execution.LookupModel(rt.Model)
+			testsRun, testsPassed, testsFailed := ParseTestsFromOutput(output)
+			completedRow := execution.Row{
+				RunUID:            runUID,
+				EntityUID:         t.ID,
+				Event:             terminalEvent,
+				TerminalReason:    terminalReason,
+				StartedAt:         rt.StartedAt.UnixMilli(),
+				CompletedAt:       completedAtMS,
+				DurationMS:        durationMS,
+				Model:             rt.Model,
+				Provider:          modelInfo.Provider,
+				ModelContextSize:  modelInfo.ContextWindowSize,
+				PricingVersion:    PricingVersion,
+				InputTokens:       int64(finalUsage.InputTokens),
+				OutputTokens:      int64(finalUsage.OutputTokens),
+				CacheReadTokens:   int64(finalUsage.CacheReadTokens),
+				CacheCreateTokens: int64(finalUsage.CacheCreationTokens),
+				CostUSD:           costUSD,
+				Turns:             numTurns,
+				Actions:           rt.Actions,
+				ToolCallsJSON:     "{}",
+				TestsRun:          testsRun,
+				TestsPassed:       testsPassed,
+				TestsFailed:       testsFailed,
+				CreatedBy:         "runner",
+			}
+			execution.ComputeDerived(&completedRow)
+			if err := r.executionLog.Insert(bgCtx, completedRow); err != nil {
+				slog.Warn("execution_log: insert completed event failed", "component", "runner", "task_id", t.ID, "error", err)
+			}
+
+			// Persist host CPU/RSS samples as individual EventSample rows.
+			if r.hostSampler != nil {
+				samples, _ := r.hostSampler.Detach(t.ID)
+				for _, smp := range samples {
+					sampleRow := execution.Row{
+						RunUID:      runUID,
+						EntityUID:   t.ID,
+						Event:       execution.EventSample,
+						CPUPct:      smp.CPUPct,
+						RSSMB:       smp.RSSMB,
+						DiskUsedGB:  smp.DiskUsedGB,
+						CostUSD:     smp.CostUSD,
+						Turns:       smp.Turns,
+						Actions:     smp.Actions,
+						ToolCallsJSON: "{}",
+						CreatedBy:   "runner",
+						CreatedAt:   smp.TS.UTC().Format(time.RFC3339Nano),
+					}
+					if err := r.executionLog.Insert(bgCtx, sampleRow); err != nil {
+						slog.Warn("execution_log: insert sample event failed", "component", "runner", "task_id", t.ID, "error", err)
+					}
+				}
+			}
+		} else if r.hostSampler != nil {
+			// Drain the sampler even when execution_log is not wired so
+			// buffers don't grow unboundedly on older test code paths.
+			r.hostSampler.Detach(t.ID)
 		}
 
 		// Post-completion execution-review gate. Successful completions must

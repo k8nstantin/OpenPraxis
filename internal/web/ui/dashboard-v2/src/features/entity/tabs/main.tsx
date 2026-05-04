@@ -6,7 +6,7 @@ import {
   useUpdateEntity,
   type EntityKind,
 } from '@/lib/queries/entity'
-import type { Manifest, Product } from '@/lib/types'
+import type { Entity } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -20,7 +20,7 @@ import {
 
 // Main tab — stats grid + repo card + description editor + revision
 // history. Same Markup ↔ Rendered toggle on description view; Cmd-Enter
-// saves; Escape cancels. PUT /api/{kind}/{id} drops a new SCD-2
+// saves; Escape cancels. PUT /api/entities/:id drops a new SCD-2
 // description revision row server-side, surfaced in the history card
 // below.
 //
@@ -28,10 +28,11 @@ import {
 // Actual, Turns, Actions, Tokens. Same byte-identical Gauge layout
 // across products and manifests; the cumulative numbers come straight
 // off the entity (server-side aggregates).
-function basePathFor(kind: EntityKind): string {
-  if (kind === 'product') return '/api/products'
-  if (kind === 'task') return '/api/tasks'
-  return '/api/manifests'
+
+// Legacy settings path — still needed until settings are migrated to /api/entities.
+function settingsPathFor(kind: EntityKind, entityId: string): string {
+  const slug = kind === 'product' ? 'products' : kind === 'task' ? 'tasks' : 'manifests'
+  return `/api/${slug}/${entityId}/settings`
 }
 
 export function MainTab({
@@ -53,7 +54,7 @@ export function MainTab({
   // /api/products/{id}/settings and /api/manifests/{id}/settings.
   useEffect(() => {
     let cancelled = false
-    fetch(`${basePathFor(kind)}/${entityId}/settings`)
+    fetch(settingsPathFor(kind, entityId))
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (cancelled || !d) return
@@ -81,12 +82,13 @@ export function MainTab({
   const [saving, setSaving] = useState(false)
   const composerRef = useRef<BlockNoteComposerHandle>(null)
 
-  const e = entity.data as Product | Manifest | undefined
-  const currentText = (
-    kind === 'manifest'
-      ? ((e as Manifest | undefined)?.content ?? e?.description ?? '')
-      : (e?.description ?? '')
-  ).trim()
+  const e = entity.data as Entity | undefined
+
+  // Description lives in comments (description_revision type). The Main tab
+  // shows the latest description_revision body from the history endpoint;
+  // currentText is derived from the most recent revision if any.
+  const latestRevision = history.data?.[0]
+  const currentText = (latestRevision?.body ?? '').trim()
   const hasDesc = currentText.length > 0
 
   const startEdit = () => {
@@ -102,15 +104,11 @@ export function MainTab({
     setSaving(true)
     try {
       const draft = await composerRef.current.getMarkdown()
-      // Attachment ids uploaded during this edit are orphans —
-      // descriptions don't have a comment_id to claim against. URLs
-      // in the markdown still resolve via /api/attachments/{id}; row
-      // hygiene (orphan cleanup or claim-against-entity) is a follow-up.
-      const patch =
-        kind === 'manifest'
-          ? { content: draft }
-          : { description: draft }
-      await update.mutateAsync(patch)
+      // Description is stored as a description_revision comment; the PUT
+      // endpoint drops a new SCD-2 revision row server-side. We send the
+      // body as a top-level `description` field which the backend records
+      // as a new revision.
+      await update.mutateAsync({ description: draft })
       setEditing(false)
     } catch (e) {
       console.error(e)
@@ -120,64 +118,15 @@ export function MainTab({
   }
 
   const created = e?.created_at ? new Date(e.created_at) : null
-  const updated = e?.updated_at ? new Date(e.updated_at) : null
+  const updatedDate = e?.valid_from ? new Date(e.valid_from) : null
 
-  // Resolved daily budget from settings — defaults to the catalog
-  // default (100 USD). Drives both cost gauges' red-line + tone.
-  const budgetRaw = repoInfo.daily_budget_usd
-  const budget = typeof budgetRaw === 'number' && budgetRaw > 0 ? budgetRaw : 100
-  const actual = e?.total_cost ?? 0
-  const costMax = budget * 1.5
-  const costTone = (v: number) =>
-    v >= budget
-      ? 'text-rose-500'
-      : v >= budget * 0.8
-        ? 'text-amber-500'
-        : 'text-emerald-500'
-
-  const description =
-    kind === 'manifest'
-      ? // Manifests store the spec body in `content`; `description` is
-        // just a one-liner summary. Show the full spec.
-        ((e as Manifest | undefined)?.content ?? e?.description)
-      : e?.description
-
-  const descriptionHTML =
-    kind === 'manifest'
-      ? ((e as Record<string, unknown> | undefined)?.['content_html'] as
-          | string
-          | undefined)
-      : ((e as Record<string, unknown> | undefined)?.['description_html'] as
-          | string
-          | undefined)
+  // Description body comes from the latest description_revision comment.
+  const description = latestRevision?.body
 
   return (
     <div className='space-y-2'>
       {e ? (
-        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
-          <div
-            className={`flex flex-col items-stretch ${costTone(0)} opacity-50`}
-            title='pending estimator backend (recompute hook + history)'
-          >
-            <Gauge
-              label='estimated'
-              value={0}
-              min={0}
-              max={costMax}
-              unit='USD'
-              redLine={budget}
-            />
-          </div>
-          <div className={`flex flex-col items-stretch ${costTone(actual)}`}>
-            <Gauge
-              label='actual'
-              value={actual}
-              min={0}
-              max={costMax}
-              unit='USD'
-              redLine={budget}
-            />
-          </div>
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
           <div className='flex flex-col items-stretch text-emerald-500'>
             <Gauge
               label='turns'
@@ -255,8 +204,8 @@ export function MainTab({
             {created ? (
               <Row label='Created' value={created.toLocaleString()} />
             ) : null}
-            {updated ? (
-              <Row label='Updated' value={updated.toLocaleString()} />
+            {updatedDate ? (
+              <Row label='Updated' value={updatedDate.toLocaleString()} />
             ) : null}
           </CardContent>
         </Card>
@@ -328,7 +277,7 @@ export function MainTab({
               </div>
             </div>
           ) : (
-            <DescriptionView raw={description} rendered={descriptionHTML} />
+            <DescriptionView raw={description} />
           )}
         </CardContent>
       </Card>
@@ -355,7 +304,7 @@ export function MainTab({
                 <div key={rev.id} className='space-y-1 py-2 text-sm'>
                   <div className='flex items-center justify-between'>
                     <code className='font-mono text-[11px]'>
-                      {rev.author.slice(0, 16)}
+                      {(rev.author ?? '').slice(0, 16)}
                     </code>
                     <span className='text-muted-foreground text-xs'>
                       {fmtTime(rev.created_at)}

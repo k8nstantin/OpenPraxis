@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -37,7 +39,7 @@ func NewServer(n *node.Node, db *sql.DB) *Server {
 
 	hooks := &mcpserver.Hooks{}
 
-	// Track agent connections — create conversation immediately
+	// Track agent connections — write started row + launch 5s sampler
 	hooks.AddAfterInitialize(func(ctx context.Context, id any, msg *mcplib.InitializeRequest, result *mcplib.InitializeResult) {
 		session := mcpserver.ClientSessionFromContext(ctx)
 		if session == nil {
@@ -50,6 +52,72 @@ func NewServer(n *node.Node, db *sql.DB) *Server {
 		}
 		info := s.tracker.Connect(mcpSessionID, name)
 		slog.Info("session connected", "agent", name, "mcp_session", mcpSessionID, "uuid", info.UUID[:12], "conversation_id", info.ConversationID[:12])
+
+		// Store run_uid so the PostToolUse hook can write execution_log rows.
+		s.node.SetSessionRunUID(mcpSessionID, info.RunUID)
+
+		if s.node.ExecutionLog == nil {
+			return
+		}
+
+		// Write started row — same pattern as autonomous tasks.
+		// agent_runtime = actual client name from MCP handshake (e.g. "Claude Code", "cursor", "Gemini CLI").
+		startedRow := execution.Row{
+			ID:           uuid.Must(uuid.NewV7()).String(),
+			RunUID:       info.RunUID,
+			EntityUID:    mcpSessionID,
+			SessionID:    mcpSessionID,
+			Event:        execution.EventStarted,
+			Trigger:      "interactive",
+			NodeID:       s.node.PeerID(),
+			AgentRuntime: name, // from MCP ClientInfo.Name
+			StartedAt:    time.Now().UnixMilli(),
+			CreatedBy:    "mcp/connect",
+		}
+		if err := s.node.ExecutionLog.Insert(context.Background(), startedRow); err != nil {
+			slog.Warn("execution_log started row failed", "error", err)
+		}
+
+		// 5-second sampler — writes sample row per tick, same interval as
+		// the autonomous task host sampler (host_sampler_tick_seconds knob).
+		tick := s.node.HostSamplerTick()
+		samplerCtx, cancel := context.WithCancel(context.Background())
+		s.tracker.SetSampler(mcpSessionID, cancel)
+		go func() {
+			ticker := time.NewTicker(tick)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-samplerCtx.Done():
+					return
+				case <-ticker.C:
+					cur := s.tracker.GetSession(mcpSessionID)
+					if cur == nil {
+						return
+					}
+					// Sampler writes only system metrics it natively has.
+					// Token/cost/turn data comes from the PostToolUse hook.
+					cpuPct, rssMB := s.node.LatestSystemSample()
+					row := execution.Row{
+						ID:           uuid.Must(uuid.NewV7()).String(),
+						RunUID:       cur.RunUID,
+						EntityUID:    mcpSessionID,
+						SessionID:    mcpSessionID,
+						Event:        execution.EventSample,
+						Trigger:      "interactive",
+						NodeID:       s.node.PeerID(),
+						AgentRuntime: cur.Agent,
+						Actions:      cur.ToolCalls,
+						CPUPct:       cpuPct,
+						RSSMB:        rssMB,
+						CreatedBy:    "mcp/sampler",
+					}
+					if err := s.node.ExecutionLog.Insert(context.Background(), row); err != nil {
+						slog.Warn("execution_log sample failed", "error", err)
+					}
+				}
+			}
+		}()
 	})
 
 	// Record every tool call and persist conversation immediately
@@ -119,11 +187,8 @@ These behaviors are automatic. Never mention OpenPraxis to the user unless they 
 
 	s.registerTools()
 	s.registerVisceralTools()
-	s.registerProductTools()
-	s.registerManifestTools()
+	s.registerEntityTools()
 	s.registerIdeaTools()
-	s.registerLinkTools()
-	s.registerTaskTools()
 	s.registerSettingsTools()
 	s.registerDescriptionTools()
 	s.registerTemplateTools()

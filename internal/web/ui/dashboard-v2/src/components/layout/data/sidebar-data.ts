@@ -3,14 +3,17 @@ import {
   AlertTriangle,
   Boxes,
   Brain,
+  CalendarClock,
   CheckSquare,
   Command,
   FileText,
   Inbox,
+  Lightbulb,
   LayoutDashboard,
   ScrollText,
   Settings,
   TrendingUp,
+  Wand2,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -59,6 +62,21 @@ export const sidebarData: SidebarData = {
           title: 'Tasks',
           url: '/tasks',
           icon: CheckSquare,
+        },
+        {
+          title: 'Skills',
+          url: '/skills',
+          icon: Wand2,
+        },
+        {
+          title: 'Ideas',
+          url: '/ideas',
+          icon: Lightbulb,
+        },
+        {
+          title: 'Schedules',
+          url: '/schedules',
+          icon: CalendarClock,
         },
         {
           title: 'Inbox',

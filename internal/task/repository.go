@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -879,97 +878,27 @@ func (s *Store) ClearActionRequest(id string) error {
 // today's rates differ from when the row was originally written.
 const PricingVersion = "v1-2026-04"
 
-// RecordRun updates run stats after a task executes and saves to run history.
-// usage carries the per-token counts parsed from the agent's stream-json
-// output; they're denormalised onto task_runs so dashboards don't have to
-// re-parse the full output blob on every read. The blob remains in
-// task_runs.output as the source of truth.
-// RecordRun inserts a completed run into task_runs and returns the
-// inserted row id. Caller passes the run_id to RecordHostMetrics to
-// persist the host CPU/RSS sparkline samples + rollup columns.
-func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) (int64, error) {
+// updateTaskRunStats updates the tasks row counters after a completed run.
+// Called by the runner goroutine immediately before writing to execution_log.
+// Does NOT write to task_runs — run history lives in execution_log.
+func (s *Store) updateTaskRunStats(id, output, status string) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	// No truncation — capture full output
-	_, err := s.db.Exec(`UPDATE tasks SET run_count = run_count + 1, last_run_at = ?, last_output = ?, status = ?, updated_at = ? WHERE id = ?`,
+	s.db.Exec(`UPDATE tasks SET run_count = run_count + 1, last_run_at = ?, last_output = ?, status = ?, updated_at = ? WHERE id = ?`,
 		now, output, status, now, id)
-	if err != nil {
-		return 0, err
-	}
-
-	// Get current run_count for run_number
-	var runCount int
-	if err := s.db.QueryRow(`SELECT run_count FROM tasks WHERE id = ?`, id).Scan(&runCount); err != nil {
-		slog.Warn("query run_count failed", "task_id", id, "error", err)
-	}
-
-	// Resolve the task's agent so the run row carries an agent_runtime
-	// stamp (used by the Stats tab summary card). Best-effort — empty
-	// string is fine if the task was deleted between RecordRun args
-	// being prepared and this query.
-	var agentRuntime string
-	_ = s.db.QueryRow(`SELECT agent FROM tasks WHERE id = ?`, id).Scan(&agentRuntime)
-
-	durationMS := time.Since(startedAt).Milliseconds()
-	if durationMS < 0 {
-		durationMS = 0
-	}
-
-	// Insert into task_runs history with full denorm (tokens + model + pricing version).
-	res, err := s.db.Exec(`INSERT INTO task_runs
-		(task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at,
-		 input_tokens, output_tokens, cache_read_tokens, cache_create_tokens, model, pricing_version,
-		 duration_ms, agent_runtime)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, runCount, output, status, actions, lines, costUSD, turns, startedAt.UTC().Format(time.RFC3339), now,
-		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheCreationTokens, model, PricingVersion,
-		durationMS, agentRuntime)
-	if err != nil {
-		return 0, err
-	}
-	runID, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-	return runID, nil
 }
 
-// RecordHostMetrics persists the HostSampler output for a run: rollup
-// columns on task_runs + every sample into task_run_host_samples. Best-
-// effort — errors log-and-swallow because losing host metrics must not
-// fail the task completion path.
+// RecordRun is retained for backward-compatibility with external callers and
+// tests. It updates the tasks row only — run history is now written to
+// execution_log by the runner goroutine directly. Returns 0, nil.
+func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) (int64, error) {
+	s.updateTaskRunStats(id, output, status)
+	return 0, nil
+}
+
+// RecordHostMetrics is a no-op. Host-metric samples are now written to
+// execution_log as EventSample rows by the runner goroutine directly.
 func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metrics HostMetrics) error {
-	if runID <= 0 {
-		return nil
-	}
-	if _, err := s.db.Exec(
-		`UPDATE task_runs SET peak_cpu_pct = ?, avg_cpu_pct = ?, peak_rss_mb = ?, avg_rss_mb = ? WHERE id = ?`,
-		metrics.PeakCPUPct, metrics.AvgCPUPct, metrics.PeakRSSMB, metrics.AvgRSSMB, runID,
-	); err != nil {
-		return fmt.Errorf("update task_runs host summary: %w", err)
-	}
-	if len(samples) == 0 {
-		return nil
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin host-samples tx: %w", err)
-	}
-	defer tx.Rollback()
-	stmt, err := tx.Prepare(`INSERT INTO task_run_host_samples
-		(run_id, ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("prepare host-samples insert: %w", err)
-	}
-	defer stmt.Close()
-	for _, smp := range samples {
-		if _, err := stmt.Exec(runID, smp.TS.UTC().Format(time.RFC3339Nano),
-			smp.CPUPct, smp.RSSMB, smp.CostUSD, smp.Turns, smp.Actions,
-			smp.DiskUsedGB, smp.DiskTotalGB); err != nil {
-			return fmt.Errorf("insert host sample: %w", err)
-		}
-	}
-	return tx.Commit()
+	return nil
 }
 
 // ListHostSamples returns the time-series host samples for a run.
@@ -1049,54 +978,63 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	return scanRuns(rows)
 }
 
-// LinkManifest adds an association between a task and a manifest.
+// LinkManifest creates a manifest→task EdgeOwns edge in the relationships
+// store. The legacy task_manifests table is no longer written to.
 func (s *Store) LinkManifest(taskID, manifestID string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO task_manifests (task_id, manifest_id, linked_at) VALUES (?, ?, ?)`,
-		taskID, manifestID, now)
-	return err
+	if s.rels == nil {
+		return fmt.Errorf("link manifest: relationships backend not wired")
+	}
+	ctx := context.Background()
+	// Idempotent: check if the edge already exists before creating.
+	_, found, err := s.rels.Get(ctx, manifestID, taskID, relationships.EdgeOwns)
+	if err != nil {
+		return fmt.Errorf("link manifest: check existing edge: %w", err)
+	}
+	if found {
+		return nil
+	}
+	return s.rels.Create(ctx, relationships.Edge{
+		SrcKind:   relationships.KindManifest,
+		SrcID:     manifestID,
+		DstKind:   relationships.KindTask,
+		DstID:     taskID,
+		Kind:      relationships.EdgeOwns,
+		CreatedBy: "task.Store.LinkManifest",
+		Reason:    "task linked to manifest",
+	})
 }
 
-// UnlinkManifest removes an association between a task and a manifest.
+// UnlinkManifest removes the manifest→task EdgeOwns edge from the
+// relationships store. The legacy task_manifests table is no longer used.
 func (s *Store) UnlinkManifest(taskID, manifestID string) error {
-	_, err := s.db.Exec(`DELETE FROM task_manifests WHERE task_id = ? AND manifest_id = ?`, taskID, manifestID)
-	return err
+	if s.rels == nil {
+		return fmt.Errorf("unlink manifest: relationships backend not wired")
+	}
+	return s.rels.Remove(context.Background(), manifestID, taskID,
+		relationships.EdgeOwns, "task.Store.UnlinkManifest", "task unlinked from manifest")
 }
 
-// ListLinkedManifests returns manifest IDs linked to a task via the link table.
+// ListLinkedManifests returns manifest IDs that own a task, resolved via
+// the relationships store. Replaces the legacy task_manifests JOIN.
 func (s *Store) ListLinkedManifests(taskID string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT manifest_id FROM task_manifests WHERE task_id = ? ORDER BY linked_at`, taskID)
+	if s.rels == nil {
+		return nil, nil
+	}
+	edges, err := s.rels.ListIncoming(context.Background(), taskID, relationships.EdgeOwns)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindManifest {
+			ids = append(ids, e.SrcID)
 		}
-		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	return ids, nil
 }
 
-// ListTasksByLinkedManifest returns tasks linked to a manifest via the link table.
+// ListTasksByLinkedManifest returns tasks owned by a manifest via the
+// relationships store. Replaces the legacy task_manifests JOIN.
 func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.db.Query(`SELECT t.id, t.title, t.description, t.schedule, t.status, t.agent, t.source_node, t.created_by, t.depends_on, t.block_reason, t.run_count, t.last_run_at, t.next_run_at, t.last_output, t.created_at, t.updated_at
-		FROM tasks t JOIN task_manifests tm ON t.id = tm.task_id
-		WHERE tm.manifest_id = ? AND t.deleted_at = '' ORDER BY t.created_at DESC LIMIT ?`, manifestID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks, err := scanTasks(rows)
-	if err == nil {
-		s.populateOwnership(tasks)
-		s.enrichWithCosts(tasks)
-	}
-	return tasks, err
+	return s.ListByManifest(manifestID, limit)
 }

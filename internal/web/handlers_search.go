@@ -8,10 +8,8 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
-	"github.com/k8nstantin/OpenPraxis/internal/idea"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
@@ -88,22 +86,6 @@ func apiMemoriesSearchGET(n *node.Node) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, items)
-	}
-}
-
-func apiManifestsSearchGET(n *node.Node) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q, limit := parseSearchParams(r)
-		if q == "" {
-			writeJSON(w, []enrichedManifest{})
-			return
-		}
-		results, err := n.Manifests.Search(q, limit)
-		if err != nil {
-			writeError(w, err.Error(), 500)
-			return
-		}
-		writeJSON(w, enrichManifests(n, results))
 	}
 }
 
@@ -255,44 +237,6 @@ func apiTasksSearch(n *node.Node) http.HandlerFunc {
 		}
 		if results == nil {
 			results = []*task.Task{}
-		}
-		writeJSON(w, results)
-	}
-}
-
-func apiProductsSearch(n *node.Node) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q, limit := parseSearchParams(r)
-		if q == "" {
-			writeJSON(w, []*product.Product{})
-			return
-		}
-		results, err := n.Products.Search(q, limit)
-		if err != nil {
-			writeError(w, err.Error(), 500)
-			return
-		}
-		if results == nil {
-			results = []*product.Product{}
-		}
-		writeJSON(w, results)
-	}
-}
-
-func apiIdeasSearch(n *node.Node) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q, limit := parseSearchParams(r)
-		if q == "" {
-			writeJSON(w, []*idea.Idea{})
-			return
-		}
-		results, err := n.Ideas.Search(q, limit)
-		if err != nil {
-			writeError(w, err.Error(), 500)
-			return
-		}
-		if results == nil {
-			results = []*idea.Idea{}
 		}
 		writeJSON(w, results)
 	}

@@ -261,18 +261,6 @@ func setProductKnob(t *testing.T, store *settings.Store, productID, key string, 
 	}
 }
 
-// recordPastRun inserts a synthetic task_runs row so SumCostSince has data to
-// aggregate. Used by the daily-budget test to simulate a product that has
-// already spent its budget earlier today.
-func recordPastRun(t *testing.T, db *sql.DB, taskID string, costUSD float64, startedAt time.Time) {
-	t.Helper()
-	_, err := db.Exec(`INSERT INTO task_runs (task_id, run_number, output, status, actions, lines, cost_usd, turns, started_at, completed_at)
-		VALUES (?, 1, '', 'completed', 0, 0, ?, 0, ?, ?)`,
-		taskID, costUSD, startedAt.UTC().Format(time.RFC3339), startedAt.UTC().Format(time.RFC3339))
-	if err != nil {
-		t.Fatalf("insert task_run: %v", err)
-	}
-}
 
 // insertTaskRow creates a real tasks row + the EdgeOwns(manifest →
 // task) row that ownership-aware queries (SumCostSince, etc.) join
@@ -321,31 +309,6 @@ func insertManifestRow(t *testing.T, db *sql.DB, manifestID, productID string) {
 	}
 }
 
-// TestRunner_Execute_ResolveAllRunsOnce —
-// Proves ResolveAll is invoked during Execute by making the DailyBudget
-// pre-spawn check fire — that check only runs AFTER ResolveAll populates the
-// runtime knobs. If ResolveAll were skipped, the daily_budget knob would not
-// be read, and Execute would proceed to spawn (failing for an unrelated
-// reason). Seeing the daily-budget error text proves the full resolve path.
-func TestRunner_Execute_ResolveAllRunsOnce(t *testing.T) {
-	r, store, tasks, manifests := newRunnerHarness(t)
-
-	wireTask(tasks, manifests, "t-ra", "m-ra", "prod-ra")
-	insertManifestRow(t, r.store.DB(), "m-ra", "prod-ra")
-	insertTaskRow(t, r.store.DB(), "t-past", "m-ra")
-	recordPastRun(t, r.store.DB(), "t-past", 0.50, time.Now().UTC())
-
-	setProductKnob(t, store, "prod-ra", "daily_budget_usd", 0.01)
-	setProductKnob(t, store, "prod-ra", "max_parallel", 10) // room to dispatch
-
-	err := r.Execute(&Task{ID: "t-ra", Title: "resolve-all check", ManifestID: "m-ra"}, "", "", "")
-	if err == nil {
-		t.Fatalf("Execute: want daily-budget error, got nil (ResolveAll probably skipped)")
-	}
-	if !strings.Contains(err.Error(), "daily budget exceeded") {
-		t.Fatalf("Execute error = %q, want daily-budget rejection (proves ResolveAll ran)", err.Error())
-	}
-}
 
 // TestRunner_Execute_UsesResolvedMaxTurns —
 // The resolver snapshot that feeds Execute decodes max_turns from the
@@ -435,69 +398,7 @@ func TestRunner_Execute_PerTaskAgentOverridesResolved(t *testing.T) {
 	}
 }
 
-// TestRunner_Execute_DailyBudgetExceeded_Rejected —
-// End-to-end pre-spawn check: a product with $0.01 daily budget and $0.50 of
-// recorded spend today refuses dispatch before ResolveAll returns to ever
-// touch the Claude CLI. The error text is stable so scripts/ops can match it.
-func TestRunner_Execute_DailyBudgetExceeded_Rejected(t *testing.T) {
-	r, store, tasks, manifests := newRunnerHarness(t)
 
-	wireTask(tasks, manifests, "t-db", "m-db", "prod-db")
-	insertManifestRow(t, r.store.DB(), "m-db", "prod-db")
-	insertTaskRow(t, r.store.DB(), "t-db-past", "m-db")
-	recordPastRun(t, r.store.DB(), "t-db-past", 0.50, time.Now().UTC())
-
-	setProductKnob(t, store, "prod-db", "daily_budget_usd", 0.01)
-
-	err := r.Execute(&Task{ID: "t-db", Title: "over budget", ManifestID: "m-db"}, "", "", "")
-	if err == nil {
-		t.Fatalf("Execute: want budget error, got nil")
-	}
-	if !strings.Contains(err.Error(), "daily budget exceeded for product prod-db") {
-		t.Fatalf("Execute error = %q, want per-product daily-budget rejection", err.Error())
-	}
-	if !strings.Contains(err.Error(), "$0.50") {
-		t.Fatalf("Execute error = %q, want it to surface actual spend", err.Error())
-	}
-}
-
-// TestRunner_Execute_MaxCostMidRun_Killed —
-// Exercises the mid-run cost tracking path at the unit level. The scanner
-// loop calls extractCostFromEvent and accumulates into rt.CumulativeCostUSD;
-// shouldRetry for a cost_cap reason must return false so a killed run does
-// not auto-retry (would just hit the cap again).
-func TestRunner_Execute_MaxCostMidRun_Killed(t *testing.T) {
-	// Simulated stream: each line is a JSON event with a growing total_cost_usd.
-	events := []string{
-		`{"type":"assistant","total_cost_usd":0.01}`,
-		`{"type":"assistant","total_cost_usd":0.05}`,
-		`{"type":"assistant","total_cost_usd":0.12}`, // would trip a $0.10 cap
-	}
-	var cum float64
-	var tripped bool
-	const cap = 0.10
-	for _, line := range events {
-		if c, ok := extractCostFromEvent(line); ok {
-			if c > cum {
-				cum = c
-			}
-			if cap > 0 && cum > cap {
-				tripped = true
-			}
-		}
-	}
-	if !tripped {
-		t.Fatalf("cost cap did not trip; cum=%.2f cap=%.2f", cum, cap)
-	}
-	if cum != 0.12 {
-		t.Fatalf("cumulative cost = %.2f, want 0.12", cum)
-	}
-	// Cost-cap hits must NOT retry — catch is that the agent will burn the
-	// same dollars again on the retry.
-	if shouldRetry("failed", "cost_cap", 0, 3) {
-		t.Fatalf("shouldRetry(cost_cap) = true, want false (non-transient)")
-	}
-}
 
 // TestRunner_Retry_TransientFailure_Requeues —
 // shouldRetry returns true for each reason isTransientFailure classifies as
@@ -517,7 +418,7 @@ func TestRunner_Retry_TransientFailure_Requeues(t *testing.T) {
 // Reasons the runner classifies as non-transient (max_turns, deliverable_missing,
 // cost_cap, daily_budget) never trigger retry regardless of the cap.
 func TestRunner_Retry_NonTransientFailure_DoesNotRequeue(t *testing.T) {
-	nonTransient := []string{"max_turns", "deliverable_missing", "cost_cap", "daily_budget"}
+	nonTransient := []string{"max_turns", "deliverable_missing"}
 	for _, reason := range nonTransient {
 		t.Run(reason, func(t *testing.T) {
 			if shouldRetry("failed", reason, 0, 5) {

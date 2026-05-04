@@ -534,6 +534,30 @@ func (s *Store) ListAllCurrent(ctx context.Context) ([]*Schedule, error) {
 // One-shot schedules (cron_expr='') typically have max_runs=1 and
 // self-disable on the first MarkFired. Recurring (cron_expr non-empty)
 // schedules with max_runs=0 fire indefinitely.
+// CloseStaleOneShots closes all one-shot schedules whose run_at is in the
+// past and are still marked valid_to=''. Called at startup to clean up
+// schedules that were never closed by the runner (e.g. migrated legacy
+// tasks, crashed runs). Returns the number of rows closed.
+func (s *Store) CloseStaleOneShots(ctx context.Context) (int64, error) {
+	now := nowUTC()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE schedules
+		   SET valid_to = ?, reason = 'stale-one-shot-cleanup'
+		 WHERE valid_to = ''
+		   AND (cron_expr = '' OR cron_expr = 'once')
+		   AND run_at != ''
+		   AND run_at < ?`,
+		now, now)
+	if err != nil {
+		return 0, fmt.Errorf("close stale one-shots: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		slog.Info("closed stale one-shot schedules", "count", n)
+	}
+	return n, nil
+}
+
 func (s *Store) MarkFired(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("schedule: MarkFired requires positive id, got %d", id)

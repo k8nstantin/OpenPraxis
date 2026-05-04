@@ -1,4 +1,7 @@
-package manifest
+// Package delusion manages the delusions table — records of agents deviating
+// from active manifests (going off-spec). Extracted from internal/manifest so
+// neither internal/node nor internal/web need to import the manifest package.
+package delusion
 
 import (
 	"database/sql"
@@ -24,9 +27,21 @@ type Delusion struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// InitDelusions creates the delusions table.
-func (s *Store) InitDelusions() error {
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS delusions (
+// Store wraps the delusions table.
+type Store struct {
+	db *sql.DB
+}
+
+// New returns a Store backed by db. InitSchema must have been called first
+// (node.New does this via the manifest store's InitDelusions; this store
+// reads from/writes to the same table).
+func New(db *sql.DB) *Store {
+	return &Store{db: db}
+}
+
+// InitSchema creates the delusions table and its indexes. Idempotent.
+func InitSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS delusions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL,
 		manifest_id TEXT NOT NULL,
@@ -42,30 +57,17 @@ func (s *Store) InitDelusions() error {
 	if err != nil {
 		return fmt.Errorf("create delusions table: %w", err)
 	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_status ON delusions(status)`)
-	if err != nil {
-		return fmt.Errorf("create delusions status index: %w", err)
-	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_created ON delusions(created_at DESC)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_session ON delusions(session_id)`)
-	if err != nil {
-		return fmt.Errorf("create delusions session index: %w", err)
-	}
-
-	s.db.Exec(`ALTER TABLE delusions ADD COLUMN source_node TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE delusions ADD COLUMN action_id TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE delusions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_status ON delusions(status)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_created ON delusions(created_at DESC)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_delusions_session ON delusions(session_id)`)
+	db.Exec(`ALTER TABLE delusions ADD COLUMN source_node TEXT NOT NULL DEFAULT ''`)
+	db.Exec(`ALTER TABLE delusions ADD COLUMN action_id TEXT NOT NULL DEFAULT ''`)
+	db.Exec(`ALTER TABLE delusions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
-// RecordDelusion stores a manifest deviation.
-func (s *Store) RecordDelusion(sessionID, sourceNode, actionID, taskID, manifestID, manifestMarker, manifestTitle, toolName, toolInput string, score float64, reason string) error {
+// Record stores a manifest deviation.
+func (s *Store) Record(sessionID, sourceNode, actionID, taskID, manifestID, manifestMarker, manifestTitle, toolName, toolInput string, score float64, reason string) error {
 	if len(toolInput) > 2000 {
 		toolInput = toolInput[:2000] + "..."
 	}
@@ -76,29 +78,24 @@ func (s *Store) RecordDelusion(sessionID, sourceNode, actionID, taskID, manifest
 	return err
 }
 
-// ListDelusions returns delusion events.
-func (s *Store) ListDelusions(status string, limit int) ([]Delusion, error) {
+// List returns delusion events, newest first.
+func (s *Store) List(status string, limit int) ([]Delusion, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-
 	query := `SELECT id, session_id, source_node, action_id, task_id, manifest_id, manifest_marker, manifest_title, tool_name, tool_input, score, reason, status, created_at FROM delusions`
 	var args []any
-
 	if status != "" {
 		query += ` WHERE status = ?`
 		args = append(args, status)
 	}
-
 	query += ` ORDER BY created_at DESC LIMIT ?`
 	args = append(args, limit)
-
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var results []Delusion
 	for rows.Next() {
 		var d Delusion
@@ -112,39 +109,14 @@ func (s *Store) ListDelusions(status string, limit int) ([]Delusion, error) {
 	return results, rows.Err()
 }
 
-// ListDelusionsByTask returns delusions for a specific task.
-func (s *Store) ListDelusionsByTask(taskID string, limit int) ([]Delusion, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.db.Query(`SELECT id, session_id, source_node, action_id, task_id, manifest_id, manifest_marker, manifest_title, tool_name, tool_input, score, reason, status, created_at
-		FROM delusions WHERE task_id = ? OR task_id LIKE ? ORDER BY created_at DESC LIMIT ?`, taskID, taskID+"%", limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []Delusion
-	for rows.Next() {
-		var d Delusion
-		var createdStr string
-		if err := rows.Scan(&d.ID, &d.SessionID, &d.SourceNode, &d.ActionID, &d.TaskID, &d.ManifestID, &d.ManifestMarker, &d.ManifestTitle, &d.ToolName, &d.ToolInput, &d.Score, &d.Reason, &d.Status, &createdStr); err != nil {
-			return nil, err
-		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-		results = append(results, d)
-	}
-	return results, rows.Err()
-}
-
-// UpdateDelusionStatus changes a delusion's status.
-func (s *Store) UpdateDelusionStatus(id int, status string) error {
+// UpdateStatus changes a delusion's status.
+func (s *Store) UpdateStatus(id int, status string) error {
 	_, err := s.db.Exec(`UPDATE delusions SET status = ? WHERE id = ?`, status, id)
 	return err
 }
 
-// PendingDelusionCount returns flagged delusion count.
-func (s *Store) PendingDelusionCount() (int, error) {
+// PendingCount returns flagged delusion count.
+func (s *Store) PendingCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM delusions WHERE status = 'flagged'`).Scan(&count)
 	if err == sql.ErrNoRows {

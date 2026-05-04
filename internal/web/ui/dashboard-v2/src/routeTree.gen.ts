@@ -12,11 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
+import { Route as AuthenticatedSkillsRouteImport } from './routes/_authenticated/skills'
+import { Route as AuthenticatedSchedulesRouteImport } from './routes/_authenticated/schedules'
 import { Route as AuthenticatedRecallRouteImport } from './routes/_authenticated/recall'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductivityRouteImport } from './routes/_authenticated/productivity'
 import { Route as AuthenticatedManifestsRouteImport } from './routes/_authenticated/manifests'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
+import { Route as AuthenticatedIdeasRouteImport } from './routes/_authenticated/ideas'
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
 import { Route as AuthenticatedActionsRouteImport } from './routes/_authenticated/actions'
@@ -46,6 +49,16 @@ const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedSkillsRoute = AuthenticatedSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSchedulesRoute = AuthenticatedSchedulesRouteImport.update({
+  id: '/schedules',
+  path: '/schedules',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedRecallRoute = AuthenticatedRecallRouteImport.update({
   id: '/recall',
   path: '/recall',
@@ -70,6 +83,11 @@ const AuthenticatedManifestsRoute = AuthenticatedManifestsRouteImport.update({
 const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedIdeasRoute = AuthenticatedIdeasRouteImport.update({
+  id: '/ideas',
+  path: '/ideas',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAuditRoute = AuthenticatedAuditRouteImport.update({
@@ -160,11 +178,14 @@ export interface FileRoutesByFullPath {
   '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
+  '/ideas': typeof AuthenticatedIdeasRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/schedules': typeof AuthenticatedSchedulesRoute
+  '/skills': typeof AuthenticatedSkillsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -181,11 +202,14 @@ export interface FileRoutesByTo {
   '/actions': typeof AuthenticatedActionsRoute
   '/activity': typeof AuthenticatedActivityRoute
   '/audit': typeof AuthenticatedAuditRoute
+  '/ideas': typeof AuthenticatedIdeasRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/manifests': typeof AuthenticatedManifestsRoute
   '/productivity': typeof AuthenticatedProductivityRoute
   '/products': typeof AuthenticatedProductsRoute
   '/recall': typeof AuthenticatedRecallRoute
+  '/schedules': typeof AuthenticatedSchedulesRoute
+  '/skills': typeof AuthenticatedSkillsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -206,11 +230,14 @@ export interface FileRoutesById {
   '/_authenticated/actions': typeof AuthenticatedActionsRoute
   '/_authenticated/activity': typeof AuthenticatedActivityRoute
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
+  '/_authenticated/ideas': typeof AuthenticatedIdeasRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
   '/_authenticated/manifests': typeof AuthenticatedManifestsRoute
   '/_authenticated/productivity': typeof AuthenticatedProductivityRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/recall': typeof AuthenticatedRecallRoute
+  '/_authenticated/schedules': typeof AuthenticatedSchedulesRoute
+  '/_authenticated/skills': typeof AuthenticatedSkillsRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
@@ -232,11 +259,14 @@ export interface FileRouteTypes {
     | '/actions'
     | '/activity'
     | '/audit'
+    | '/ideas'
     | '/inbox'
     | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/schedules'
+    | '/skills'
     | '/tasks'
     | '/settings/account'
     | '/settings/appearance'
@@ -253,11 +283,14 @@ export interface FileRouteTypes {
     | '/actions'
     | '/activity'
     | '/audit'
+    | '/ideas'
     | '/inbox'
     | '/manifests'
     | '/productivity'
     | '/products'
     | '/recall'
+    | '/schedules'
+    | '/skills'
     | '/tasks'
     | '/'
     | '/settings/account'
@@ -277,11 +310,14 @@ export interface FileRouteTypes {
     | '/_authenticated/actions'
     | '/_authenticated/activity'
     | '/_authenticated/audit'
+    | '/_authenticated/ideas'
     | '/_authenticated/inbox'
     | '/_authenticated/manifests'
     | '/_authenticated/productivity'
     | '/_authenticated/products'
     | '/_authenticated/recall'
+    | '/_authenticated/schedules'
+    | '/_authenticated/skills'
     | '/_authenticated/tasks'
     | '/_authenticated/'
     | '/_authenticated/settings/account'
@@ -323,6 +359,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/skills': {
+      id: '/_authenticated/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof AuthenticatedSkillsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/schedules': {
+      id: '/_authenticated/schedules'
+      path: '/schedules'
+      fullPath: '/schedules'
+      preLoaderRoute: typeof AuthenticatedSchedulesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/recall': {
       id: '/_authenticated/recall'
       path: '/recall'
@@ -356,6 +406,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof AuthenticatedInboxRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/ideas': {
+      id: '/_authenticated/ideas'
+      path: '/ideas'
+      fullPath: '/ideas'
+      preLoaderRoute: typeof AuthenticatedIdeasRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/audit': {
@@ -487,11 +544,14 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedActionsRoute: typeof AuthenticatedActionsRoute
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
+  AuthenticatedIdeasRoute: typeof AuthenticatedIdeasRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
   AuthenticatedManifestsRoute: typeof AuthenticatedManifestsRoute
   AuthenticatedProductivityRoute: typeof AuthenticatedProductivityRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedRecallRoute: typeof AuthenticatedRecallRoute
+  AuthenticatedSchedulesRoute: typeof AuthenticatedSchedulesRoute
+  AuthenticatedSkillsRoute: typeof AuthenticatedSkillsRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
@@ -501,11 +561,14 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedActionsRoute: AuthenticatedActionsRoute,
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
+  AuthenticatedIdeasRoute: AuthenticatedIdeasRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
   AuthenticatedManifestsRoute: AuthenticatedManifestsRoute,
   AuthenticatedProductivityRoute: AuthenticatedProductivityRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedRecallRoute: AuthenticatedRecallRoute,
+  AuthenticatedSchedulesRoute: AuthenticatedSchedulesRoute,
+  AuthenticatedSkillsRoute: AuthenticatedSkillsRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }

@@ -58,27 +58,26 @@ func (b *nodeBridge) RecallMemory(id string) (*chat.MemoryResult, error) {
 }
 
 func (b *nodeBridge) ListManifests(status string, limit int) ([]chat.ManifestSummary, error) {
-	manifests, err := b.n.Manifests.List(status, limit)
+	entities, err := b.n.Entities.List("manifest", status, limit)
 	if err != nil {
 		return nil, err
 	}
 	var out []chat.ManifestSummary
-	for _, m := range manifests {
+	for _, e := range entities {
 		out = append(out, chat.ManifestSummary{
-			ID: m.ID, Title: m.Title, Status: m.Status, JiraRef: joinRefs(m.JiraRefs),
+			ID: e.EntityUID, Title: e.Title, Status: e.Status,
 		})
 	}
 	return out, nil
 }
 
 func (b *nodeBridge) GetManifest(id string) (*chat.ManifestDetail, error) {
-	m, err := b.n.Manifests.Get(id)
-	if err != nil || m == nil {
+	e, err := b.n.Entities.Get(id)
+	if err != nil || e == nil {
 		return nil, err
 	}
 	return &chat.ManifestDetail{
-		ID: m.ID, Title: m.Title, Status: m.Status,
-		Version: m.Version, Author: m.Author, JiraRef: joinRefs(m.JiraRefs), Content: m.Content,
+		ID: e.EntityUID, Title: e.Title, Status: e.Status,
 	}, nil
 }
 

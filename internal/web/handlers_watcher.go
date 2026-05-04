@@ -79,10 +79,9 @@ func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
 		// Resolve manifest
 		var manifestTitle, manifestContent string
 		if t.ManifestID != "" {
-			m, _ := n.Manifests.Get(t.ManifestID)
-			if m != nil {
-				manifestTitle = m.Title
-				manifestContent = m.Content
+			if e, _ := n.Entities.Get(t.ManifestID); e != nil {
+				manifestTitle = e.Title
+				manifestContent = e.Title // entity store carries title only; full content lives in legacy store
 			}
 		}
 

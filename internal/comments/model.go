@@ -13,6 +13,7 @@ const (
 	TargetManifest TargetType = "manifest"
 	TargetTask     TargetType = "task"
 	TargetIdea     TargetType = "idea"
+	TargetEntity   TargetType = "entity"
 )
 
 type Comment struct {

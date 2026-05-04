@@ -44,7 +44,12 @@ interface ExplicitEntry {
   value: string // JSON-encoded
 }
 
-function basePath(kind: EntityKind): string {
+// Settings endpoints use per-kind paths registered in the backend:
+//   GET/PUT /api/products/{id}/settings
+//   GET/PUT /api/manifests/{id}/settings
+//   GET/PUT /api/tasks/{id}/settings
+//   DELETE  /api/{kind}s/{id}/settings/{key}
+function settingsBasePath(kind: EntityKind): string {
   if (kind === 'product') return '/api/products'
   if (kind === 'task') return '/api/tasks'
   return '/api/manifests'
@@ -70,7 +75,7 @@ export function ExecutionTab({
     try {
       const [catRes, expRes] = await Promise.all([
         fetch('/api/settings/catalog'),
-        fetch(`${basePath(kind)}/${entityId}/settings`),
+        fetch(`${settingsBasePath(kind)}/${entityId}/settings`),
       ])
       if (!catRes.ok) throw new Error(`catalog → ${catRes.status}`)
       if (!expRes.ok) throw new Error(`settings → ${expRes.status}`)
@@ -206,7 +211,7 @@ function NumericKnobCell({
     setStatus('saving')
     setErrMsg(null)
     try {
-      const res = await fetch(`${basePath(kind)}/${entityId}/settings`, {
+      const res = await fetch(`${settingsBasePath(kind)}/${entityId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [knob.key]: next }),
@@ -230,7 +235,7 @@ function NumericKnobCell({
   const reset = async () => {
     try {
       const res = await fetch(
-        `${basePath(kind)}/${entityId}/settings/${encodeURIComponent(knob.key)}`,
+        `${settingsBasePath(kind)}/${entityId}/settings/${encodeURIComponent(knob.key)}`,
         { method: 'DELETE' }
       )
       if (!res.ok) {
@@ -312,7 +317,7 @@ function KnobRow({
     setStatus('saving')
     setErrMsg(null)
     try {
-      const res = await fetch(`${basePath(kind)}/${entityId}/settings`, {
+      const res = await fetch(`${settingsBasePath(kind)}/${entityId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [knob.key]: next }),
@@ -336,7 +341,7 @@ function KnobRow({
   const reset = async () => {
     try {
       const res = await fetch(
-        `${basePath(kind)}/${entityId}/settings/${encodeURIComponent(knob.key)}`,
+        `${settingsBasePath(kind)}/${entityId}/settings/${encodeURIComponent(knob.key)}`,
         { method: 'DELETE' }
       )
       if (!res.ok) {
@@ -583,13 +588,6 @@ function computeWarnings(knob: KnobDef, value: KnobValue): string[] {
   }
   if (knob.key === 'temperature' && typeof value === 'number' && value > 1.5) {
     out.push('High temperature rarely helps for coding')
-  }
-  if (
-    knob.key === 'daily_budget_usd' &&
-    typeof value === 'number' &&
-    value > 90
-  ) {
-    out.push('Within $10 of visceral rule cap ($100)')
   }
   return out
 }

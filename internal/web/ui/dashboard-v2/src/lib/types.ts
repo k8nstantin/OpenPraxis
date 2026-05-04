@@ -5,25 +5,28 @@
 // actually reads — narrowing-by-need keeps the type surface honest and
 // keeps drift visible in code review.
 
+export type EntityType = 'skill' | 'product' | 'manifest' | 'task' | 'idea'
+
 export type EntityStatus =
   | 'draft'
-  | 'open'
-  | 'in_progress'
+  | 'active'
   | 'closed'
   | 'archived'
-  | 'cancelled'
   | string
 
-export interface Product {
-  id: string
+export interface Entity {
+  row_id: number
+  entity_uid: string
+  type: EntityType
   title: string
-  description?: string
   status: EntityStatus
-  tags?: string[]
-  source_node?: string
+  tags: string[]
+  valid_from: string
+  valid_to: string
+  changed_by: string
+  change_reason: string
   created_at: string
-  updated_at: string
-  total_cost?: number
+  // Aggregated stats fields
   total_manifests?: number
   total_tasks?: number
   total_turns?: number
@@ -31,53 +34,27 @@ export interface Product {
   total_tokens?: number
 }
 
-export interface Manifest {
+export interface ExecutionRow {
   id: string
-  title: string
-  description?: string
-  status: EntityStatus
-  project_id?: string
-  tags?: string[]
-  source_node?: string
+  run_uid: string
+  entity_uid: string
+  event: 'started' | 'sample' | 'completed' | 'failed'
+  run_number: number
+  turns: number
+  input_tokens: number
+  output_tokens: number
+  cache_hit_rate_pct: number
+  cpu_pct: number
+  rss_mb: number
   created_at: string
-  updated_at: string
-  total_tasks?: number
-  total_turns?: number
-  total_cost?: number
-  total_actions?: number
-  total_tokens?: number
 }
 
-export interface Task {
+export interface OutputChunk {
   id: string
-  marker: string
-  manifest_id?: string
-  title: string
-  description?: string
-  description_html?: string
-  status: EntityStatus
-  agent?: string
-  schedule?: string
-  depends_on?: string
-  block_reason?: string
-  source_node?: string
-  tags?: string[]
+  run_uid: string
+  seq: number
+  chunk: string
   created_at: string
-  updated_at: string
-  total_cost?: number
-  total_turns?: number
-  total_actions?: number
-  total_tokens?: number
-}
-
-export interface Idea {
-  id: string
-  title: string
-  description?: string
-  status?: string
-  source_node?: string
-  created_at: string
-  updated_at: string
 }
 
 export type CommentType =
@@ -106,6 +83,7 @@ export interface ProductDependency {
   id: string
   title: string
   status: EntityStatus
+  // Note: id here IS the entity_uid — the dependency endpoints return {id,title,status}
 }
 
 // Hierarchy endpoint response — recursive shape for breadcrumb building.
@@ -118,3 +96,10 @@ export interface HierarchyNode {
   children?: HierarchyNode[]
   sub_products?: HierarchyNode[]
 }
+
+// Legacy type aliases kept for backward compat with any remaining consumers.
+// All three now map to Entity — callers should migrate to Entity directly.
+export type Product = Entity
+export type Manifest = Entity
+export type Task = Entity
+export type Idea = Entity

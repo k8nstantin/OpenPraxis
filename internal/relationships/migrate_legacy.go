@@ -365,6 +365,9 @@ func (s *Store) migrateTaskDeps(ctx context.Context) (int, error) {
 		`SELECT task_id, depends_on, valid_from, valid_to, changed_by, reason
 		 FROM task_dependency`)
 	if err != nil {
+		// task_dependency has been dropped by DropLegacyTables on post-migration
+		// DBs, or may never have existed on fresh installs. Either case means
+		// there are no rows to migrate.
 		if isNoSuchTable(err) {
 			return 0, nil
 		}

@@ -7,9 +7,8 @@ import (
 	"testing"
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -125,7 +124,7 @@ func isErrResult(r *mcplib.CallToolResult) bool {
 	return r.IsError
 }
 
-// newTestServerWithAllStores wires Comments + Tasks + Manifests + Products
+// newTestServerWithAllStores wires Comments + Tasks + Entities
 // so the resolveCommentTarget path can validate target full UUIDs.
 func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
@@ -143,20 +142,15 @@ func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	if err != nil {
 		t.Fatalf("NewStore tasks: %v", err)
 	}
-	manifests, err := manifest.NewStore(db)
+	entities, err := entity.NewStore(db)
 	if err != nil {
-		t.Fatalf("NewStore manifests: %v", err)
-	}
-	products, err := product.NewStore(db)
-	if err != nil {
-		t.Fatalf("NewStore products: %v", err)
+		t.Fatalf("NewStore entities: %v", err)
 	}
 
 	n := &node.Node{
-		Comments:  comments.NewStore(db),
-		Tasks:     tasks,
-		Manifests: manifests,
-		Products:  products,
+		Comments: comments.NewStore(db),
+		Tasks:    tasks,
+		Entities: entities,
 	}
 	return &Server{node: n}, db
 }

@@ -49,8 +49,6 @@ func Catalog() []KnobDef {
 	return []KnobDef{
 		{Key: "max_parallel", Type: KnobInt, SliderMin: f(1), SliderMax: f(100), SliderStep: f(1), Default: 3, Description: "Max tasks this product runs concurrently"},
 		{Key: "max_turns", Type: KnobInt, SliderMin: f(10), SliderMax: f(10000), SliderStep: f(10), Default: 50, Description: "Agent turn ceiling per task run"},
-		{Key: "max_cost_usd", Type: KnobFloat, SliderMin: f(0.01), SliderMax: f(1000), SliderStep: f(0.01), Default: 10.0, Unit: "USD", Description: "Max cost per single task run"},
-		{Key: "daily_budget_usd", Type: KnobFloat, SliderMin: f(1), SliderMax: f(10000), SliderStep: f(1), Default: 100.0, Unit: "USD", Description: "Per-product daily budget; clamped by visceral rule"},
 		{Key: "timeout_minutes", Type: KnobInt, SliderMin: f(1), SliderMax: f(1440), SliderStep: f(1), Default: 30, Unit: "minutes", Description: "Max wall time per task run"},
 		{Key: "temperature", Type: KnobFloat, SliderMin: f(0), SliderMax: f(2), SliderStep: f(0.05), Default: 0.2, Description: "LLM sampling temperature"},
 		{Key: "reasoning_effort", Type: KnobEnum, EnumValues: []string{"minimal", "low", "medium", "high"}, Default: "medium", Description: "Thinking budget for reasoning models"},
