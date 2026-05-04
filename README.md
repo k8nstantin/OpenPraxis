@@ -173,8 +173,7 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 - **Status colours** — green done, grey pending, red failed, amber in flight. One glance tells you where the build is.
 - **Any shape, no custom code.** Linear 12-task chain (like the ELS product: `T1 → T1R → T2 → T2R → … → T6R`)? Renders top-to-bottom. Eight independent pairs (like INT MySQL backup/verify)? Renders as eight parallel short columns. Multi-parent fan-in? Dagre figures it out. Empty manifest? Graceful. The renderer takes the edge set and delegates layout to [dagre](https://github.com/dagrejs/dagre) ([PR #158](https://github.com/k8nstantin/OpenPraxis/pull/158)); we don't do arithmetic on positions anymore.
 - **Click any node to drill in.** Purple → product detail. Blue → manifest detail. Chain node → task detail with live output. `#view-products/<id>/dag` is shareable.
-- **Locally bundled.** Cytoscape + dagre + cytoscape-dagre are served from `/vendor/` on the same Go binary ([PR #159](https://github.com/k8nstantin/OpenPraxis/pull/159)). The DAG works offline, air-gapped, no CDN risk.
-- **Contract-tested at the API level.** `TestProductHierarchy_EmptyProduct / _LinearChain / _ParallelPairs` locks the `/api/products/:id/hierarchy` payload dagre rides on so a new DAG shape can't silently break the renderer ([PR #160](https://github.com/k8nstantin/OpenPraxis/pull/160)).
+- **Contract-tested at the API level.** `TestProductHierarchy_EmptyProduct / _LinearChain / _ParallelPairs` locks the `/api/products/:id/hierarchy` payload the renderer rides on so a new DAG shape can't silently break the layout ([PR #160](https://github.com/k8nstantin/OpenPraxis/pull/160)).
 
 **Why it matters.** A spec without a picture is a PDF nobody reads. A DAG without real numbers is a toy. OpenPraxis combines both — you see the plan _and_ the current cost, status, run count, and cost-per-turn of every node in it, live, in one view.
 
@@ -243,36 +242,35 @@ Most agent tools hand you a black box: you push "run", hope for the best, and re
 
 The result is cost and quality control by construction — you set a daily budget, you see spend accrue against it live, the watcher flags every failed gate, and runaway sessions can't hide behind a finished status.
 
-### Dashboard — cost today vs. budget, tasks ranked by spend
+### Dashboard — cumulative cost, cache efficiency, and live activity
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="OpenPraxis dashboard overview — running task with live elapsed time, daily cost vs budget, tasks-today ranked by cost" width="100%" />
+  <img src="docs/images/overview.png" alt="OpenPraxis dashboard — cumulative cost $658, 98% cache hit ratio, actions-per-hour histogram, top tools breakdown" width="100%" />
 </p>
 
-One glance tells you the entire cost story of the day:
+One glance tells you the entire cost and efficiency story of your fleet:
 
-- **Running Tasks** — live card with agent, action count, elapsed time, pause/stop/emergency-stop buttons. A runaway task is one click away from dead.
-- **Cost Today ($16.24 / $100)** — current spend against the daily budget you set as a visceral rule. Crosses into red the moment you exceed it.
-- **Turns Today (438)** — total agent turns billed today across every task.
-- **Tasks (147) · Memories (134) · Nodes (1) · Uptime** — the state of the platform at a glance.
-- **Productivity (99 A)** — score derived from lines-of-code changed per dollar per task, letter-graded.
-- **Tasks Today — By Cost** — every task that ran today, sorted by cost. Columns: marker, title, branch, turns, cost, status. No ranking favourite, no scrolling through 200 tasks to find the expensive one.
+- **AI Stats (cumulative)** — total cost, turns, actions, and runs across all time (or scoped to today). Trend charts for cost, turns, and actions show where spend accelerated.
+- **Cache hit ratio** — dial gauge. 98% means almost every token was served from cache; a drop here is the earliest signal that prompts drifted and cost is about to spike.
+- **Token split** — stacked bar: `cache_read` (green) vs `input` (blue) vs `cache_create` (orange) vs `output` (yellow). Lets you see exactly how token budget is allocated across the fleet.
+- **Actions / hour** — 12-hour histogram. Identify burst windows, overnight runs, and idle periods at a glance.
+- **Top tools** — ranked by call count across the last 300 actions. Know whether your agents spend time in `Bash`, `Read`, `Edit`, or MCP calls.
+- **Nodes & Sessions** — peer roster with live session cards: which agents are connected, turn count, last activity.
 
 ### Live tool output — watch the agent work, turn by turn
 
 <p align="center">
-  <img src="docs/images/tasks-live-output.png" alt="Task detail with live bash, read, and edit tool calls streaming as the agent runs" width="100%" />
+  <img src="docs/images/tasks-live-output.png" alt="Task detail — execution control dials, dependency graph, run history, and live output streaming" width="100%" />
 </p>
 
-Open any running task and every tool call streams in as the agent makes it:
+Open any task and see everything in one panel:
 
-- **Bash** — full command, working directory, stdout, stderr, exit code.
-- **Read / Edit / Write** — file path, line ranges, diffs.
-- **Web fetch, Grep, Glob** — full query and result.
-- **Turn counter** — each agent turn is numbered and costed individually, so you can see exactly where the session got expensive.
-- **Pause (SIGSTOP) / Stop / Emergency Stop All** — freeze or kill at any point; no waiting for the agent to decide.
-
-Every action row is stored and searchable forever. "What did the agent actually edit on Thursday?" is answerable.
+- **Execution control dials** — semicircle gauges for max turns, max cost, temperature, reasoning effort, and more. Set them per-task; they inherit from manifest → product → system when not overridden.
+- **Dependency chain** — which tasks this one depends on, and which depend on it.
+- **Run history** — every execution attempt with start time, cost, turns, exit reason, and status. Click any run to drill into its action log.
+- **Live output** — bash commands, file reads, edits, and MCP calls stream in turn-by-turn as the agent runs.
+- **Pause (SIGSTOP) / Stop / Emergency Stop All** — freeze or kill from the task header; no waiting for the agent.
+- **Comments thread** — typed comments (`agent_note`, `review_approval`, `watcher_finding`, etc.) on the same page as the run output.
 
 ### Products → Manifests → Tasks — every cost and every turn rolls up
 
@@ -292,21 +290,21 @@ Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns
 ### Visualize the plan — interactive DAG, status-colored
 
 <p align="center">
-  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below with green/red status colors" width="100%" />
+  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as nodes, task chains below with status colors, ECharts force layout" width="100%" />
 </p>
 
-Cytoscape.js renders every product as an interactive directed acyclic graph:
+Every product renders as an interactive directed acyclic graph:
 
-- **Purple product node** at the top.
-- **Manifest nodes** linked by **blue manifest-dep edges** — the build order.
-- **Task nodes** under each manifest linked by **yellow task-dep edges** — the execution chain.
+- **Product node** at the top — the initiative root.
+- **Manifest nodes** linked by manifest-dep edges — the build order.
+- **Task nodes** under each manifest linked by task-dep edges — the execution chain.
 - **Status colors** — green done, gray pending, red failed, amber in flight.
-- **Zoom, pan, click to drill.** Every node is reachable by URL (`#view-products/<id>/dag`) so diagrams are shareable.
+- **Zoom, pan, click to drill.** Click any node to open its detail panel inline.
 
-### Every conversation, every tool call, every visceral-rule ack — searchable forever
+### Every action, every session, every cost unit — searchable forever
 
 <p align="center">
-  <img src="docs/images/conversations-detail.png" alt="Conversation detail — an agent session's visceral rule acknowledgement at session start, plus tool calls" width="100%" />
+  <img src="docs/images/conversations-detail.png" alt="Activity feed — live action stream with agent, tool, cost, and turn data across all running and recent sessions" width="100%" />
 </p>
 
 Every agent session is captured as a conversation:
@@ -319,7 +317,7 @@ Every agent session is captured as a conversation:
 ### Independent observer — three gates whose findings post as comments
 
 <p align="center">
-  <img src="docs/images/watcher-audit-history.png" alt="Watcher audit history — 53 total audits, 24 passed, 29 failed, per-task verdict with git, build, and manifest checks" width="100%" />
+  <img src="docs/images/watcher-audit-history.png" alt="Audit tab — per-task watcher verdicts with git, build, and manifest gate results" width="100%" />
 </p>
 
 The watcher is a **separate process** outside every agent session. After a task finishes, it runs three gates:
@@ -338,9 +336,9 @@ The review task pattern: pair every main task with a `depends_on`-linked review 
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/exec-controls-product.png" alt="Product detail — Execution Controls panel with 12 knobs at product scope (max_parallel, max_turns, temperature, daily_budget_usd, etc.), soft-cap warning shown on daily_budget_usd" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-manifest.png" alt="Manifest detail — same 12 knobs at manifest scope, showing which inherit from product vs. locally overridden" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-task.png" alt="Task detail — same 12 knobs at task scope, narrowest override point with inheritance provenance" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-product.png" alt="Product detail — execution control dials at product scope showing max_turns, temperature, reasoning_effort, and budget knobs" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-manifest.png" alt="Manifest detail — same execution control dials at manifest scope, overriding or inheriting from the product" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-task.png" alt="Task detail — execution control dials at task scope, the narrowest override point in the inheritance chain" /></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Product</b> — set the wide default once</sub></td>
@@ -433,7 +431,7 @@ OpenPraxis is a single Go binary that runs as:
 ## Key Concepts
 
 ### Products
-Top-level organizational hierarchy. A product groups related manifests into a single initiative with aggregated cost, turns, and task status. Visualized as an interactive DAG (Cytoscape.js) showing the manifest dependency chain with tasks below each manifest.
+Top-level organizational hierarchy. A product groups related manifests into a single initiative with aggregated cost, turns, and task status. Visualized as an interactive DAG showing the manifest dependency chain with tasks below each manifest.
 
 **Hierarchy:** Product > Manifest > Task > Run
 
@@ -531,8 +529,6 @@ Grouped in the sidebar under three headers — **Memory**, **Development**, **Ne
 | **Recall** | Network | Soft-deleted items, restorable |
 | **Settings** | Network | Profile, agent integrations, chat provider config |
 
-Brand: the sidebar mark is now an image (PR #161) served from `/assets/openpraxis-icon.png` — also wired as the favicon + apple-touch-icon.
-
 ## MCP Tools (55 as of 2026-04-22)
 
 | Category | Tools |
@@ -589,17 +585,16 @@ Claude Code will spawn OpenPraxis as a subprocess. On first session, the agent r
 
 Open `http://localhost:8765`.
 
-## Stats (2026-04-22)
+## Stats (2026-05-04)
 
 | Metric | Count |
 |--------|-------|
-| Go source files | 150 |
-| Go lines of code | ~36,200 |
-| Dashboard JS | ~7,800 lines (19 view modules + core api.js, tree.js, lifecycle.js, task-status.js) |
-| Vendored JS libs | 3 — cytoscape 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0 (served from `/vendor/`, PR #159) |
+| Go source files | ~155 |
+| Go lines of code | ~38,000 |
+| Dashboard | React 19 + Vite + Tailwind v4 + TanStack Router + shadcn/ui — compiled to `ui/dashboard-v2/dist/`, embedded in binary |
 | MCP tools | 55 |
 | HTTP routes | ~150 (REST, WebSocket, hook endpoint, MCP over streamable HTTP) |
-| Dashboard tabs | 17 |
+| Dashboard tabs | 12 (Operations: Overview, Actions Log, Products, Manifests, Tasks, Inbox, Recall · Governance: Productivity, Audit, Activity · Configuration: Settings) |
 | Persistent tables | 23 primary + vec-search virtual tables |
 | Go test files | ~70, incl. contract tests for the product hierarchy DAG shapes (PR #160) |
 
@@ -643,7 +638,7 @@ internal/
   task/                     Task runner, scheduler, repository, metrics, runtime state
   watcher/                  Independent task execution auditor (3 gates)
   web/                      HTTP handlers, WebSocket hub, embedded dashboard
-    ui/                     Static frontend (HTML, CSS, vanilla JS, Cytoscape.js)
+    ui/dashboard-v2/        React dashboard (Vite + React 19 + Tailwind v4 + TanStack Router + shadcn/ui)
 mobile/                     React Native (Expo) companion app
 tools/                      Python utility scripts
 ```

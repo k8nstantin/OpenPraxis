@@ -1,0 +1,11 @@
+{
+  "name": "openpraxis-screenshots",
+  "version": "1.0.0",
+  "description": "Take fresh docs/images/ screenshots from the live Portal V2",
+  "scripts": {
+    "shoot": "node shoot.js"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}
