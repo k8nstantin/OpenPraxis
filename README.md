@@ -41,7 +41,7 @@ flowchart TB
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="OpenPraxis dashboard — live spend vs daily budget, running tasks, tasks ranked by cost" width="100%" />
+  <img src="docs/images/overview-v2.png" alt="OpenPraxis dashboard — cumulative cost, cache hit ratio, actions-per-hour, top tools" width="100%" />
 </p>
 
 ### Features
@@ -163,7 +163,7 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 **The hierarchy isn't just a data model — it's a picture.** Every product renders as an interactive Directed Acyclic Graph. You see the whole build plan at once: what's done, what's running, what's blocked, what's next, where the money went, and exactly which task implements which line of which spec.
 
 <p align="center">
-  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below, status-colored, interactive" width="100%" />
+  <img src="docs/images/product-dag-openpraxis-v2.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below, status-colored, interactive" width="100%" />
 </p>
 
 - **Purple product node** at the top — the initiative.
@@ -245,7 +245,7 @@ The result is cost and quality control by construction — you set a daily budge
 ### Dashboard — cumulative cost, cache efficiency, and live activity
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="OpenPraxis dashboard — cumulative cost $658, 98% cache hit ratio, actions-per-hour histogram, top tools breakdown" width="100%" />
+  <img src="docs/images/overview-v2.png" alt="OpenPraxis dashboard — cumulative cost $658, 98% cache hit ratio, actions-per-hour histogram, top tools breakdown" width="100%" />
 </p>
 
 One glance tells you the entire cost and efficiency story of your fleet:
@@ -260,7 +260,7 @@ One glance tells you the entire cost and efficiency story of your fleet:
 ### Live tool output — watch the agent work, turn by turn
 
 <p align="center">
-  <img src="docs/images/tasks-live-output.png" alt="Task detail — execution control dials, dependency graph, run history, and live output streaming" width="100%" />
+  <img src="docs/images/tasks-live-output-v2.png" alt="Task detail — execution control dials, dependency graph, run history, and live output streaming" width="100%" />
 </p>
 
 Open any task and see everything in one panel:
@@ -276,8 +276,8 @@ Open any task and see everything in one panel:
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/products-detail.png" alt="Product detail showing three linked manifests with aggregate cost, tasks, turns, and status" /></td>
-    <td width="50%"><img src="docs/images/manifests-detail.png" alt="Manifest detail with four executed tasks inline, each showing status, cost, turns, and runs" /></td>
+    <td width="50%"><img src="docs/images/products-detail-v2.png" alt="Product detail showing three linked manifests with aggregate cost, tasks, turns, and status" /></td>
+    <td width="50%"><img src="docs/images/manifests-detail-v2.png" alt="Manifest detail with four executed tasks inline, each showing status, cost, turns, and runs" /></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Products</b> group manifests under one initiative. Header shows <b>Manifests / Tasks / Turns / Cost</b> aggregated across every child — spend per initiative, not guesswork.</sub></td>
@@ -290,7 +290,7 @@ Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns
 ### Visualize the plan — interactive DAG, status-colored
 
 <p align="center">
-  <img src="docs/images/product-dag-openpraxis.png" alt="Product DAG — product at top, manifests as nodes, task chains below with status colors, ECharts force layout" width="100%" />
+  <img src="docs/images/product-dag-openpraxis-v2.png" alt="Product DAG — product at top, manifests as nodes, task chains below with status colors, ECharts force layout" width="100%" />
 </p>
 
 Every product renders as an interactive directed acyclic graph:
@@ -304,7 +304,7 @@ Every product renders as an interactive directed acyclic graph:
 ### Every action, every session, every cost unit — searchable forever
 
 <p align="center">
-  <img src="docs/images/conversations-detail.png" alt="Activity feed — live action stream with agent, tool, cost, and turn data across all running and recent sessions" width="100%" />
+  <img src="docs/images/conversations-detail-v2.png" alt="Activity feed — live action stream with agent, tool, cost, and turn data across all running and recent sessions" width="100%" />
 </p>
 
 Every agent session is captured as a conversation:
@@ -317,7 +317,7 @@ Every agent session is captured as a conversation:
 ### Independent observer — three gates whose findings post as comments
 
 <p align="center">
-  <img src="docs/images/watcher-audit-history.png" alt="Audit tab — per-task watcher verdicts with git, build, and manifest gate results" width="100%" />
+  <img src="docs/images/watcher-audit-history-v2.png" alt="Audit tab — per-task watcher verdicts with git, build, and manifest gate results" width="100%" />
 </p>
 
 The watcher is a **separate process** outside every agent session. After a task finishes, it runs three gates:
@@ -336,9 +336,9 @@ The review task pattern: pair every main task with a `depends_on`-linked review 
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/exec-controls-product.png" alt="Product detail — execution control dials at product scope showing max_turns, temperature, reasoning_effort, and budget knobs" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-manifest.png" alt="Manifest detail — same execution control dials at manifest scope, overriding or inheriting from the product" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-task.png" alt="Task detail — execution control dials at task scope, the narrowest override point in the inheritance chain" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-product-v2.png" alt="Product detail — execution control dials at product scope showing max_turns, temperature, reasoning_effort, and budget knobs" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-manifest-v2.png" alt="Manifest detail — same execution control dials at manifest scope, overriding or inheriting from the product" /></td>
+    <td width="33%"><img src="docs/images/exec-controls-task-v2.png" alt="Task detail — execution control dials at task scope, the narrowest override point in the inheritance chain" /></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Product</b> — set the wide default once</sub></td>

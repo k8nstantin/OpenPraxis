@@ -31,51 +31,51 @@ async function shot(pg, file) {
   await pg.waitForTimeout(4000);
 
   // Overview
-  await shot(pg, 'overview.png');
+  await shot(pg, 'overview-v2.png');
 
   // Tasks — with row selected to show detail panel
   await nav(pg, 'Tasks');
   await clickRow(pg);
-  await shot(pg, 'tasks-live-output.png');
+  await shot(pg, 'tasks-live-output-v2.png');
 
   // Products — list view
   await nav(pg, 'Products');
-  await shot(pg, 'products-detail.png');
+  await shot(pg, 'products-detail-v2.png');
 
   // Products — click row then DAG tab
   await clickRow(pg);
   const dagTab = pg.locator('[role=tab]:has-text("DAG")').first();
   if (await dagTab.count() > 0) { await dagTab.click(); await pg.waitForTimeout(2500); }
-  await shot(pg, 'product-dag-openpraxis.png');
+  await shot(pg, 'product-dag-openpraxis-v2.png');
 
   // Manifests — with row selected
   await nav(pg, 'Manifests');
   await clickRow(pg);
-  await shot(pg, 'manifests-detail.png');
+  await shot(pg, 'manifests-detail-v2.png');
 
   // Audit / Watcher
   await nav(pg, 'Audit');
-  await shot(pg, 'watcher-audit-history.png');
+  await shot(pg, 'watcher-audit-history-v2.png');
 
   // Activity → conversations
   await nav(pg, 'Activity');
-  await shot(pg, 'conversations-detail.png');
+  await shot(pg, 'conversations-detail-v2.png');
 
   // Exec controls: Products > row > Settings tab (if exists, else just row view)
   await nav(pg, 'Products');
   await clickRow(pg);
   await clickTab(pg, 'Settings');
-  await shot(pg, 'exec-controls-product.png');
+  await shot(pg, 'exec-controls-product-v2.png');
 
   await nav(pg, 'Manifests');
   await clickRow(pg);
   await clickTab(pg, 'Settings');
-  await shot(pg, 'exec-controls-manifest.png');
+  await shot(pg, 'exec-controls-manifest-v2.png');
 
   await nav(pg, 'Tasks');
   await clickRow(pg);
   await clickTab(pg, 'Settings');
-  await shot(pg, 'exec-controls-task.png');
+  await shot(pg, 'exec-controls-task-v2.png');
 
   await browser.close();
   console.log('\nAll done.');
