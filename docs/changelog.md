@@ -2,6 +2,31 @@
 
 Moved out of the main README to keep the landing page focused on what OpenPraxis **is** rather than what just changed. See the ["Changelog" link in the README](../README.md#deeper-references) to land here from the top of the repo.
 
+## v0.5.0 — May 2026
+
+### Breaking changes
+
+- **`:9766` retired.** Portal V2 is now the only dashboard and serves on `:8765`. Any bookmark or script pointing at port 9766 must be updated.
+- **`--portal-v2-port` flag removed.** Passing this flag to `openpraxis serve` now errors. Remove it from start scripts.
+
+### Legacy portal removed ([#325](https://github.com/k8nstantin/OpenPraxis/pull/325))
+
+17,000+ lines of legacy vanilla-JS dashboard code deleted: `views/`, `components/`, `vendor/`, `assets/`, `app.js`, `api.js`, `style.css`, `index.html`, `tree.js`, `lifecycle.js`, `task-status.js`. The dual-port architecture is gone — one binary, one port (`:8765`), one dashboard.
+
+The React dashboard (Vite + React 19 + Tailwind v4 + TanStack Router + shadcn/ui) is now the canonical UI. It is embedded directly in the Go binary via `go:embed all:ui/dashboard-v2/dist` and served by the primary `Handler()` function.
+
+`handler_v2.go` has been deleted — its functionality is merged into `handler.go`. The `Makefile` build pipeline now builds only the React dashboard before `go build`.
+
+### Dashboard layout
+
+Portal V2 organises the sidebar into three groups:
+
+- **Operations** — Overview, Actions Log, Products, Manifests, Tasks, Inbox, Recall
+- **Governance** — Productivity, Audit, Activity
+- **Configuration** — Settings
+
+Execution controls are presented as semicircle dial gauges (not sliders) at every scope level (task → manifest → product → system).
+
 ## April 2026
 
 Landed on `main` between 2026-04-20 and 2026-04-22.
