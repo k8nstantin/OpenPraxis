@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
@@ -35,8 +36,8 @@ type ServerDeps struct {
 	ChatTools    *chat.ChatTools
 }
 
-// Handler creates the main HTTP handler on :8765 — Portal V2 React frontend
-// plus the full backend (/api/*, /mcp, /ws).
+// Handler creates the main HTTP handler on :8765 — React dashboard plus the
+// full backend (/api/*, /mcp, /ws).
 func Handler(deps ServerDeps) http.Handler {
 	r := mux.NewRouter()
 
@@ -52,14 +53,25 @@ func Handler(deps ServerDeps) http.Handler {
 	mountMCP(r, deps)
 
 	// React shell — Vite build output embedded at compile time.
-	// Hash router: server always serves index.html; route resolution is
-	// client-side via the hash fragment, so no per-path SPA rewrite needed.
+	// The app uses hash-based routing (createHashHistory) so deep links always
+	// arrive at the server as "/". The fallback below also handles any future
+	// switch to history mode: unknown paths serve index.html instead of 404.
 	v2Content, err := fs.Sub(uiFS, "ui/dashboard-v2/dist")
 	if err != nil {
 		panic(fmt.Sprintf("dashboard-v2 embed sub: %v", err))
 	}
 	fileServer := http.FileServer(http.FS(v2Content))
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Strip leading "/" — fs.FS paths must not start with slash.
+		path := strings.TrimPrefix(req.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if _, err := fs.Stat(v2Content, path); err != nil {
+			// File not found: fall back to index.html for SPA deep-link support.
+			req = req.Clone(req.Context())
+			req.URL.Path = "/"
+		}
 		if req.URL.Path == "/" || req.URL.Path == "/index.html" {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		}
