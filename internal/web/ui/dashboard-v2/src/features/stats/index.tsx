@@ -40,10 +40,13 @@ interface Totals {
 // ── Query ─────────────────────────────────────────────────────────────────
 
 const RANGES = [
-  { label: '24h',  days: 1 },
-  { label: '7d',   days: 7 },
-  { label: '30d',  days: 30 },
-  { label: '90d',  days: 90 },
+  { label: '1d',   days: 1 },
+  { label: '2d',   days: 2 },
+  { label: '3d',   days: 3 },
+  { label: '1w',   days: 7 },
+  { label: '2w',   days: 14 },
+  { label: '1m',   days: 30 },
+  { label: '3m',   days: 90 },
   { label: 'All',  days: 0 },
 ] as const
 
