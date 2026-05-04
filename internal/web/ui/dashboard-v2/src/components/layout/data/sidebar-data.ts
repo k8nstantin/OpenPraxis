@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Boxes,
   Brain,
   CalendarClock,
@@ -93,6 +94,11 @@ export const sidebarData: SidebarData = {
     {
       title: 'Governance',
       items: [
+        {
+          title: 'Stats',
+          url: '/stats',
+          icon: BarChart3,
+        },
         {
           title: 'Productivity',
           url: '/productivity',
