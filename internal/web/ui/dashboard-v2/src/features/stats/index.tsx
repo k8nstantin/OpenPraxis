@@ -137,36 +137,34 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
   )
 }
 
-function ChartCard({ title, children, range, onRange }: {
-  title: string
-  children: React.ReactNode
-  range?: RangeDays
-  onRange?: (r: RangeDays) => void
-}) {
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card>
       <CardHeader className='pb-1 pt-3'>
-        <div className='flex items-center justify-between'>
-          <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>{title}</CardTitle>
-          {onRange && (
-            <div className='inline-flex rounded border bg-muted/30 p-0.5 text-[10px]'>
-              {RANGES.map(r => (
-                <button key={r.days} type='button'
-                  onClick={() => onRange(r.days)}
-                  className={cn('rounded px-2 py-0.5 transition-colors',
-                    range === r.days
-                      ? 'bg-primary/20 text-foreground font-semibold'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>{title}</CardTitle>
       </CardHeader>
       <CardContent className='pb-3'>{children}</CardContent>
     </Card>
+  )
+}
+
+function RangeBar({ range, onRange }: { range: RangeDays; onRange: (r: RangeDays) => void }) {
+  return (
+    <div className='flex items-center gap-2 mb-4'>
+      <div className='inline-flex rounded-md border bg-card p-0.5 text-xs'>
+        {RANGES.map(r => (
+          <button key={r.days} type='button'
+            onClick={() => onRange(r.days)}
+            className={cn('rounded px-3 py-1 transition-colors',
+              range === r.days
+                ? 'bg-primary/15 text-foreground font-semibold'
+                : 'text-muted-foreground hover:text-foreground'
+            )}>
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -187,6 +185,7 @@ function RunsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDay
 
   return (
     <div className='space-y-4'>
+      <RangeBar range={range} onRange={onRange} />
       <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
         <Card><CardContent className='pt-4'><Kpi label='Total runs' value={String(t.total_runs + t.total_failed)} sub={`${t.total_failed} failed`} /></CardContent></Card>
         <Card><CardContent className='pt-4'><Kpi label='Success rate' value={`${t.total_runs + t.total_failed > 0 ? ((t.total_runs / (t.total_runs + t.total_failed)) * 100).toFixed(0) : 0}%`} accent='text-emerald-400' /></CardContent></Card>
@@ -195,7 +194,7 @@ function RunsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDay
         <Card><CardContent className='pt-4'><Kpi label='Errors' value={String(t.total_errors)} accent={t.total_errors > 0 ? 'text-rose-400' : undefined} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily runs — completed vs failed' range={range} onRange={onRange}>
+        <ChartCard title='Daily runs — completed vs failed'>
           {data.runs.length ? <EChart height={180} option={{
             grid: { left: 32, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -245,6 +244,7 @@ function EfficiencyTab({ data, range, onRange }: { data: StatsHistory; range: Ra
   const t = data.totals
   return (
     <div className='space-y-4'>
+      <RangeBar range={range} onRange={onRange} />
       <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
         <Card><CardContent className='pt-4'><Kpi label='Avg turns/run' value={t.avg_turns.toFixed(1)} /></CardContent></Card>
         <Card><CardContent className='pt-4'><Kpi label='Cache hit' value={`${t.avg_cache_hit_pct.toFixed(0)}%`} accent='text-emerald-400' /></CardContent></Card>
@@ -253,7 +253,7 @@ function EfficiencyTab({ data, range, onRange }: { data: StatsHistory; range: Ra
         <Card><CardContent className='pt-4'><Kpi label='Total errors' value={String(t.total_errors)} accent={t.total_errors > 10 ? 'text-rose-400' : undefined} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Avg turns per run' range={range} onRange={onRange}>
+        <ChartCard title='Avg turns per run'>
           {eff.length ? <EChart height={180} option={{
             grid: { left: 36, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis' },
@@ -321,6 +321,7 @@ function TokensTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
   const totalAll = t.total_input_tokens + t.total_output_tokens + t.total_cache_read_tokens + t.total_cache_create_tokens
   return (
     <div className='space-y-4'>
+      <RangeBar range={range} onRange={onRange} />
       <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
         <Card><CardContent className='pt-4'><Kpi label='Input tokens' value={fmt(t.total_input_tokens)} accent='text-sky-400' /></CardContent></Card>
         <Card><CardContent className='pt-4'><Kpi label='Output tokens' value={fmt(t.total_output_tokens)} accent='text-violet-400' /></CardContent></Card>
@@ -329,7 +330,7 @@ function TokensTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
         <Card><CardContent className='pt-4'><Kpi label='Total tokens' value={fmt(totalAll)} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily token volumes (stacked)' range={range} onRange={onRange}>
+        <ChartCard title='Daily token volumes (stacked)'>
           {tok.length ? <EChart height={180} option={{
             grid: { left: 40, right: 8, top: 8, bottom: 24 },
             tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -392,6 +393,7 @@ function ProductivityTab({ data, range, onRange }: { data: StatsHistory; range: 
   const hasData = prod.some(d => d.lines_added > 0 || d.commits > 0 || d.tests_run > 0)
   return (
     <div className='space-y-4'>
+      <RangeBar range={range} onRange={onRange} />
       <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8'>
         <Card><CardContent className='pt-4'><Kpi label='Lines added'   value={fmt(linesAdded)}   accent='text-emerald-400' /></CardContent></Card>
         <Card><CardContent className='pt-4'><Kpi label='Lines removed' value={fmt(linesRemoved)} accent='text-rose-400' /></CardContent></Card>
@@ -410,7 +412,7 @@ function ProductivityTab({ data, range, onRange }: { data: StatsHistory; range: 
       )}
       {hasData && (
         <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-          <ChartCard title='Lines added / removed per day' range={range} onRange={onRange}>
+          <ChartCard title='Lines added / removed per day'>
             <EChart height={180} option={{
               grid: { left: 40, right: 8, top: 8, bottom: 24 },
               tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -490,53 +492,60 @@ function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-export function StatsPage() {
-  const [range, setRange] = useState<RangeDays>(0)
-  const { data, isLoading } = useStatsHistory(range)
-  const rangeLabel = RANGES.find(r => r.days === range)?.label ?? 'All'
+// Each tab owns its data + range independently.
+function TabPane({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
+}
 
+function RunsPane() {
+  const [range, setRange] = useState<RangeDays>(0)
+  const { data } = useStatsHistory(range)
+  return data ? <RunsTab data={data} range={range} onRange={setRange} /> : null
+}
+function EfficiencyPane() {
+  const [range, setRange] = useState<RangeDays>(0)
+  const { data } = useStatsHistory(range)
+  return data ? <EfficiencyTab data={data} range={range} onRange={setRange} /> : null
+}
+function TokensPane() {
+  const [range, setRange] = useState<RangeDays>(0)
+  const { data } = useStatsHistory(range)
+  return data ? <TokensTab data={data} range={range} onRange={setRange} /> : null
+}
+function ProductivityPane() {
+  const [range, setRange] = useState<RangeDays>(0)
+  const { data } = useStatsHistory(range)
+  return data ? <ProductivityTab data={data} range={range} onRange={setRange} /> : null
+}
+function AgentsPane() {
+  const [range, setRange] = useState<RangeDays>(0)
+  const { data } = useStatsHistory(range)
+  return data ? <AgentsTab data={data} range={range} onRange={setRange} /> : null
+}
+
+export function StatsPage() {
   return (
     <>
       <Header />
       <Main>
-        <div className='mb-4 flex items-center justify-between'>
+        <div className='mb-4 flex items-baseline justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Stats</h1>
-          <div className='flex items-center gap-3'>
-            <div className='inline-flex rounded-md border bg-card p-0.5 text-xs'>
-              {RANGES.map(r => (
-                <button key={r.days} type='button'
-                  onClick={() => setRange(r.days)}
-                  className={cn('rounded px-3 py-1 transition-colors',
-                    range === r.days
-                      ? 'bg-primary/15 text-foreground font-semibold'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <span className='text-muted-foreground text-xs'>{rangeLabel} · execution_log</span>
-          </div>
+          <span className='text-muted-foreground text-xs'>execution_log</span>
         </div>
-
-        {isLoading ? (
-          <div className='text-muted-foreground text-sm'>Loading…</div>
-        ) : data ? (
-          <Tabs defaultValue='runs'>
-            <TabsList>
-              <TabsTrigger value='runs'>Runs</TabsTrigger>
-              <TabsTrigger value='efficiency'>Efficiency</TabsTrigger>
-              <TabsTrigger value='tokens'>Tokens</TabsTrigger>
-              <TabsTrigger value='productivity'>Productivity</TabsTrigger>
-              <TabsTrigger value='agents'>Agents</TabsTrigger>
-            </TabsList>
-            <TabsContent value='runs'         className='mt-4'><RunsTab         data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='efficiency'   className='mt-4'><EfficiencyTab   data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='tokens'       className='mt-4'><TokensTab       data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='productivity' className='mt-4'><ProductivityTab data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='agents'       className='mt-4'><AgentsTab       data={data} range={range} onRange={setRange} /></TabsContent>
-          </Tabs>
-        ) : null}
+        <Tabs defaultValue='runs'>
+          <TabsList>
+            <TabsTrigger value='runs'>Runs</TabsTrigger>
+            <TabsTrigger value='efficiency'>Efficiency</TabsTrigger>
+            <TabsTrigger value='tokens'>Tokens</TabsTrigger>
+            <TabsTrigger value='productivity'>Productivity</TabsTrigger>
+            <TabsTrigger value='agents'>Agents</TabsTrigger>
+          </TabsList>
+          <TabsContent value='runs'         className='mt-4'><RunsPane /></TabsContent>
+          <TabsContent value='efficiency'   className='mt-4'><EfficiencyPane /></TabsContent>
+          <TabsContent value='tokens'       className='mt-4'><TokensPane /></TabsContent>
+          <TabsContent value='productivity' className='mt-4'><ProductivityPane /></TabsContent>
+          <TabsContent value='agents'       className='mt-4'><AgentsPane /></TabsContent>
+        </Tabs>
       </Main>
     </>
   )
