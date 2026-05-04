@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
@@ -18,16 +19,13 @@ import (
 	"github.com/gorilla/mux"
 )
 
-//go:embed ui
+//go:embed all:ui/dashboard-v2/dist
 var uiFS embed.FS
 
-// ServerDeps bundles the long list of cross-cutting services every HTTP
-// handler in this package needs (DB-backed stores via Node, the MCP
-// server, the WebSocket hub, the peer registry, and chat plumbing). All
-// fields are non-nil at runtime; tests construct a minimal ServerDeps
-// directly. Both Handler() (Portal A) and HandlerV2() (Portal V2) take
-// the same struct so the dependency surface stays in lockstep as we
-// add new services.
+// ServerDeps bundles the cross-cutting services every HTTP handler needs
+// (DB-backed stores via Node, MCP server, WebSocket hub, peer registry,
+// chat plumbing). All fields are non-nil at runtime; tests build a
+// minimal ServerDeps directly.
 type ServerDeps struct {
 	Node         *node.Node
 	MCP          *mcp.Server
@@ -38,84 +36,46 @@ type ServerDeps struct {
 	ChatTools    *chat.ChatTools
 }
 
-// Handler creates the main HTTP handler for Portal A on :8765 — legacy
-// vanilla-JS dashboard at `/` plus the full backend (`/api/*`, `/mcp`,
-// `/ws`). The earlier React experiment at `/dashboard/*` was retired
-// in favour of Portal V2 on :9766.
-//
-// Portal V2 on :9766 (HandlerV2) shares the API + WebSocket via the
-// same mountAPI / mountWS helpers so both ports talk to the same Node,
-// same DB, same hub. /mcp is Portal-A only because agent configs point
-// at :8765 and there's no value in duplicating the agent endpoint.
+// Handler creates the main HTTP handler on :8765 — React dashboard plus the
+// full backend (/api/*, /mcp, /ws).
 func Handler(deps ServerDeps) http.Handler {
 	r := mux.NewRouter()
 
-	// Dashboard UI (embedded static files)
-	uiContent, _ := fs.Sub(uiFS, "ui")
-	r.PathPrefix("/assets/").Handler(http.FileServer(http.FS(uiContent)))
-	// Cache-bust app.js and style.css — prevent browser serving stale UI
-	r.Path("/style.css").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		data, err := uiFS.ReadFile("ui/style.css")
-		if err != nil {
-			http.Error(w, "not found", 404)
-			return
-		}
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Write(data)
-	})
-	// Serve any .js file from ui/ (or ui/views/) with cache-bust headers
-	serveJS := func(w http.ResponseWriter, req *http.Request) {
-		// Map URL path to embedded file: /app.js → ui/app.js, /views/tasks.js → ui/views/tasks.js
-		path := "ui" + req.URL.Path
-		data, err := uiFS.ReadFile(path)
-		if err != nil {
-			http.Error(w, "not found", 404)
-			return
-		}
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Write(data)
-	}
-	r.PathPrefix("/views/").HandlerFunc(serveJS)
-	r.PathPrefix("/components/").HandlerFunc(serveJS)
-	// /vendor/*.js — pinned third-party libraries (cytoscape, dagre, cytoscape-dagre).
-	// Served from the embedded FS, not a CDN, so the dashboard works offline and
-	// isn't silently broken when a CDN is flaky or blocked.
-	r.PathPrefix("/vendor/").HandlerFunc(serveJS)
-	r.Path("/app.js").HandlerFunc(serveJS)
-	r.Path("/api.js").HandlerFunc(serveJS)
-	r.Path("/tree.js").HandlerFunc(serveJS)
-	r.Path("/lifecycle.js").HandlerFunc(serveJS)
-	r.Path("/task-status.js").HandlerFunc(serveJS)
-
-	// WebSocket — broadcast hub. Mounted on Portal A and Portal V2 (via
-	// HandlerV2 → mountWS) so React on either port can subscribe to the
-	// same event stream.
-	mountWS(r, deps)
-
-	// MCP endpoint — agent-facing. Mounted on Portal A only because
-	// `~/.claude/settings.json` and similar agent configs point at
-	// :8765/mcp; duplicating it on :9766 adds surface no caller needs.
-	mountMCP(r, deps)
-
-	// Dashboard REST API
+	// REST API
 	api := r.PathPrefix("/api").Subrouter()
 	mountAPI(api, deps)
 
-	// Dashboard index (catch-all)
-	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := uiFS.ReadFile("ui/index.html")
-		if err != nil {
-			http.Error(w, "Dashboard not found", 500)
-			return
+	// WebSocket broadcast hub
+	mountWS(r, deps)
+
+	// MCP endpoint — agent-facing. Agent configs (~/.claude/settings.json, etc.)
+	// point at :8765/mcp so this stays on the primary port only.
+	mountMCP(r, deps)
+
+	// React shell — Vite build output embedded at compile time.
+	// The app uses hash-based routing (createHashHistory) so deep links always
+	// arrive at the server as "/". The fallback below also handles any future
+	// switch to history mode: unknown paths serve index.html instead of 404.
+	v2Content, err := fs.Sub(uiFS, "ui/dashboard-v2/dist")
+	if err != nil {
+		panic(fmt.Sprintf("dashboard-v2 embed sub: %v", err))
+	}
+	fileServer := http.FileServer(http.FS(v2Content))
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Strip leading "/" — fs.FS paths must not start with slash.
+		path := strings.TrimPrefix(req.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		if _, err := fs.Stat(v2Content, path); err != nil {
+			// File not found: fall back to index.html for SPA deep-link support.
+			req = req.Clone(req.Context())
+			req.URL.Path = "/"
+		}
+		if req.URL.Path == "/" || req.URL.Path == "/index.html" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
+		fileServer.ServeHTTP(w, req)
 	})
 
 	return r
@@ -457,17 +417,12 @@ func apiActivityByPeer(n *node.Node) http.HandlerFunc {
 // writeJSON, writeError, decodeBody are in helpers.go
 
 
-// mountWS registers the WebSocket broadcast endpoint on the given
-// router. Both Portal A and Portal V2 mount it so React on either port
-// can subscribe to the same hub broadcasts.
+// mountWS registers the WebSocket broadcast endpoint on the given router.
 func mountWS(r *mux.Router, deps ServerDeps) {
 	r.HandleFunc("/ws", deps.Hub.HandleWS)
 }
 
-// mountMCP registers the agent-facing MCP HTTP endpoint with request
-// logging. Mounted on Portal A only — agent configs (Claude Code,
-// Cursor, etc.) point at :8765/mcp and duplicating the endpoint on
-// :9766 adds surface no caller actually uses.
+// mountMCP registers the agent-facing MCP HTTP endpoint with request logging.
 func mountMCP(r *mux.Router, deps ServerDeps) {
 	mcpHandler := http.StripPrefix("/mcp", deps.MCP.Handler())
 	r.PathPrefix("/mcp").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -476,15 +431,9 @@ func mountMCP(r *mux.Router, deps ServerDeps) {
 	})
 }
 
-// mountAPI registers every /api/* route on the given subrouter. Both
-// Portal A and Portal V2 call this so the dynamic backend (status,
-// tasks, products, manifests, comments, descriptions, templates,
-// settings, chat, etc.) is identical on both ports.
-//
+// mountAPI registers every /api/* route on the given subrouter.
 // Route order matters: gorilla/mux matches in registration order, so
-// scoped-search routes are registered BEFORE the /{id} catch-all
-// patterns that would otherwise swallow them. Don't reorder without
-// re-verifying with curl probes against the affected paths.
+// scoped-search routes must be registered BEFORE /{id} catch-all patterns.
 func mountAPI(api *mux.Router, deps ServerDeps) {
 	n := deps.Node
 	mcpServer := deps.MCP
