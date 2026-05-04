@@ -72,26 +72,11 @@ func (n *Node) RecordDescriptionChange(
 // currentDescription reads the entity's current denormalised body + returns
 // the full UUID so callers (and the revision insert) operate on canonical
 // ids instead of short markers. Returns ("", "", nil) for missing rows.
+//
+// After the legacy store purge, products / manifests / ideas / entities all
+// resolve through the unified entity store. Tasks still have their own store.
 func (n *Node) currentDescription(target comments.TargetType, idOrMarker string) (body, fullID string, err error) {
 	switch target {
-	case comments.TargetProduct:
-		if n.Products == nil {
-			return "", "", nil
-		}
-		p, err := n.Products.Get(idOrMarker)
-		if err != nil || p == nil {
-			return "", "", err
-		}
-		return p.Description, p.ID, nil
-	case comments.TargetManifest:
-		if n.Manifests == nil {
-			return "", "", nil
-		}
-		m, err := n.Manifests.Get(idOrMarker)
-		if err != nil || m == nil {
-			return "", "", err
-		}
-		return m.Content, m.ID, nil
 	case comments.TargetTask:
 		if n.Tasks == nil {
 			return "", "", nil
@@ -101,15 +86,15 @@ func (n *Node) currentDescription(target comments.TargetType, idOrMarker string)
 			return "", "", err
 		}
 		return t.Description, t.ID, nil
-	case comments.TargetIdea:
-		if n.Ideas == nil {
+	case comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
+		if n.Entities == nil {
 			return "", "", nil
 		}
-		i, err := n.Ideas.Get(idOrMarker)
-		if err != nil || i == nil {
+		e, err := n.Entities.Get(idOrMarker)
+		if err != nil || e == nil {
 			return "", "", err
 		}
-		return i.Description, i.ID, nil
+		return e.Title, e.EntityUID, nil
 	}
 	return "", "", nil
 }
@@ -268,48 +253,21 @@ func (n *Node) RestoreDescription(
 // the whole PATCH payload.
 func (n *Node) writeEntityDescription(target comments.TargetType, fullID, body string) error {
 	switch target {
-	case comments.TargetProduct:
-		if n.Products == nil {
-			return fmt.Errorf("products store not wired")
-		}
-		p, err := n.Products.Get(fullID)
-		if err != nil {
-			return err
-		}
-		if p == nil {
-			return fmt.Errorf("product not found: %s", fullID)
-		}
-		return n.Products.Update(p.ID, p.Title, body, p.Status, p.Tags)
-	case comments.TargetManifest:
-		if n.Manifests == nil {
-			return fmt.Errorf("manifests store not wired")
-		}
-		m, err := n.Manifests.Get(fullID)
-		if err != nil {
-			return err
-		}
-		if m == nil {
-			return fmt.Errorf("manifest not found: %s", fullID)
-		}
-		return n.Manifests.Update(m.ID, m.Title, m.Description, body, m.Status, m.ProjectID, m.DependsOn, m.JiraRefs, m.Tags)
 	case comments.TargetTask:
 		if n.Tasks == nil {
 			return fmt.Errorf("tasks store not wired")
 		}
 		_, err := n.Tasks.Update(fullID, nil, &body)
 		return err
-	case comments.TargetIdea:
-		if n.Ideas == nil {
-			return fmt.Errorf("ideas store not wired")
+	case comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
+		if n.Entities == nil {
+			return fmt.Errorf("entities store not wired")
 		}
-		i, err := n.Ideas.Get(fullID)
-		if err != nil {
-			return err
+		e, err := n.Entities.Get(fullID)
+		if err != nil || e == nil {
+			return fmt.Errorf("entity not found: %s", fullID)
 		}
-		if i == nil {
-			return fmt.Errorf("idea not found: %s", fullID)
-		}
-		return n.Ideas.Update(i.ID, i.Title, body, i.Status, i.Priority, i.ProjectID, i.Tags)
+		return n.Entities.Update(e.EntityUID, e.Title, e.Status, e.Tags, "system", "description restore")
 	}
 	return fmt.Errorf("unsupported target type: %s", target)
 }

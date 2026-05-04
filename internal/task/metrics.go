@@ -79,6 +79,54 @@ func ParseCostFromOutput(output string) (costUSD float64, turns int) {
 	return 0, 0
 }
 
+// ParseTestsFromOutput scans task output for common test result patterns
+// and returns (testsRun, testsPassed, testsFailed).
+// Recognises: Go test output, Jest, pytest, npm test.
+func ParseTestsFromOutput(output string) (run, passed, failed int) {
+	if output == "" {
+		return
+	}
+	for _, line := range strings.Split(output, "\n") {
+		// Go: "ok  package (0.123s)" or "FAIL package"
+		if strings.HasPrefix(line, "ok  ") || strings.HasPrefix(line, "ok\t") {
+			run++
+			passed++
+			continue
+		}
+		if strings.HasPrefix(line, "FAIL\t") || strings.HasPrefix(line, "FAIL ") {
+			run++
+			failed++
+			continue
+		}
+		// pytest: "X passed, Y failed"
+		if strings.Contains(line, " passed") {
+			var p, f int
+			fmt.Sscanf(line, "%d passed", &p)
+			fmt.Sscanf(line, "%d failed", &f)
+			if p > 0 || f > 0 {
+				run += p + f
+				passed += p
+				failed += f
+			}
+			continue
+		}
+		// Jest: "Tests: X passed, Y failed, Z total"
+		if strings.Contains(line, "Tests:") && strings.Contains(line, "passed") {
+			var p, f, total int
+			fmt.Sscanf(line, "Tests: %d passed", &p)
+			fmt.Sscanf(line, "Tests: %d failed", &f)
+			fmt.Sscanf(line, "Tests: %d total", &total)
+			if total > 0 {
+				run = total
+				passed = p
+				failed = f
+			}
+			continue
+		}
+	}
+	return
+}
+
 // BackfillCosts parses cost_usd from output for runs that have cost_usd=0 but non-empty output.
 func (s *Store) BackfillCosts() (int, error) {
 	rows, err := s.db.Query(`SELECT id, output FROM task_runs WHERE cost_usd = 0 AND output != '' LIMIT 5000`)

@@ -10,10 +10,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
+	"github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+
+	"github.com/google/uuid"
 )
 
 // apiHook handles Claude Code hook events — reads transcript file directly, no in-memory state.
@@ -35,6 +39,55 @@ func apiHook(n *node.Node) http.HandlerFunc {
 		if err := json.Unmarshal(bodyBytes, &event); err != nil {
 			writeJSON(w, map[string]string{"status": "ok"})
 			return
+		}
+
+		// Store live transcript path so the 5s MCP sampler can parse cumulative
+		// token/cost data mid-session. transcript_path is sent on every hook event.
+		if event.TranscriptPath != "" && event.SessionID != "" {
+			n.SetTranscriptPath(event.SessionID, event.TranscriptPath)
+		}
+
+		// PostToolUse: write a throttled sample row to execution_log so
+		// interactive session stats update without waiting for session end.
+		// Throttled to once per 30s — PostToolUse fires on every tool call.
+		if (event.HookEventName == "PostToolUse" || event.HookEventName == "AfterTool") &&
+			event.SessionID != "" && event.TranscriptPath != "" &&
+			n.ExecutionLog != nil && n.ShouldWriteSample(event.SessionID, 30*time.Second) {
+			runUID := n.GetSessionRunUID(event.SessionID)
+			if runUID == "" {
+				runUID = uuid.Must(uuid.NewV7()).String()
+			}
+			if node.ParseLiveTranscript != nil {
+				live := node.ParseLiveTranscript(event.TranscriptPath)
+				totalTok := int64(live.InputTokens + live.OutputTokens + live.CacheReadTokens + live.CacheCreateTokens)
+				cacheHit := float64(0)
+				if totalTok > 0 {
+					cacheHit = float64(live.CacheReadTokens) / float64(totalTok) * 100
+				}
+				cpuPct, rssMB := n.LatestSystemSample()
+				sr := execution.Row{
+					ID:                uuid.Must(uuid.NewV7()).String(),
+					RunUID:            runUID,
+					EntityUID:         event.SessionID,
+					SessionID:         event.SessionID,
+					Event:             execution.EventSample,
+					Trigger:           "interactive",
+					NodeID:            n.PeerID(),
+					AgentRuntime:      n.AgentForSession(event.SessionID),
+					Model:             live.Model,
+					Turns:             live.Turns,
+					Actions:           live.Actions,
+					InputTokens:       int64(live.InputTokens),
+					OutputTokens:      int64(live.OutputTokens),
+					CacheReadTokens:   int64(live.CacheReadTokens),
+					CacheCreateTokens: int64(live.CacheCreateTokens),
+					CacheHitRatePct:   cacheHit,
+					CPUPct:            cpuPct,
+					RSSMB:             rssMB,
+					CreatedBy:         "hook/post-tool-use",
+				}
+				_ = n.ExecutionLog.Insert(context.Background(), sr)
+			}
 		}
 
 		// Record actions on PostToolUse/AfterTool + check visceral compliance
@@ -136,19 +189,56 @@ func apiHook(n *node.Node) http.HandlerFunc {
 
 		go func() {
 			cost := parseTranscriptCost(transcriptPath)
+			turns := readTranscript(transcriptPath)
+
 			if cost.OutputTokens > 0 {
-				costJSON := fmt.Sprintf(`{"input_tokens":%d,"output_tokens":%d,"cache_read":%d,"cache_create":%d,"cost_usd":%.6f,"model":"%s"}`,
-					cost.InputTokens, cost.OutputTokens, cost.CacheReadTokens, cost.CacheCreateTokens, cost.CostUSD, cost.Model)
-				if err := n.Actions.Record(sessionID, n.PeerID(), "session_cost", costJSON, "", cwd); err != nil {
-					slog.Warn("record session cost failed", "error", err)
-				} else {
-					slog.Info("session cost recorded", "session_id", sessionID[:min(12, len(sessionID))],
-						"cost_usd", cost.CostUSD, "input_tokens", cost.InputTokens, "output_tokens", cost.OutputTokens,
-						"cache_read_tokens", cost.CacheReadTokens, "cache_create_tokens", cost.CacheCreateTokens, "model", cost.Model)
+				tokenJSON := fmt.Sprintf(`{"input_tokens":%d,"output_tokens":%d,"cache_read":%d,"cache_create":%d,"model":"%s"}`,
+					cost.InputTokens, cost.OutputTokens, cost.CacheReadTokens, cost.CacheCreateTokens, cost.Model)
+				if err := n.Actions.Record(sessionID, n.PeerID(), "session_tokens", tokenJSON, "", cwd); err != nil {
+					slog.Warn("record session tokens failed", "error", err)
 				}
 			}
 
-			turns := readTranscript(transcriptPath)
+			if n.ExecutionLog != nil && (cost.OutputTokens > 0 || len(turns) > 0) {
+				runUID := uuid.Must(uuid.NewV7()).String()
+				totalTokens := int64(cost.InputTokens + cost.OutputTokens + cost.CacheReadTokens + cost.CacheCreateTokens)
+				cacheHitRate := float64(0)
+				if totalTokens > 0 {
+					cacheHitRate = float64(cost.CacheReadTokens) / float64(totalTokens) * 100
+				}
+				turnCount := 0
+				actionCount := 0
+				for _, t := range turns {
+					if t.Role == "assistant" {
+						turnCount++
+					} else if t.Role == "user" && len(t.Content) > 6 && t.Content[:6] == "[tool:" {
+						actionCount++
+					}
+				}
+				row := execution.Row{
+					ID:                uuid.Must(uuid.NewV7()).String(),
+					RunUID:            runUID,
+					EntityUID:         sessionID,
+					SessionID:         sessionID,
+					Event:             execution.EventCompleted,
+					Trigger:           "interactive",
+					NodeID:            n.PeerID(),
+					AgentRuntime:      n.AgentForSession(sessionID),
+					Model:             cost.Model,
+					InputTokens:       int64(cost.InputTokens),
+					OutputTokens:      int64(cost.OutputTokens),
+					CacheReadTokens:   int64(cost.CacheReadTokens),
+					CacheCreateTokens: int64(cost.CacheCreateTokens),
+					CacheHitRatePct:   cacheHitRate,
+					Turns:             turnCount,
+					Actions:           actionCount,
+					CreatedBy:         "hook/session-end",
+				}
+				if err := n.ExecutionLog.Insert(context.Background(), row); err != nil {
+					slog.Warn("execution_log insert failed for session", "error", err)
+				}
+			}
+
 			if len(turns) == 0 {
 				return
 			}
@@ -277,13 +367,12 @@ func readTranscript(path string) []conversation.Turn {
 	return turns
 }
 
-// sessionCost holds parsed token usage and computed cost from a transcript.
+// sessionCost holds parsed token usage from a transcript.
 type sessionCost struct {
 	InputTokens       int
 	OutputTokens      int
 	CacheReadTokens   int
 	CacheCreateTokens int
-	CostUSD           float64
 	Model             string
 }
 
@@ -305,13 +394,13 @@ func parseTranscriptCost(path string) sessionCost {
 		} `json:"totalUsage"`
 	}
 	if err := json.Unmarshal(data, &gemini); err == nil && gemini.TotalUsage.OutputTokens > 0 {
-		return computeCost(sessionCost{
+		return sessionCost{
 			InputTokens:       gemini.TotalUsage.InputTokens,
 			OutputTokens:      gemini.TotalUsage.OutputTokens,
 			CacheReadTokens:   gemini.TotalUsage.CacheReadInputTokens,
 			CacheCreateTokens: gemini.TotalUsage.CacheCreationInputTokens,
 			Model:             gemini.Model,
-		})
+		}
 	}
 
 	// Fall back to Claude Code transcript (JSONL)
@@ -354,49 +443,32 @@ func parseTranscriptCost(path string) sessionCost {
 		}
 	}
 
-	return computeCost(cost)
+	return cost
 }
 
-// computeCost applies model-specific pricing to the raw token counts.
-func computeCost(cost sessionCost) sessionCost {
-	// Default pricing (Opus)
-	inputRate := 15.0   // per million
-	outputRate := 75.0
-	cacheReadRate := 1.5
-	cacheCreateRate := 18.75
-
-	m := strings.ToLower(cost.Model)
-	if strings.Contains(m, "sonnet") {
-		inputRate = 3.0
-		outputRate = 15.0
-		cacheReadRate = 0.30
-		cacheCreateRate = 3.75
-	} else if strings.Contains(m, "haiku") {
-		inputRate = 0.25
-		outputRate = 1.25
-		cacheReadRate = 0.025
-		cacheCreateRate = 0.3125
-	} else if strings.Contains(m, "gemini") {
-		// Gemini 1.5 Pro: $3.50/M input, $10.50/M output
-		// Gemini 1.5 Flash: $0.075/M input, $0.30/M output
-		// (Approximate pricing for integration)
-		if strings.Contains(m, "pro") {
-			inputRate = 3.50
-			outputRate = 10.50
-			cacheReadRate = 0.875
-			cacheCreateRate = 3.50
-		} else {
-			inputRate = 0.075
-			outputRate = 0.30
-			cacheReadRate = 0.01875
-			cacheCreateRate = 0.075
+func init() {
+	// Wire the transcript parser into the node package so the MCP sampler
+	// (which imports node but not web) can call it without a circular import.
+	// Parses both token/cost AND turn/action counts from the live transcript.
+	node.ParseLiveTranscript = func(path string) node.LiveSessionCost {
+		c := parseTranscriptCost(path)
+		turns := readTranscript(path)
+		turnCount, actionCount := 0, 0
+		for _, t := range turns {
+			if t.Role == "assistant" {
+				turnCount++
+			} else if t.Role == "user" && len(t.Content) > 6 && t.Content[:6] == "[tool:" {
+				actionCount++
+			}
+		}
+		return node.LiveSessionCost{
+			InputTokens:       c.InputTokens,
+			OutputTokens:      c.OutputTokens,
+			CacheReadTokens:   c.CacheReadTokens,
+			CacheCreateTokens: c.CacheCreateTokens,
+			Model:             c.Model,
+			Turns:             turnCount,
+			Actions:           actionCount,
 		}
 	}
-
-	cost.CostUSD = float64(cost.InputTokens)/1_000_000*inputRate +
-		float64(cost.OutputTokens)/1_000_000*outputRate +
-		float64(cost.CacheReadTokens)/1_000_000*cacheReadRate +
-		float64(cost.CacheCreateTokens)/1_000_000*cacheCreateRate
-
-	return cost
 }

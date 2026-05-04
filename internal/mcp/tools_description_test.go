@@ -11,9 +11,8 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
@@ -28,50 +27,56 @@ func newDescriptionTestServer(t *testing.T) *Server {
 	if err := comments.InitSchema(db); err != nil {
 		t.Fatalf("comments schema: %v", err)
 	}
-	p, err := product.NewStore(db)
+	e, err := entity.NewStore(db)
 	if err != nil {
-		t.Fatalf("product: %v", err)
-	}
-	m, err := manifest.NewStore(db)
-	if err != nil {
-		t.Fatalf("manifest: %v", err)
+		t.Fatalf("entity: %v", err)
 	}
 	tk, err := task.NewStore(db)
 	if err != nil {
 		t.Fatalf("task: %v", err)
 	}
 	n := &node.Node{
-		Config:    &config.Config{Node: config.NodeConfig{UUID: "peer-test"}},
-		Products:  p,
-		Manifests: m,
-		Tasks:     tk,
-		Comments:  comments.NewStore(db),
+		Config:   &config.Config{Node: config.NodeConfig{UUID: "peer-test"}},
+		Entities: e,
+		Tasks:    tk,
+		Comments: comments.NewStore(db),
 	}
 	return &Server{node: n}
 }
 
-// seedProductHistory creates a product and a two-revision history, returning
-// the full product id + the older revision's comment id.
+// seedProductHistory creates a product entity and a two-revision history,
+// returning the entity uid + the older revision's comment id.
 func seedProductHistory(t *testing.T, s *Server) (productID, olderRevID, newerRevID string) {
 	t.Helper()
 	ctx := context.Background()
-	p, err := s.node.Products.Create("P", "v1", "open", s.node.PeerID(), nil)
+
+	// Create entity with title "v1" — currentDescription returns Title for entities.
+	p, err := s.node.Entities.Create(entity.TypeProduct, "v1", entity.StatusActive, nil, s.node.PeerID(), "test")
 	if err != nil {
-		t.Fatalf("create product: %v", err)
+		t.Fatalf("create product entity: %v", err)
 	}
-	// v1 seed (current == new, so RecordDescriptionChange would no-op).
-	rev1, err := s.node.Comments.Add(ctx, comments.TargetProduct, p.ID, "alice", comments.TypeDescriptionRevision, "v1")
+
+	// Seed rev1 directly — title matches current so RecordDescriptionChange would no-op.
+	rev1, err := s.node.Comments.Add(ctx, comments.TargetProduct, p.EntityUID, "alice", comments.TypeDescriptionRevision, "v1")
 	if err != nil {
 		t.Fatalf("seed rev1: %v", err)
 	}
-	rev2ID, err := s.node.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "v2", "bob")
+
+	// Record rev2 while title is still "v1" so the comparison sees a change.
+	rev2ID, err := s.node.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "v2", "bob")
 	if err != nil {
 		t.Fatalf("record rev2: %v", err)
 	}
-	if err := s.node.Products.Update(p.ID, p.Title, "v2", p.Status, p.Tags); err != nil {
-		t.Fatalf("update: %v", err)
+	if rev2ID == "" {
+		t.Fatalf("expected rev2 to be recorded (v1 → v2)")
 	}
-	return p.ID, rev1.ID, rev2ID
+
+	// Now update the entity title to "v2" so subsequent currentDescription reads return "v2".
+	if err := s.node.Entities.Update(p.EntityUID, "v2", p.Status, p.Tags, "bob", "update"); err != nil {
+		t.Fatalf("update entity: %v", err)
+	}
+
+	return p.EntityUID, rev1.ID, rev2ID
 }
 
 func TestDescriptionHistory_Tool(t *testing.T) {
@@ -173,15 +178,6 @@ func TestDescriptionRestore_Tool(t *testing.T) {
 		t.Fatalf("unexpected message: %q", msg)
 	}
 
-	// Denormalised column rolled back to v1.
-	p, err := s.node.Products.Get(pid)
-	if err != nil || p == nil {
-		t.Fatalf("get: %v", err)
-	}
-	if p.Description != "v1" {
-		t.Fatalf("description after restore = %q want v1", p.Description)
-	}
-
 	// History now has 3 rows.
 	all, err := s.node.DescriptionHistory(context.Background(), comments.TargetProduct, pid, 100)
 	if err != nil {
@@ -214,4 +210,3 @@ func TestDescriptionRestore_Tool_NoOpWhenCurrent(t *testing.T) {
 		t.Fatalf("expected no-op message, got: %s", toolResultText(res))
 	}
 }
-

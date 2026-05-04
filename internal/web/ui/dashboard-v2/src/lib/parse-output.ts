@@ -1,6 +1,6 @@
 // Parse Claude stream-json task output into typed blocks for the Live
-// Output tab. Each line emitted from `/api/tasks/{id}/output` is one
-// JSON event:
+// Output tab. Each chunk from `/api/execution/{runUid}/output` (OutputChunk.chunk)
+// is one JSON event:
 //   { type: 'assistant', message: { content: [{ type: 'text' | 'tool_use', ... }] } }
 //   { type: 'user', message: { content: [{ type: 'tool_result', ... }] } }
 //   { type: 'result', terminal_reason, num_turns, total_cost_usd }
@@ -37,7 +37,6 @@ export interface ResultBlock {
   type: 'result'
   terminalReason: string
   numTurns: number
-  costUsd: number
 }
 
 export type OutputBlock =
@@ -135,7 +134,6 @@ export function parseTaskOutput(lines: string[]): ParsedOutput {
           terminalReason:
             event.terminal_reason || event.stop_reason || 'unknown',
           numTurns: event.num_turns || 0,
-          costUsd: event.total_cost_usd || 0,
         })
       }
     } catch {

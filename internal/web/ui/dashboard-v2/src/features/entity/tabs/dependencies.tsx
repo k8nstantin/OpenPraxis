@@ -18,7 +18,7 @@ import {
   useUnlinkManifest,
   type EntityKind,
 } from '@/lib/queries/entity'
-import type { Comment, Manifest } from '@/lib/types'
+import type { Comment, Entity } from '@/lib/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,9 +36,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { DepPicker, type PickerRow } from '../dep-picker'
 
 const STATUS_COLOR: Record<string, string> = {
-  open: 'bg-emerald-500/15 text-emerald-500',
-  in_progress: 'bg-sky-500/15 text-sky-500',
   draft: 'bg-amber-500/15 text-amber-500',
+  active: 'bg-emerald-500/15 text-emerald-500',
   closed: 'bg-zinc-500/15 text-zinc-400',
   archived: 'bg-zinc-500/10 text-zinc-500',
 }
@@ -94,18 +93,18 @@ export function DependenciesTab({
 
   // Products: deps = sub-products (downstream).
   // Manifests: deps = upstream (depends-on).
+  // The dependency endpoints return {id, title, status} where id IS the entity_uid.
   const depRows: PickerRow[] = (deps.data ?? []).map((d) => ({
     id: d.id,
-    marker: d.marker,
     title: d.title,
     status: d.status,
   }))
+  // Children come from /api/entities (unified endpoint) — rows have entity_uid.
   const childRows: PickerRow[] = (children.data ?? []).map(
-    (m: { id: string; marker?: string; title?: string; status?: string }) => ({
-      id: m.id,
-      marker: m.marker ?? m.id.slice(0, 12),
-      title: m.title ?? m.id.slice(0, 12),
-      status: m.status ?? '',
+    (m: Entity) => ({
+      id: m.entity_uid,
+      title: m.title,
+      status: m.status,
     })
   )
 
@@ -122,10 +121,9 @@ export function DependenciesTab({
   const pickerCandidates = useMemo<PickerRow[]>(() => {
     if (picker === 'manifest-link') {
       return (allManifests.data ?? [])
-        .filter((m) => !childRows.some((r) => r.id === m.id))
+        .filter((m) => !childRows.some((r) => r.id === m.entity_uid))
         .map((m) => ({
-          id: m.id,
-          marker: m.marker,
+          id: m.entity_uid,
           title: m.title,
           status: m.status,
         }))
@@ -133,10 +131,9 @@ export function DependenciesTab({
     if (picker === 'subproduct') {
       const exclude = new Set([entityId, ...depRows.map((r) => r.id)])
       return (allProducts.data ?? [])
-        .filter((p) => !exclude.has(p.id))
+        .filter((p) => !exclude.has(p.entity_uid))
         .map((p) => ({
-          id: p.id,
-          marker: p.marker,
+          id: p.entity_uid,
           title: p.title,
           status: p.status,
         }))
@@ -144,10 +141,9 @@ export function DependenciesTab({
     if (picker === 'manifest-upstream') {
       const exclude = new Set([entityId, ...depRows.map((r) => r.id)])
       return (allManifests.data ?? [])
-        .filter((m) => !exclude.has(m.id))
+        .filter((m) => !exclude.has(m.entity_uid))
         .map((m) => ({
-          id: m.id,
-          marker: m.marker,
+          id: m.entity_uid,
           title: m.title,
           status: m.status,
         }))
@@ -673,10 +669,10 @@ function RevisionRow({
   )
 }
 
-// Suppress unused-import warning — `Manifest` is referenced indirectly
+// Suppress unused-import warning — `Entity` is referenced indirectly
 // via the queries layer's typing; keep the import so future tweaks
 // don't have to re-add it.
-export type { Manifest }
+export type { Entity }
 
 function fmtTime(ts: number | string): string {
   const t = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)

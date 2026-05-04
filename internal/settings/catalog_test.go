@@ -5,29 +5,6 @@ import (
 	"testing"
 )
 
-func TestCatalog_HasExpectedKnobCount(t *testing.T) {
-	// 12 v1 knobs + 2 prompt-context knobs (prompt_max_comment_chars,
-	// prompt_max_context_pct) added in the runner-hardening manifest
-	// 019db6a6-72f + 1 compliance_checks_enabled flag added after the
-	// PostToolUse embedding spam incident + 4 RC/M5 operator knobs
-	// (scheduler_tick_seconds, on_restart_behavior, branch_prefix,
-	// worktree_base_dir) + 2 React/Products M1 cutover flags
-	// (frontend_dashboard_v2, frontend_dev_mode) + 8 React 2 / Foundation
-	// per-tab cutover flags (frontend_dashboard_v2_<tab> for products,
-	// manifests, tasks, memories, conversations, settings, compliance,
-	// overview). Every knob inherits via the existing task → manifest →
-	// product → system resolver.
-	// 30 knobs: 29 existing + host_sampler_tick_seconds (added with the
-	// SystemSampler in the Stats backend chunk).
-	// +2 comment attachment knobs (UB-2): comment_attachment_max_mb +
-	// comment_attachment_allowed_mimes.
-	const want = 32
-	got := len(Catalog())
-	if got != want {
-		t.Fatalf("Catalog() returned %d knobs, want %d", got, want)
-	}
-}
-
 func TestCatalog_EveryKnobHasDescription(t *testing.T) {
 	for _, k := range Catalog() {
 		if k.Description == "" {

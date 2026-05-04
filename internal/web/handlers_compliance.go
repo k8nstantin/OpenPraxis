@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/action"
+	"github.com/k8nstantin/OpenPraxis/internal/delusion"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 
 	"github.com/gorilla/mux"
@@ -142,7 +143,8 @@ func cosineSim(a, b []float32) float64 {
 // checkManifestDelusion checks if an action is unrelated to any active manifest.
 // Low similarity to ALL manifests = agent is going off-spec (delusional).
 func checkManifestDelusion(n *node.Node, sessionID, toolName string, toolInput any) {
-	manifests, err := n.Manifests.List("open", 10)
+	// Use the unified entity store to list open manifests.
+	manifests, err := n.Entities.List("manifest", "open", 10)
 	if err != nil || len(manifests) == 0 {
 		return
 	}
@@ -177,11 +179,12 @@ func checkManifestDelusion(n *node.Node, sessionID, toolName string, toolInput a
 		return
 	}
 
+	ds := delusion.New(n.Index.DB())
+
 	// Check similarity against each active manifest
 	for _, m := range manifests {
-		// Embed the manifest description + title (not full content — too long)
-		manifestDesc := m.Title + ": " + m.Description
-		manifestVec, err := n.Embedder.EmbedQuery(ctx, manifestDesc)
+		// Embed the manifest title (entity store carries title, not content)
+		manifestVec, err := n.Embedder.EmbedQuery(ctx, m.Title)
 		if err != nil {
 			continue
 		}
@@ -192,7 +195,7 @@ func checkManifestDelusion(n *node.Node, sessionID, toolName string, toolInput a
 		// This means the agent is doing something off-spec
 		if sim < 0.3 {
 			reason := fmt.Sprintf("Action has %.0f%% similarity to manifest '%s' — agent may be going off-spec", sim*100, m.Title)
-			if err := n.Manifests.RecordDelusion(sessionID, n.PeerID(), "", "", m.ID, "", m.Title, toolName, inputStr, sim, reason); err != nil {
+			if err := ds.Record(sessionID, n.PeerID(), "", "", m.EntityUID, "", m.Title, toolName, inputStr, sim, reason); err != nil {
 				slog.Warn("record delusion failed", "error", err)
 			}
 		}
@@ -290,7 +293,8 @@ func apiAmnesiaUpdate(n *node.Node, newStatus string) http.HandlerFunc {
 func apiDelusionsByPeer(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		events, err := n.Manifests.ListDelusions(status, 200)
+		ds := delusion.New(n.Index.DB())
+		events, err := ds.List(status, 200)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -347,7 +351,8 @@ func apiDelusionsByPeer(n *node.Node) http.HandlerFunc {
 func apiDelusions(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
-		events, err := n.Manifests.ListDelusions(status, 50)
+		ds := delusion.New(n.Index.DB())
+		events, err := ds.List(status, 50)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -361,7 +366,8 @@ func apiDelusionUpdate(n *node.Node, newStatus string) http.HandlerFunc {
 		idStr := mux.Vars(r)["id"]
 		var id int
 		fmt.Sscanf(idStr, "%d", &id)
-		if err := n.Manifests.UpdateDelusionStatus(id, newStatus); err != nil {
+		ds := delusion.New(n.Index.DB())
+		if err := ds.UpdateStatus(id, newStatus); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

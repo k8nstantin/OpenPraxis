@@ -28,9 +28,8 @@ export interface PickerRow {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  open: 'bg-emerald-500/15 text-emerald-500',
-  in_progress: 'bg-sky-500/15 text-sky-500',
   draft: 'bg-amber-500/15 text-amber-500',
+  active: 'bg-emerald-500/15 text-emerald-500',
   closed: 'bg-zinc-500/15 text-zinc-400',
   archived: 'bg-zinc-500/10 text-zinc-500',
 }

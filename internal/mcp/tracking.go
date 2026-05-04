@@ -23,7 +23,11 @@ type SessionInfo struct {
 	LastSeenAt     time.Time  `json:"last_seen_at"`
 	ToolCalls      int        `json:"tool_calls"`
 	ConversationID string     `json:"conversation_id"`
-	turns          []conversation.Turn
+	// RunUID is the stable execution_log run identifier for this session.
+	// Shared across started/sample/completed rows so the full run is queryable.
+	RunUID      string       `json:"run_uid"`
+	stopSampler func()       // cancel func for the per-session 5s sampler
+	turns       []conversation.Turn
 }
 
 // AgentTracker tracks connected MCP sessions and their tool call history.
@@ -57,6 +61,7 @@ func (t *AgentTracker) Connect(mcpSessionID, agentName string) *SessionInfo {
 		ConnectedAt:    now,
 		LastSeenAt:     now,
 		ConversationID: uuid.Must(uuid.NewV7()).String(),
+		RunUID:         uuid.Must(uuid.NewV7()).String(),
 	}
 	t.sessions[mcpSessionID] = info
 
@@ -127,6 +132,15 @@ func (t *AgentTracker) RecordToolCall(mcpSessionID, toolName string, args map[st
 	return out
 }
 
+// SetSampler stores the cancel function for a session's periodic sampler goroutine.
+func (t *AgentTracker) SetSampler(mcpSessionID string, stop func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if s, ok := t.sessions[mcpSessionID]; ok {
+		s.stopSampler = stop
+	}
+}
+
 // Disconnect removes a session from the active cache and marks it disconnected in the DB.
 func (t *AgentTracker) Disconnect(mcpSessionID string) *SessionInfo {
 	t.mu.Lock()
@@ -136,6 +150,11 @@ func (t *AgentTracker) Disconnect(mcpSessionID string) *SessionInfo {
 		return nil
 	}
 	delete(t.sessions, mcpSessionID)
+
+	// Stop the per-session sampler goroutine.
+	if session.stopSampler != nil {
+		session.stopSampler()
+	}
 
 	// Mark disconnected in SQLite
 	if t.store != nil {

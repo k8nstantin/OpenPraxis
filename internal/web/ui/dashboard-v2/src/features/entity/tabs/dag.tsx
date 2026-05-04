@@ -34,12 +34,10 @@ interface DAGTabProps {
 }
 
 const STATUS_BORDER: Record<string, string> = {
-  open: '#10b981',
-  in_progress: '#0ea5e9',
   draft: '#f59e0b',
+  active: '#10b981',
   closed: '#71717a',
   archived: '#52525b',
-  cancelled: '#f43f5e',
 }
 
 const KIND_COLOR: Record<string, string> = {

@@ -1,52 +1,44 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   Comment,
+  Entity,
+  ExecutionRow,
   HierarchyNode,
-  Manifest,
-  Product,
+  OutputChunk,
   ProductDependency,
-  Task,
 } from '@/lib/types'
 
 // Generic entity queries layer for Products + Manifests + Tasks.
 //
 // All three kinds share the same 5-tab surface; the only thing that
-// changes is the URL prefix and the children/hierarchy semantics. Each
-// hook takes a `kind` and dispatches to the correct API path. See
-// features/entity/* for the React surface that consumes these.
+// changes is the type param. Each hook takes a `kind` and dispatches
+// to the unified /api/entities endpoint. See features/entity/* for the
+// React surface that consumes these.
 //
-// Path conventions (verified against handlers_*.go in this PR):
-//   /api/products/{id}                      GET, PUT
-//   /api/products/{id}/manifests            GET (children)
-//   /api/products/{id}/hierarchy            GET (recursive descent)
-//   /api/products/{id}/dependencies         GET (sub-products), POST (body-style)
-//   /api/products/{id}/dependencies/{X}     DELETE
-//   /api/products/{id}/comments             GET, POST
-//   /api/products/{id}/description/history  GET
-//   /api/products/{id}/settings             GET, PUT, DELETE/{key}
-//   /api/manifests/{id}                     GET, PUT
-//   /api/manifests/{id}/tasks               GET (children)
-//   /api/manifests/{id}/dependencies        GET (?direction=out), POST (body-style)
-//   /api/manifests/{id}/dependencies/{X}    DELETE
-//   /api/manifests/{id}/comments            GET, POST
-//   /api/manifests/{id}/description/history GET
-//   /api/manifests/{id}/settings            GET, PUT, DELETE/{key}
-//   /api/tasks/{id}                         GET, PATCH
-//   /api/tasks/{id}/dependencies            GET (?direction=out), POST (body-style)
-//   /api/tasks/{id}/dependencies/{X}        DELETE
-//   /api/tasks/{id}/comments                GET, POST
-//   /api/tasks/{id}/description/history     GET
-//   /api/tasks/{id}/settings                GET, PUT, DELETE/{key}
+// Path conventions (unified entities API):
+//   GET    /api/entities?type=<kind>&status=<s>&limit=<n>   list
+//   GET    /api/entities/:id                                 detail
+//   PUT    /api/entities/:id                                 update
+//   POST   /api/entities                                     create
+//   GET    /api/entities/:id/history                         SCD-2 version history
+//   GET    /api/entities/:id/runs                            execution history (ExecutionRow[])
+//   GET    /api/entities/:id/comments                        Comments tab
+//   GET    /api/entities/search?q=...&type=...               search
+//   GET    /api/execution/:runUid                            all events for a run
+//   GET    /api/execution/:runUid/output                     live text chunks (OutputChunk[])
 //
-// Tasks are leaves in the product → manifest → task tree:
-//   - useEntityChildren: returns []  (tasks have no children)
-//   - useEntityHierarchy: disabled    (no recursive descent)
+// Legacy per-entity-type endpoints still in use (backend keeps them registered):
+//   /api/relationships/graph                                 DAG tab
+//   /api/products/{id}/dependencies                          Dep mutations (product downstream)
+//   /api/manifests/{id}/dependencies                         Dep mutations (manifest upstream)
+//   /api/products/{id}/hierarchy                             Product list-pane tree expand
+//   /api/{kind}s/{id}/settings                               Execution/Main tabs knobs
+//   /api/{kind}s/{id}/description/history                    Main tab revisions
 
-export type EntityKind = 'product' | 'manifest' | 'task'
+export type EntityKind = 'product' | 'manifest' | 'task' | 'skill' | 'idea'
 
-// EntityRecord is the union of fields that the generic surface reads.
-// Cast to Product / Manifest / Task as needed for kind-specific extras.
-export type EntityRecord = Product | Manifest | Task
+// EntityRecord is the unified entity shape returned by /api/entities.
+export type EntityRecord = Entity
 
 export const entityKeys = {
   all: (kind: EntityKind) => [kind] as const,
@@ -63,12 +55,19 @@ export const entityKeys = {
     [...entityKeys.all(kind), 'hierarchy', id] as const,
   descriptionHistory: (kind: EntityKind, id: string) =>
     [...entityKeys.all(kind), 'description-history', id] as const,
+  runs: (kind: EntityKind, id: string) =>
+    [...entityKeys.all(kind), 'runs', id] as const,
+  execution: (runUid: string) => ['execution', runUid] as const,
+  executionOutput: (runUid: string) => ['execution', runUid, 'output'] as const,
 }
 
-function basePath(kind: EntityKind): string {
-  if (kind === 'product') return '/api/products'
-  if (kind === 'task') return '/api/tasks'
-  return '/api/manifests'
+// kindPlural returns the legacy URL segment for a given entity kind.
+// Used only for endpoints that are still registered per-kind in the
+// backend: /api/{kind}s/{id}/settings and /api/{kind}s/{id}/dependencies.
+function kindPlural(kind: EntityKind): string {
+  if (kind === 'product') return 'products'
+  if (kind === 'task') return 'tasks'
+  return 'manifests'
 }
 
 async function fetchJSON<T>(path: string): Promise<T> {
@@ -121,7 +120,8 @@ export function useEntityGraph(
 export function useEntityList(kind: EntityKind) {
   return useQuery({
     queryKey: entityKeys.list(kind),
-    queryFn: () => fetchJSON<EntityRecord[]>(basePath(kind)),
+    queryFn: () =>
+      fetchJSON<Entity[]>(`/api/entities?type=${kind}&limit=200`),
     staleTime: 30 * 1000,
   })
 }
@@ -129,7 +129,7 @@ export function useEntityList(kind: EntityKind) {
 export function useEntity(kind: EntityKind, id: string | undefined) {
   return useQuery({
     queryKey: entityKeys.detail(kind, id ?? ''),
-    queryFn: () => fetchJSON<EntityRecord>(`${basePath(kind)}/${id}`),
+    queryFn: () => fetchJSON<Entity>(`/api/entities/${id}`),
     enabled: !!id,
     staleTime: 15 * 1000,
   })
@@ -145,15 +145,16 @@ export function useEntityHierarchy(
 ) {
   return useQuery({
     queryKey: entityKeys.hierarchy(kind, id ?? ''),
+    // Only the /api/products/{id}/hierarchy endpoint exists in the backend.
     queryFn: () =>
-      fetchJSON<HierarchyNode>(`${basePath(kind)}/${id}/hierarchy`),
+      fetchJSON<HierarchyNode>(`/api/products/${id}/hierarchy`),
     enabled: kind === 'product' && !!id,
     staleTime: 30 * 1000,
   })
 }
 
 // Children — products → manifests; manifests → tasks; tasks → none.
-// Same shape on the wire ({id, marker, title, status} subset), so the
+// Same shape on the wire ({entity_uid, title, status} subset), so the
 // consumers (Dependencies tab + DAG tab) can treat the rows uniformly.
 // Tasks are leaves: the query is disabled and resolves to an empty
 // array so callers don't have to special-case undefined.
@@ -163,40 +164,40 @@ export function useEntityChildren(
 ) {
   const path =
     kind === 'product'
-      ? `/api/products/${id}/manifests`
+      ? `/api/entities?type=manifest&parent_id=${id}&limit=200`
       : kind === 'manifest'
-        ? `/api/manifests/${id}/tasks`
+        ? `/api/entities?type=task&manifest_id=${id}&limit=200`
         : ''
   return useQuery({
     queryKey: entityKeys.children(kind, id ?? ''),
     queryFn: () =>
       kind === 'task'
         ? Promise.resolve([] as unknown[])
-        : fetchJSON<Manifest[] | unknown[]>(path),
+        : fetchJSON<Entity[] | unknown[]>(path),
     enabled: !!id && kind !== 'task',
     staleTime: 15 * 1000,
   })
 }
 
-// Dependency rows — same {id, marker, title, status} shape. Manifest's
-// endpoint wraps in `{deps: [...]}` AND requires direction=out; the
-// product's wraps in `{deps: [...]}` too; the task's mirrors manifest
-// and returns 0-or-1 rows because tasks carry at most one dep on the
-// underlying tasks.depends_on column. Normalize all three to a bare
-// array.
+// Dependency rows — same {id, title, status} shape. Uses the per-kind
+// dependency endpoints (products and manifests only; tasks are leaves).
+// Backend registers: /api/products/{id}/dependencies and
+// /api/manifests/{id}/dependencies.
 export function useEntityDependencies(
   kind: EntityKind,
   id: string | undefined
 ) {
+  // Tasks have no dep endpoint in the backend — return empty for them.
   const path =
     kind === 'product'
       ? `/api/products/${id}/dependencies`
-      : kind === 'task'
-        ? `/api/tasks/${id}/dependencies?direction=out`
-        : `/api/manifests/${id}/dependencies?direction=out`
+      : kind === 'manifest'
+        ? `/api/manifests/${id}/dependencies?direction=out`
+        : ''
   return useQuery({
     queryKey: entityKeys.deps(kind, id ?? ''),
     queryFn: async () => {
+      if (!path) return [] as ProductDependency[]
       const res = await fetch(path)
       if (!res.ok) throw new Error(`dependencies → ${res.status}`)
       const data = (await res.json()) as
@@ -204,7 +205,7 @@ export function useEntityDependencies(
         | { deps: ProductDependency[] }
       return Array.isArray(data) ? data : (data.deps ?? [])
     },
-    enabled: !!id,
+    enabled: !!id && kind !== 'task',
     staleTime: 30 * 1000,
   })
 }
@@ -216,7 +217,8 @@ export function useEntityComments(
   return useQuery({
     queryKey: entityKeys.comments(kind, id ?? ''),
     queryFn: async () => {
-      const res = await fetch(`${basePath(kind)}/${id}/comments`)
+      // Unified /api/entities/:id/comments endpoint — works for all kinds.
+      const res = await fetch(`/api/entities/${id}/comments`)
       if (!res.ok) throw new Error(`comments → ${res.status}`)
       const data = (await res.json()) as Comment[] | { comments: Comment[] }
       return Array.isArray(data) ? data : (data.comments ?? [])
@@ -242,33 +244,101 @@ export function useEntityDescriptionHistory(
   return useQuery({
     queryKey: entityKeys.descriptionHistory(kind, id ?? ''),
     queryFn: async () => {
-      const res = await fetch(`${basePath(kind)}/${id}/description/history`)
+      // Description revisions are stored as comments with type=description_revision.
+      const res = await fetch(`/api/entities/${id}/comments?type=description_revision&limit=100`)
       if (!res.ok) throw new Error(`description history → ${res.status}`)
-      const data = (await res.json()) as
-        | { items: DescriptionRevision[] }
-        | DescriptionRevision[]
-      return Array.isArray(data) ? data : (data.items ?? [])
+      const data = (await res.json()) as { comments: DescriptionRevision[] } | DescriptionRevision[]
+      const rows = Array.isArray(data) ? data : (data.comments ?? [])
+      // Map comment shape {author, body, created_at} to DescriptionRevision shape.
+      return rows.map((r, i) => ({
+        id: (r as {id?: string}).id ?? String(i),
+        version: rows.length - i,
+        author: (r as {author?: string}).author ?? '',
+        body: (r as {body?: string}).body ?? '',
+        created_at: (r as {created_at?: number | string}).created_at ?? '',
+      })) as DescriptionRevision[]
     },
     enabled: !!id,
     staleTime: 60 * 1000,
   })
 }
 
+// Entity execution runs — new unified endpoint.
+export function useEntityRuns(
+  kind: EntityKind,
+  id: string | undefined
+) {
+  return useQuery({
+    queryKey: entityKeys.runs(kind, id ?? ''),
+    queryFn: () =>
+      fetchJSON<ExecutionRow[]>(`/api/entities/${id}/runs`),
+    enabled: !!id,
+    staleTime: 10 * 1000,
+  })
+}
+
+// All events for a specific run (started|sample|completed|failed rows).
+export function useExecutionRun(runUid: string | undefined) {
+  return useQuery({
+    queryKey: entityKeys.execution(runUid ?? ''),
+    queryFn: () =>
+      fetchJSON<ExecutionRow[]>(`/api/execution/${runUid}`),
+    enabled: !!runUid,
+    staleTime: 10 * 1000,
+  })
+}
+
+// Live text chunks for a run's output stream.
+export function useExecutionOutput(runUid: string | undefined) {
+  return useQuery({
+    queryKey: entityKeys.executionOutput(runUid ?? ''),
+    queryFn: () =>
+      fetchJSON<OutputChunk[]>(`/api/execution/${runUid}/output`),
+    enabled: !!runUid,
+    refetchInterval: (q) => {
+      // Stop polling if we have a completed/failed event for this run.
+      const rows = q.state.data ?? []
+      const done = rows.some(
+        (r) => r.event === 'completed' || r.event === 'failed'
+      )
+      return done ? false : 750
+    },
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+  })
+}
+
 // ── Mutations ─────────────────────────────────────────────────────────
+
+// Create a new entity of any type. Returns the created entity so the
+// caller can immediately navigate to it.
+export function useCreateEntity(kind: EntityKind) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { type: EntityKind; title: string; status?: string; tags?: string[] }) => {
+      const res = await fetch('/api/entities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, status: payload.status ?? 'draft' }),
+      })
+      if (!res.ok) throw new Error(`create ${kind} → ${res.status}`)
+      return (await res.json()) as Entity
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: entityKeys.list(kind) })
+    },
+  })
+}
 
 export function useUpdateEntity(
   kind: EntityKind,
   id: string | undefined
 ) {
   const qc = useQueryClient()
-  // Tasks update via PATCH; products + manifests via PUT. Backend
-  // surface predates the generic queries layer, so we keep the verbs
-  // as-is rather than churn handler signatures.
-  const method = kind === 'task' ? 'PATCH' : 'PUT'
   return useMutation({
     mutationFn: async (patch: Partial<EntityRecord>) => {
-      const res = await fetch(`${basePath(kind)}/${id}`, {
-        method,
+      const res = await fetch(`/api/entities/${id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
@@ -306,7 +376,8 @@ export function useCreateEntityComment(
       type: string
       body: string
     }) => {
-      const res = await fetch(`${basePath(kind)}/${id}/comments`, {
+      // Use the unified /api/entities/:id/comments endpoint.
+      const res = await fetch(`/api/entities/${id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -353,7 +424,7 @@ async function postDepRevision(
   payload: DepRevisionPayload
 ): Promise<void> {
   const body = JSON.stringify(payload, null, 2)
-  await fetch(`${basePath(kind)}/${entityId}/comments`, {
+  await fetch(`/api/entities/${entityId}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -386,7 +457,7 @@ export function useAddUpstreamDep(
       target: { id: string; marker: string; title: string }
       snapshot: DepRevisionPayload['snapshot']
     }) => {
-      const res = await fetch(`${basePath(kind)}/${entityId}/dependencies`, {
+      const res = await fetch(`/api/${kindPlural(kind)}/${entityId}/dependencies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ depends_on_id: input.target.id }),
@@ -418,7 +489,7 @@ export function useRemoveUpstreamDep(
       snapshot: DepRevisionPayload['snapshot']
     }) => {
       const res = await fetch(
-        `${basePath(kind)}/${entityId}/dependencies/${input.target.id}`,
+        `/api/${kindPlural(kind)}/${entityId}/dependencies/${input.target.id}`,
         { method: 'DELETE' }
       )
       if (!res.ok && res.status !== 404)
@@ -449,7 +520,7 @@ export function useAddDownstreamDep(
       snapshot: DepRevisionPayload['snapshot']
     }) => {
       const res = await fetch(
-        `${basePath(kind)}/${input.target.id}/dependencies`,
+        `/api/${kindPlural(kind)}/${input.target.id}/dependencies`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -483,7 +554,7 @@ export function useRemoveDownstreamDep(
       snapshot: DepRevisionPayload['snapshot']
     }) => {
       const res = await fetch(
-        `${basePath(kind)}/${input.target.id}/dependencies/${entityId}`,
+        `/api/${kindPlural(kind)}/${input.target.id}/dependencies/${entityId}`,
         { method: 'DELETE' }
       )
       if (!res.ok && res.status !== 404)
@@ -511,7 +582,7 @@ export function useLinkManifest(productId: string | undefined) {
       target: { id: string; marker: string; title: string }
       snapshot: DepRevisionPayload['snapshot']
     }) => {
-      const res = await fetch(`/api/manifests/${input.target.id}`, {
+      const res = await fetch(`/api/entities/${input.target.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: productId }),
@@ -537,7 +608,7 @@ export function useUnlinkManifest(productId: string | undefined) {
       target: { id: string; marker: string; title: string }
       snapshot: DepRevisionPayload['snapshot']
     }) => {
-      const res = await fetch(`/api/manifests/${input.target.id}`, {
+      const res = await fetch(`/api/entities/${input.target.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: '' }),
@@ -564,9 +635,9 @@ export function useAllProducts() {
   return useQuery({
     queryKey: ['products', 'list'],
     queryFn: async () => {
-      const res = await fetch('/api/products')
+      const res = await fetch('/api/entities?type=product&limit=500')
       if (!res.ok) throw new Error(`products → ${res.status}`)
-      return (await res.json()) as Product[]
+      return (await res.json()) as Entity[]
     },
     staleTime: 30 * 1000,
   })
@@ -576,9 +647,9 @@ export function useAllManifests() {
   return useQuery({
     queryKey: ['manifest', 'list'],
     queryFn: async () => {
-      const res = await fetch('/api/manifests')
+      const res = await fetch('/api/entities?type=manifest&limit=500')
       if (!res.ok) throw new Error(`manifests → ${res.status}`)
-      return (await res.json()) as Manifest[]
+      return (await res.json()) as Entity[]
     },
     staleTime: 30 * 1000,
   })
@@ -616,7 +687,7 @@ export function useRestoreEntityDependencySnapshot(
 
       // Sub re-parents (downstream — X depends on this).
       for (const subId of subsToAdd) {
-        const r = await fetch(`${basePath(kind)}/${subId}/dependencies`, {
+        const r = await fetch(`/api/${kindPlural(kind)}/${subId}/dependencies`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ depends_on_id: entityId }),
@@ -627,7 +698,7 @@ export function useRestoreEntityDependencySnapshot(
       }
       for (const subId of subsToRemove) {
         const r = await fetch(
-          `${basePath(kind)}/${subId}/dependencies/${entityId}`,
+          `/api/${kindPlural(kind)}/${subId}/dependencies/${entityId}`,
           { method: 'DELETE' }
         )
         if (!r.ok && r.status !== 404) {
@@ -646,7 +717,7 @@ export function useRestoreEntityDependencySnapshot(
           (id) => !targetManifests.has(id)
         )
         for (const mId of manifestsToAdd) {
-          const r = await fetch(`/api/manifests/${mId}`, {
+          const r = await fetch(`/api/entities/${mId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: entityId }),
@@ -655,7 +726,7 @@ export function useRestoreEntityDependencySnapshot(
             throw new Error(`restore: link manifest ${mId} → ${r.status}`)
         }
         for (const mId of manifestsToRemove) {
-          const r = await fetch(`/api/manifests/${mId}`, {
+          const r = await fetch(`/api/entities/${mId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: '' }),
@@ -684,7 +755,7 @@ export function useRestoreEntityDependencySnapshot(
           2
         ) +
         '\n</dependency_revision>'
-      await fetch(`${basePath(kind)}/${entityId}/comments`, {
+      await fetch(`/api/entities/${entityId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -715,37 +786,39 @@ export function useCreateAndLinkSubProduct(productId: string | undefined) {
       title: string
       snapshot: { upstream: string[]; downstream: string[]; manifests: string[] }
     }) => {
-      const createRes = await fetch('/api/products', {
+      const createRes = await fetch('/api/entities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: input.title, status: 'draft' }),
+        body: JSON.stringify({ title: input.title, type: 'product', status: 'draft' }),
       })
       if (!createRes.ok)
         throw new Error(`create product → ${createRes.status}`)
-      const created = (await createRes.json()) as Product
+      const created = (await createRes.json()) as Entity
 
+      const createdId = created.entity_uid
       const linkRes = await fetch(
-        `/api/products/${created.id}/dependencies`,
+        `/api/products/${createdId}/dependencies`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ depends_on_id: productId }),
         }
       )
+      // 409 = already linked — treat as success.
       if (!linkRes.ok && linkRes.status !== 409)
         throw new Error(`link sub → ${linkRes.status}`)
 
       if (productId) {
         const newSnapshot = {
           ...input.snapshot,
-          downstream: [...input.snapshot.downstream, created.id],
+          downstream: [...input.snapshot.downstream, createdId],
         }
         await postDepRevision('product', productId, {
           op: 'add',
           kind: 'product_downstream',
           target: {
-            id: created.id,
-            marker: created.marker,
+            id: createdId,
+            marker: createdId.slice(0, 12),
             title: created.title,
           },
           snapshot: newSnapshot,
@@ -768,29 +841,31 @@ export function useCreateAndLinkManifest(productId: string | undefined) {
       title: string
       snapshot: { upstream: string[]; downstream: string[]; manifests: string[] }
     }) => {
-      const res = await fetch('/api/manifests', {
+      const res = await fetch('/api/entities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: input.title,
+          type: 'manifest',
           project_id: productId,
           status: 'draft',
         }),
       })
       if (!res.ok) throw new Error(`create manifest → ${res.status}`)
-      const created = (await res.json()) as Manifest
+      const created = (await res.json()) as Entity
+      const createdId = created.entity_uid
 
       if (productId) {
         const newSnapshot = {
           ...input.snapshot,
-          manifests: [...input.snapshot.manifests, created.id],
+          manifests: [...input.snapshot.manifests, createdId],
         }
         await postDepRevision('product', productId, {
           op: 'add',
           kind: 'manifest',
           target: {
-            id: created.id,
-            marker: created.marker,
+            id: createdId,
+            marker: createdId.slice(0, 12),
             title: created.title,
           },
           snapshot: newSnapshot,
@@ -818,17 +893,19 @@ export function useCreateAndLinkUpstreamManifest(
       title: string
       snapshot: { upstream: string[]; downstream: string[]; manifests: string[] }
     }) => {
-      const res = await fetch('/api/manifests', {
+      const res = await fetch('/api/entities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: input.title,
+          type: 'manifest',
           project_id: projectId ?? '',
           status: 'draft',
         }),
       })
       if (!res.ok) throw new Error(`create manifest → ${res.status}`)
-      const created = (await res.json()) as Manifest
+      const created = (await res.json()) as Entity
+      const createdId = created.entity_uid
 
       // THIS depends on created (created is upstream of THIS).
       const linkRes = await fetch(
@@ -836,23 +913,24 @@ export function useCreateAndLinkUpstreamManifest(
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ depends_on_id: created.id }),
+          body: JSON.stringify({ depends_on_id: createdId }),
         }
       )
+      // 409 = already linked — treat as success.
       if (!linkRes.ok && linkRes.status !== 409)
         throw new Error(`link upstream manifest → ${linkRes.status}`)
 
       if (manifestId) {
         const newSnapshot = {
           ...input.snapshot,
-          upstream: [...input.snapshot.upstream, created.id],
+          upstream: [...input.snapshot.upstream, createdId],
         }
         await postDepRevision('manifest', manifestId, {
           op: 'add',
           kind: 'manifest_upstream',
           target: {
-            id: created.id,
-            marker: created.marker,
+            id: createdId,
+            marker: createdId.slice(0, 12),
             title: created.title,
           },
           snapshot: newSnapshot,
@@ -870,53 +948,45 @@ export function useCreateAndLinkUpstreamManifest(
 
 // ── Task live output ─────────────────────────────────────────────────
 //
-// `/api/tasks/{id}/output` returns `{lines: string[], running: bool}`
-// from the runner's 200-line ring buffer. Polled while running, then
-// settles. When the task is no longer running, the last completed run's
-// full `output` blob is the source of truth — fetched via the runs hook.
+// The legacy `/api/tasks/{id}/output` ring-buffer endpoint was never
+// implemented in the backend. Live output is now served via:
+//
+//   GET /api/entities/{id}/runs   → ExecutionRow[] (all run events)
+//   GET /api/execution/{runUid}/output → OutputChunk[] (text chunks)
+//
+// `useTaskRuns` fetches the full run event log so the Live Output tab
+// can group events by run_uid and determine running/completed state.
+// `useTaskRunOutput` fetches the text chunks for a specific run.
 
-export interface TaskOutputResponse {
-  lines: string[]
-  running: boolean
-}
-
-export function useTaskOutput(taskId: string | undefined) {
-  return useQuery({
-    queryKey: ['task', taskId ?? '', 'output'],
-    queryFn: () => fetchJSON<TaskOutputResponse>(`/api/tasks/${taskId}/output`),
-    enabled: !!taskId,
-    // Poll while running; once `running:false` the query stops refetching
-    // automatically (refetchInterval reads the latest data).
-    refetchInterval: (q) => (q.state.data?.running ? 750 : false),
-    refetchIntervalInBackground: false,
-    staleTime: 0,
-  })
-}
-
-export interface TaskRunRow {
-  id: number
-  task_id: string
-  run_number: number
-  output: string
-  status: string
-  actions: number
-  lines: number
-  cost_usd: number
-  turns: number
-  model: string
-  started_at: string
-  completed_at: string
-}
-
-// All runs for this task, DESC by run_number. Endpoint returns rows
-// with full `output` blobs included — eager fetch is fine for the
-// typical case (1–10 runs, <1MB each); revisit with metadata-only
-// + lazy per-run fetch if a hot task hits multi-MB territory.
+// All run events for this task from /api/entities/{id}/runs.
+// Returns ExecutionRow[] sorted DESC by created_at (backend order).
 export function useTaskRuns(taskId: string | undefined) {
   return useQuery({
     queryKey: ['task', taskId ?? '', 'runs'],
-    queryFn: () => fetchJSON<TaskRunRow[]>(`/api/tasks/${taskId}/runs`),
+    queryFn: () => fetchJSON<ExecutionRow[]>(`/api/entities/${taskId}/runs`),
     enabled: !!taskId,
+    refetchInterval: (q) => {
+      // Keep polling while there is an active run (started without a terminal event).
+      const rows = q.state.data ?? []
+      const runUids = new Set(rows.map((r) => r.run_uid))
+      const started = new Set(
+        rows.filter((r) => r.event === 'started').map((r) => r.run_uid)
+      )
+      const terminal = new Set(
+        rows
+          .filter((r) => r.event === 'completed' || r.event === 'failed')
+          .map((r) => r.run_uid)
+      )
+      const hasRunning = [...runUids].some(
+        (uid) => started.has(uid) && !terminal.has(uid)
+      )
+      return hasRunning ? 1500 : false
+    },
+    refetchIntervalInBackground: false,
     staleTime: 5 * 1000,
   })
 }
+
+// Text chunks for a specific run — used by the Live Output tab for the
+// current in-flight run. Delegates to useExecutionOutput (same hook).
+export { useExecutionOutput as useTaskRunOutput }

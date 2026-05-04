@@ -13,9 +13,9 @@ import (
 func apiRecall(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		type recallItem struct {
-			ID     string `json:"id"`
-			Type   string `json:"type"` // memory, manifest, idea, task
-			Title  string `json:"title"`
+			ID    string `json:"id"`
+			Type  string `json:"type"` // memory, task
+			Title string `json:"title"`
 		}
 		var items []recallItem
 
@@ -23,18 +23,6 @@ func apiRecall(n *node.Node) http.HandlerFunc {
 		mems, _ := n.Index.ListDeleted(50)
 		for _, m := range mems {
 			items = append(items, recallItem{ID: m.ID, Type: "memory", Title: m.L0})
-		}
-
-		// Deleted manifests
-		manifests, _ := n.Manifests.ListDeleted(50)
-		for _, m := range manifests {
-			items = append(items, recallItem{ID: m.ID, Type: "manifest", Title: m.Title})
-		}
-
-		// Deleted ideas
-		ideas, _ := n.Ideas.ListDeleted(50)
-		for _, i := range ideas {
-			items = append(items, recallItem{ID: i.ID, Type: "idea", Title: i.Title})
 		}
 
 		// Deleted tasks
@@ -55,10 +43,6 @@ func apiRestore(n *node.Node) http.HandlerFunc {
 		switch itemType {
 		case "memory":
 			err = n.Index.Restore(id)
-		case "manifest":
-			err = n.Manifests.Restore(id)
-		case "idea":
-			err = n.Ideas.Restore(id)
 		case "task":
 			err = n.Tasks.Restore(id)
 		default:

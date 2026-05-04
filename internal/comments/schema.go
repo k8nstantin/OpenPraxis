@@ -40,6 +40,10 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("migrate target_type check: %w", err)
 	}
 
+	if err := migrateTargetTypeAddEntity(db); err != nil {
+		return fmt.Errorf("migrate target_type add entity: %w", err)
+	}
+
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target_type, target_id, created_at DESC)`)
 	if err != nil {
 		return fmt.Errorf("create comments target index: %w", err)
@@ -76,6 +80,49 @@ func migrateTargetTypeCheck(db *sql.DB) error {
 	if _, err := tx.Exec(`CREATE TABLE comments_new (
 		id           TEXT NOT NULL PRIMARY KEY,
 		target_type  TEXT NOT NULL CHECK (target_type IN ('product','manifest','task','idea')),
+		target_id    TEXT NOT NULL,
+		author       TEXT NOT NULL,
+		type         TEXT NOT NULL,
+		body         TEXT NOT NULL,
+		created_at   INTEGER NOT NULL,
+		updated_at   INTEGER,
+		parent_id    TEXT
+	)`); err != nil {
+		return fmt.Errorf("create comments_new: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO comments_new SELECT id, target_type, target_id, author, type, body, created_at, updated_at, parent_id FROM comments`); err != nil {
+		return fmt.Errorf("copy rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE comments`); err != nil {
+		return fmt.Errorf("drop old: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE comments_new RENAME TO comments`); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return tx.Commit()
+}
+
+// migrateTargetTypeAddEntity rebuilds the comments table with 'entity' added
+// to the CHECK constraint. Idempotent — no-op when the constraint already
+// contains 'entity'.
+func migrateTargetTypeAddEntity(db *sql.DB) error {
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='comments'`).Scan(&ddl); err != nil {
+		return fmt.Errorf("read table ddl: %w", err)
+	}
+	if strings.Contains(ddl, "'entity'") {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE comments_new (
+		id           TEXT NOT NULL PRIMARY KEY,
+		target_type  TEXT NOT NULL CHECK (target_type IN ('product','manifest','task','idea','entity')),
 		target_id    TEXT NOT NULL,
 		author       TEXT NOT NULL,
 		type         TEXT NOT NULL,
