@@ -71,6 +71,12 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
     return comments.data.filter(c => !(c.body ?? '').includes('<dependency_revision>'))
   }, [comments.data])
 
+  // Only the most recent description_revision gets the emerald highlight
+  const latestDescId = useMemo(() => {
+    const revs = real.filter(c => c.type === 'description_revision')
+    return revs[0]?.id ?? null
+  }, [real])
+
   const types = useMemo(() => Array.from(new Set(real.map(c => c.type))), [real])
 
   const visible = useMemo<Comment[]>(() => {
@@ -205,7 +211,8 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                   key={c.id}
                   className={cn(
                     'space-y-2 p-3 text-sm',
-                    c.type === 'description_revision' && 'border-l-2 border-emerald-400/60 bg-emerald-400/5',
+                    c.type === 'description_revision' && c.id === latestDescId && 'border-l-2 border-emerald-400/60 bg-emerald-400/5',
+                    c.type === 'description_revision' && c.id !== latestDescId && 'opacity-50',
                   )}
                 >
                   <div className='flex items-center justify-between gap-2'>
