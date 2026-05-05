@@ -18,7 +18,7 @@ interface OverviewStats {
 }
 
 interface ChartsData {
-  activity:     { hour: string; completed: number; failed: number }[]
+  activity:     { hour: string; completed: number; failed: number; running: number }[]
   productivity: { hour: string; lines_added: number; lines_removed: number; files_changed: number; commits: number; tests_run: number; tests_passed: number; tests_failed: number }[]
   efficiency:   { hour: string; avg_turns: number; avg_actions_per_turn: number; cache_hit_rate_pct: number }[]
   tokens:       { hour: string; cache_read_tokens: number; cache_create_tokens: number; input_tokens: number; output_tokens: number }[]
@@ -58,16 +58,24 @@ function useOverviewStats() {
 
 function useChartsData() {
   return useQuery({
-    queryKey: ['stats', 'charts', 24],
-    queryFn: () => fetch('/api/stats/charts?hours=24').then(r => r.json()) as Promise<ChartsData>,
+    queryKey: ['stats', 'charts', 'today'],
+    queryFn: () => fetch('/api/stats/charts').then(r => r.json()) as Promise<ChartsData>,
     refetchInterval: 60_000, staleTime: 30_000,
   })
 }
 
+function todayHoursET(): number {
+  return parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }).format(new Date()),
+    10,
+  ) + 1
+}
+
 function useGitStats() {
+  const h = todayHoursET()
   return useQuery({
-    queryKey: ['stats', 'git'],
-    queryFn: () => fetch('/api/stats/git?hours=24').then(r => r.json()) as Promise<GitStats>,
+    queryKey: ['stats', 'git', 'today', h],
+    queryFn: () => fetch(`/api/stats/git?hours=${h}`).then(r => r.json()) as Promise<GitStats>,
     refetchInterval: 120_000, staleTime: 60_000,
   })
 }
@@ -115,16 +123,15 @@ function fmt(n: number, dec = 0) {
 
 const TZ = 'America/New_York'
 
-// Format a UTC ISO string as a short Eastern-time label for chart axes.
+// hourLabel converts a UTC ISO bucket to the Eastern-time hour label.
+// Since charts use midnight-ET as the window start, buckets naturally run
+// 0h, 1h, 2h … current-hour — matching the clock display.
 function hourLabel(iso: string): string {
-  const d = new Date(iso)
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ, hour: 'numeric', hour12: false, weekday: 'short',
-  }).formatToParts(d)
-  const h = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10)
-  const day = parts.find(p => p.type === 'weekday')?.value ?? ''
-  // Show day name only at midnight local time
-  return h === 0 ? `${day} 0h` : `${h}h`
+  const h = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }).format(new Date(iso)),
+    10,
+  )
+  return `${h}h`
 }
 
 // Format a UTC ISO string as HH:MM in Eastern time for system-stats axes.
@@ -161,7 +168,7 @@ function Empty() {
 }
 
 // Common axis label config — show every other label so 24 buckets don't crowd
-const xLabelOpts = { fontSize: 9, interval: 1 }
+const xLabelOpts = { fontSize: 9, interval: 0 }
 
 // ── Execution charts ───────────────────────────────────────────────────────
 
@@ -169,11 +176,12 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
   const hours  = data.map(d => hourLabel(d.hour))
   return (
     <EChart height={160} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: hours, axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
+        { name: 'running',   type: 'bar', stack: 'runs', data: data.map(d => d.running ?? 0),   itemStyle: { color: '#38bdf8' } },
         { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981' } },
         { name: 'failed',    type: 'bar', stack: 'runs', data: data.map(d => d.failed),    itemStyle: { color: '#f43f5e' } },
       ],
@@ -184,7 +192,7 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
   return (
     <EChart height={160} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
@@ -199,7 +207,7 @@ function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
 function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
   return (
     <EChart height={160} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -214,7 +222,7 @@ function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
 function LinesChart({ data }: { data: ChartsData['productivity'] }) {
   return (
     <EChart height={160} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -229,7 +237,7 @@ function LinesChart({ data }: { data: ChartsData['productivity'] }) {
 function CommitsChart({ data }: { data: ChartsData['productivity'] }) {
   return (
     <EChart height={160} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
@@ -273,7 +281,9 @@ function SplitChart({ interactive, autonomous }: { interactive: number; autonomo
 
 // ── System stats charts ────────────────────────────────────────────────────
 
-function downsample(samples: SysSample[], targetPoints = 120): SysSample[] {
+// Downsample to ~60 points (one per minute for 60min window) and pick
+// evenly-spaced labels so the x-axis shows readable HH:MM marks.
+function downsample(samples: SysSample[], targetPoints = 60): SysSample[] {
   if (samples.length <= targetPoints) return samples
   const step = Math.ceil(samples.length / targetPoints)
   return samples.filter((_, i) => i % step === 0)
@@ -284,9 +294,9 @@ function CPUChart({ samples }: { samples: SysSample[] }) {
   const ds = downsample(samples)
   return (
     <EChart height={160} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `CPU ${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{
         name: 'CPU %', type: 'line', data: ds.map(s => +s.cpu_pct.toFixed(1)),
@@ -303,9 +313,9 @@ function MemoryChart({ samples }: { samples: SysSample[] }) {
   const total = ds[0]?.mem_total_mb ?? 16384
   return (
     <EChart height={160} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `RAM ${((p[0]?.value ?? 0)/1024).toFixed(1)} GB` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
       yAxis: { type: 'value', min: 0, max: total, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v/1024).toFixed(0)}G` } },
       series: [{
         name: 'RAM used', type: 'line', data: ds.map(s => +s.mem_used_mb.toFixed(0)),
@@ -321,10 +331,10 @@ function NetworkChart({ samples }: { samples: SysSample[] }) {
   const ds = downsample(samples)
   return (
     <EChart height={160} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'rx', type: 'line', data: ds.map(s => +s.net_rx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 1.5 } },
@@ -338,10 +348,10 @@ function DiskIOChart({ samples }: { samples: SysSample[] }) {
   const ds = downsample(samples)
   return (
     <EChart height={160} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'read',  type: 'line', data: ds.map(s => +s.disk_read_mbps.toFixed(2)),  smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 } },

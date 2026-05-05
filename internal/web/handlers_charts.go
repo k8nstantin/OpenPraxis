@@ -43,6 +43,7 @@ type hourBucket struct {
 	Hour      string `json:"hour"` // "2026-05-04T14:00:00Z"
 	Completed int    `json:"completed"`
 	Failed    int    `json:"failed"`
+	Running   int    `json:"running"` // started but no terminal event yet
 }
 
 type productivityBucket struct {
@@ -76,14 +77,18 @@ type reasonCount struct {
 	Count  int    `json:"count"`
 }
 
-// pad24Hours fills in missing hours so every series always has 24 buckets.
+// easternTZ is America/New_York — charts always show Eastern time.
+var easternTZ, _ = time.LoadLocation("America/New_York")
+
+// pad24*Hours fills in all 24 hourly buckets (oldest → newest) so charts
+// always have a full day of x-axis slots even when some hours have no data.
 func pad24ActivityHours(data []hourBucket) []hourBucket {
 	m := make(map[string]hourBucket, len(data))
 	for _, b := range data { m[b.Hour] = b }
-	out := make([]hourBucket, 0, 24)
+	var out []hourBucket
 	now := time.Now().UTC()
 	for i := 23; i >= 0; i-- {
-		h := now.Add(-time.Duration(i)*time.Hour).Format("2006-01-02T15:00:00Z")
+		h := now.Add(-time.Duration(i) * time.Hour).Truncate(time.Hour).Format("2006-01-02T15:00:00Z")
 		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, hourBucket{Hour: h}) }
 	}
 	return out
@@ -91,10 +96,10 @@ func pad24ActivityHours(data []hourBucket) []hourBucket {
 func pad24ProductivityHours(data []productivityBucket) []productivityBucket {
 	m := make(map[string]productivityBucket, len(data))
 	for _, b := range data { m[b.Hour] = b }
-	out := make([]productivityBucket, 0, 24)
+	var out []productivityBucket
 	now := time.Now().UTC()
 	for i := 23; i >= 0; i-- {
-		h := now.Add(-time.Duration(i)*time.Hour).Format("2006-01-02T15:00:00Z")
+		h := now.Add(-time.Duration(i) * time.Hour).Truncate(time.Hour).Format("2006-01-02T15:00:00Z")
 		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, productivityBucket{Hour: h}) }
 	}
 	return out
@@ -102,10 +107,10 @@ func pad24ProductivityHours(data []productivityBucket) []productivityBucket {
 func pad24EfficiencyHours(data []efficiencyBucket) []efficiencyBucket {
 	m := make(map[string]efficiencyBucket, len(data))
 	for _, b := range data { m[b.Hour] = b }
-	out := make([]efficiencyBucket, 0, 24)
+	var out []efficiencyBucket
 	now := time.Now().UTC()
 	for i := 23; i >= 0; i-- {
-		h := now.Add(-time.Duration(i)*time.Hour).Format("2006-01-02T15:00:00Z")
+		h := now.Add(-time.Duration(i) * time.Hour).Truncate(time.Hour).Format("2006-01-02T15:00:00Z")
 		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, efficiencyBucket{Hour: h}) }
 	}
 	return out
@@ -113,10 +118,63 @@ func pad24EfficiencyHours(data []efficiencyBucket) []efficiencyBucket {
 func pad24TokenHours(data []tokenBucket) []tokenBucket {
 	m := make(map[string]tokenBucket, len(data))
 	for _, b := range data { m[b.Hour] = b }
-	out := make([]tokenBucket, 0, 24)
+	var out []tokenBucket
 	now := time.Now().UTC()
 	for i := 23; i >= 0; i-- {
-		h := now.Add(-time.Duration(i)*time.Hour).Format("2006-01-02T15:00:00Z")
+		h := now.Add(-time.Duration(i) * time.Hour).Truncate(time.Hour).Format("2006-01-02T15:00:00Z")
+		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, tokenBucket{Hour: h}) }
+	}
+	return out
+}
+
+// todayHours returns UTC-formatted hour buckets from 00:00 ET today through
+// the current hour ET, inclusive. This gives a "today so far" x-axis that
+// starts at midnight and ends at the current hour.
+func todayHours() []string {
+	now := time.Now().In(easternTZ)
+	// Midnight of today in Eastern time, expressed as UTC.
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, easternTZ).UTC()
+	// How many hours from midnight to current local hour?
+	hoursToday := int(now.Hour()) + 1 // +1 to include current hour
+	hours := make([]string, hoursToday)
+	for i := 0; i < hoursToday; i++ {
+		hours[i] = midnight.Add(time.Duration(i) * time.Hour).Format("2006-01-02T15:00:00Z")
+	}
+	return hours
+}
+
+func padTodayActivityHours(data []hourBucket) []hourBucket {
+	m := make(map[string]hourBucket, len(data))
+	for _, b := range data { m[b.Hour] = b }
+	var out []hourBucket
+	for _, h := range todayHours() {
+		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, hourBucket{Hour: h}) }
+	}
+	return out
+}
+func padTodayProductivityHours(data []productivityBucket) []productivityBucket {
+	m := make(map[string]productivityBucket, len(data))
+	for _, b := range data { m[b.Hour] = b }
+	var out []productivityBucket
+	for _, h := range todayHours() {
+		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, productivityBucket{Hour: h}) }
+	}
+	return out
+}
+func padTodayEfficiencyHours(data []efficiencyBucket) []efficiencyBucket {
+	m := make(map[string]efficiencyBucket, len(data))
+	for _, b := range data { m[b.Hour] = b }
+	var out []efficiencyBucket
+	for _, h := range todayHours() {
+		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, efficiencyBucket{Hour: h}) }
+	}
+	return out
+}
+func padTodayTokenHours(data []tokenBucket) []tokenBucket {
+	m := make(map[string]tokenBucket, len(data))
+	for _, b := range data { m[b.Hour] = b }
+	var out []tokenBucket
+	for _, h := range todayHours() {
 		if b, ok := m[h]; ok { out = append(out, b) } else { out = append(out, tokenBucket{Hour: h}) }
 	}
 	return out
@@ -130,34 +188,38 @@ const realTS = `CASE WHEN started_at>0 THEN started_at/1000 ELSE strftime('%s', 
 // hourExpr returns a SQL expression that buckets realTS into "YYYY-MM-DDTHH:00:00Z".
 const hourExpr = `strftime('%Y-%m-%dT%H:00:00Z', datetime(` + realTS + `, 'unixepoch'))`
 
-// apiStatsCharts handles GET /api/stats/charts?hours=N (default 24).
-// Returns hourly buckets using started_at as the canonical timestamp.
+// apiStatsCharts handles GET /api/stats/charts.
+// Returns 24 hourly buckets (rolling last 24h) using started_at as canonical timestamp.
+// Matches the stat card window so charts and totals are consistent.
 func apiStatsCharts(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		hours := 24
-		if h := r.URL.Query().Get("hours"); h != "" {
-			if v, err := strconv.Atoi(h); err == nil && v > 0 {
-				hours = v
-			}
-		}
-		sinceUnix := time.Now().UTC().Add(-time.Duration(hours) * time.Hour).Unix()
+		sinceUnix := time.Now().UTC().Add(-24 * time.Hour).Unix()
 		// WHERE clause uses realTS comparison (unix seconds)
 		whereClause := `event IN ('completed','failed') AND (` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 
 		var d chartsData
 
 		// ── Hourly activity ───────────────────────────────────────────────
+		// Include all three states: running (started, no terminal yet),
+		// completed, and failed — so interactive sessions appear immediately.
+		actWhere := `(` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 		rows, err := n.DB().QueryContext(r.Context(), `
 			SELECT `+hourExpr+` as hour,
 			       SUM(CASE WHEN event='completed' THEN 1 ELSE 0 END),
-			       SUM(CASE WHEN event='failed'    THEN 1 ELSE 0 END)
-			FROM execution_log WHERE `+whereClause+`
+			       SUM(CASE WHEN event='failed'    THEN 1 ELSE 0 END),
+			       SUM(CASE WHEN event='started'
+			                 AND run_uid NOT IN (
+			                   SELECT run_uid FROM execution_log
+			                   WHERE event IN ('completed','failed')
+			                 ) THEN 1 ELSE 0 END)
+			FROM execution_log WHERE `+actWhere+`
+			  AND event IN ('completed','failed','started')
 			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var b hourBucket
-				if rows.Scan(&b.Hour, &b.Completed, &b.Failed) == nil {
+				if rows.Scan(&b.Hour, &b.Completed, &b.Failed, &b.Running) == nil {
 					d.Activity = append(d.Activity, b)
 				}
 			}

@@ -201,7 +201,7 @@ function RunsBarChart({ range }: { range: RangeDays }) {
   const days = runs.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
@@ -220,7 +220,7 @@ function DurationLineChart({ range }: { range: RangeDays }) {
   const days = runs.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}s' } },
@@ -248,7 +248,7 @@ function RetriesBarChart({ range }: { range: RangeDays }) {
   const days = runs.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -266,7 +266,7 @@ function TurnsLineChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -282,7 +282,7 @@ function CacheHitLineChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
@@ -298,7 +298,7 @@ function ContextPctLineChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
@@ -314,7 +314,7 @@ function TokensPerTurnLineChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -330,7 +330,7 @@ function ActionsPerTurnLineChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -346,7 +346,7 @@ function CompactionsBarChart({ range }: { range: RangeDays }) {
   const days = eff.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
@@ -364,7 +364,7 @@ function TokenStackedBarChart({ range }: { range: RangeDays }) {
   const days = tok.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'k' : String(v) } },
@@ -385,7 +385,7 @@ function CacheRatioLineChart({ range }: { range: RangeDays }) {
   const days = tok.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value?.toFixed(1)}%` },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
@@ -401,7 +401,7 @@ function OutputTokensBarChart({ range }: { range: RangeDays }) {
   const days = tok.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v:number) => v>=1e3?(v/1e3).toFixed(0)+'k':String(v) } },
@@ -420,7 +420,7 @@ function ReasoningTokensBarChart({ range }: { range: RangeDays }) {
   }
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -442,7 +442,7 @@ function LinesBarChart({ range }: { range: RangeDays }) {
   const days = prod.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
@@ -465,7 +465,7 @@ function CommitsFilesBarChart({ range }: { range: RangeDays }) {
   const days = prod.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
@@ -488,7 +488,7 @@ function TestsBarChart({ range }: { range: RangeDays }) {
   const days = prod.map(d => d.day.slice(5))
   return (
     <EChart height={180} option={{
-      grid: { left: 32, right: 8, top: 8, bottom: 24 },
+      grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
