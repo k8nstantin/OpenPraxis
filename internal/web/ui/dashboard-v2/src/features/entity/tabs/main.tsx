@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
   useEntity,
-  useEntityDescriptionHistory,
   type EntityKind,
 } from '@/lib/queries/entity'
 import type { Entity } from '@/lib/types'
@@ -45,8 +44,6 @@ export function MainTab({
   entityId: string
 }) {
   const entity = useEntity(kind, entityId)
-  const history = useEntityDescriptionHistory(kind, entityId)
-  const update = useUpdateEntity(kind, entityId)
   const [repoInfo, setRepoInfo] = useState<Record<string, string | number>>(
     {}
   )
@@ -82,6 +79,7 @@ export function MainTab({
   const e = entity.data as Entity | undefined
   const created = e?.created_at ? new Date(e.created_at) : null
   const updatedDate = e?.valid_from ? new Date(e.valid_from) : null
+  // history is now shown inside ContentBlock — no separate query needed
 
   return (
     <div className='space-y-2'>
@@ -179,43 +177,6 @@ export function MainTab({
         placeholder={`Write ${(CONTENT_LABEL[kind] ?? 'description').toLowerCase()} here… Markdown supported, drag/paste files to attach`}
       />
 
-      <Card className='gap-0 py-0'>
-        <CardContent className='space-y-1 px-3 py-2'>
-          <div className='flex items-center justify-between'>
-            <span className='text-muted-foreground text-xs uppercase tracking-wider'>
-              Revisions
-            </span>
-            <Badge variant='outline' className='text-[10px]'>
-              {history.data?.length ?? 0}
-            </Badge>
-          </div>
-          {history.isLoading ? (
-            <Skeleton className='h-12 w-full' />
-          ) : !history.data || history.data.length === 0 ? (
-            <div className='text-muted-foreground text-sm'>
-              No prior revisions recorded.
-            </div>
-          ) : (
-            <div className='divide-y'>
-              {history.data.map((rev) => (
-                <div key={rev.id} className='space-y-1 py-2 text-sm'>
-                  <div className='flex items-center justify-between'>
-                    <code className='font-mono text-[11px]'>
-                      {(rev.author ?? '').slice(0, 16)}
-                    </code>
-                    <span className='text-muted-foreground text-xs'>
-                      {fmtTime(rev.created_at)}
-                    </span>
-                  </div>
-                  <pre className='text-muted-foreground line-clamp-3 font-mono text-xs whitespace-pre-wrap break-words'>
-                    {rev.body}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }
