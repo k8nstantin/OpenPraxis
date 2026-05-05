@@ -64,17 +64,6 @@ function useChartsData() {
   })
 }
 
-interface WeekRun { day: string; completed: number; failed: number }
-function useWeekRuns() {
-  return useQuery({
-    queryKey: ['stats', 'history', 7, 'runs'],
-    queryFn: () =>
-      fetch('/api/stats/history?days=7')
-        .then(r => r.json())
-        .then((d: { runs: WeekRun[] }) => d.runs ?? []) as Promise<WeekRun[]>,
-    refetchInterval: 60_000, staleTime: 30_000,
-  })
-}
 
 function todayHoursET(): number {
   return parseInt(
@@ -135,22 +124,29 @@ function fmt(n: number, dec = 0) {
 
 const TZ = 'America/New_York'
 
-// hourLabel converts a UTC ISO bucket to the Eastern-time hour label.
-// Since charts use midnight-ET as the window start, buckets naturally run
-// 0h, 1h, 2h … current-hour — matching the clock display.
+// ET offset in hours. May–Nov = EDT (−4), Dec–Mar = EST (−5).
+function etOffset(): number {
+  const d = new Date()
+  const jan = new Date(d.getFullYear(), 0, 1)
+  const jul = new Date(d.getFullYear(), 6, 1)
+  const stdOff = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset())
+  return -(stdOff > 300 ? 5 : 4) // 300 = EST, <300 = EDT
+}
+
+// Convert a UTC ISO bucket string → Eastern-time hour label "9h", "23h" etc.
 function hourLabel(iso: string): string {
-  const h = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }).format(new Date(iso)),
-    10,
-  )
-  return `${h}h`
+  const utcH = parseInt(iso.slice(11, 13), 10) // "2026-05-05T09:00:00Z" → 9
+  const etH = ((utcH + etOffset()) + 24) % 24
+  return `${etH}h`
 }
 
 // Format a UTC ISO string as HH:MM in Eastern time for system-stats axes.
 function timeLabel(ts: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date(ts))
+  const d = new Date(ts)
+  const utcH = d.getUTCHours()
+  const utcM = d.getUTCMinutes()
+  const etH = ((utcH + etOffset()) + 24) % 24
+  return `${etH.toString().padStart(2,'0')}:${utcM.toString().padStart(2,'0')}`
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────
@@ -184,21 +180,6 @@ const xLabelOpts = { fontSize: 9, interval: 0 }
 
 // ── Execution charts ───────────────────────────────────────────────────────
 
-function RunsWeekChart({ data }: { data: WeekRun[] }) {
-  const days = data.map(d => d.day.slice(5)) // "MM-DD"
-  return (
-    <EChart height={160} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
-      series: [
-        { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981', borderRadius: [2,2,0,0] } },
-        { name: 'failed',    type: 'bar', stack: 'runs', data: data.map(d => d.failed),    itemStyle: { color: '#f43f5e', borderRadius: [2,2,0,0] } },
-      ],
-    }} />
-  )
-}
 
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
   return (
@@ -379,7 +360,6 @@ export function Overview() {
   const { data: c } = useChartsData()
   const { data: g } = useGitStats()
   const { data: sys } = useSysStats()
-  const { data: week } = useWeekRuns()
 
   const commits      = (g?.total_commits  ?? 0) || (c?.total_commits      ?? 0)
   const linesAdded   = (g?.total_added    ?? 0) || (c?.total_lines_added  ?? 0)
@@ -430,8 +410,8 @@ export function Overview() {
           {/* Row 3 — activity + cache */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Runs · last 7 days</CardTitle></CardHeader>
-              <CardContent className='pb-3'>{week && week.length > 0 ? <RunsWeekChart data={week} /> : <Empty />}</CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Avg turns · actions/turn · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{c?.efficiency?.length ? <AvgTurnsChart data={c.efficiency} /> : <Empty />}</CardContent>
             </Card>
             <Card>
               <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate % · 24h</CardTitle></CardHeader>
@@ -439,11 +419,11 @@ export function Overview() {
             </Card>
           </div>
 
-          {/* Row 4 — efficiency + token ratio */}
+          {/* Row 4 — commits + lines */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Avg turns · actions/turn · 24h</CardTitle></CardHeader>
-              <CardContent className='pb-3'>{c?.efficiency?.length ? <AvgTurnsChart data={c.efficiency} /> : <Empty />}</CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Commits · tests · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{productivity.length ? <CommitsChart data={productivity} /> : <Empty />}</CardContent>
             </Card>
             <Card>
               <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Lines added / removed · 24h</CardTitle></CardHeader>
