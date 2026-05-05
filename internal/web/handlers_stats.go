@@ -118,47 +118,37 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 		q := r.URL.Query()
 		fromStr := q.Get("from")
 		toStr := q.Get("to")
-		asOfStr := q.Get("as_of")
 
-		// Defaults: last 1 hour. Mirrors the Stats tab default window.
 		now := time.Now().UTC()
 		from := now.Add(-1 * time.Hour)
 		to := now
 		if fromStr != "" {
-			t, err := time.Parse(time.RFC3339, fromStr)
-			if err != nil {
-				writeError(w, "from must be RFC3339", 400)
-				return
+			if t, err := time.Parse(time.RFC3339, fromStr); err == nil {
+				from = t
 			}
-			from = t
 		}
 		if toStr != "" {
-			t, err := time.Parse(time.RFC3339, toStr)
-			if err != nil {
-				writeError(w, "to must be RFC3339", 400)
-				return
+			if t, err := time.Parse(time.RFC3339, toStr); err == nil {
+				to = t
 			}
-			to = t
 		}
 
-		query := `SELECT ts, cpu_pct, load_1m, load_5m, load_15m,
-			mem_used_mb, mem_total_mb, swap_used_mb,
-			disk_used_gb, disk_total_gb, net_rx_mbps, net_tx_mbps,
-			disk_read_mbps, disk_write_mbps
-			FROM system_host_samples WHERE ts >= ? AND ts <= ?`
-		args := []any{from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339)}
-		if asOfStr != "" {
-			if _, err := time.Parse(time.RFC3339, asOfStr); err != nil {
-				writeError(w, "as_of must be RFC3339", 400)
-				return
-			}
-			query += ` AND ts <= ?`
-			args = append(args, asOfStr)
-		}
-		query += ` ORDER BY ts ASC LIMIT 5000`
-
+		// Source: execution_log sample rows — single source of truth.
+		// Reads rows written by the runner's host sampler.
 		db := n.DB()
-		rows, err := db.Query(query, args...)
+		rows, err := db.Query(`
+			SELECT created_at,
+			       cpu_pct, load_avg_1m, load_avg_1m, load_avg_1m,
+			       mem_used_mb, mem_total_mb, 0,
+			       disk_used_gb, 0,
+			       net_rx_mbps, net_tx_mbps,
+			       disk_read_mbps, disk_write_mbps
+			FROM execution_log
+			WHERE event = 'sample'
+			  AND created_at >= ? AND created_at <= ?
+			ORDER BY created_at ASC LIMIT 5000`,
+			from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339),
+		)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
@@ -175,8 +165,7 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 				&s.DiskUsedGB, &s.DiskTotalGB,
 				&s.NetRxMbps, &s.NetTxMbps,
 				&s.DiskReadMBps, &s.DiskWriteMBps); err != nil {
-				writeError(w, err.Error(), 500)
-				return
+				continue
 			}
 			if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
 				s.TS = t
