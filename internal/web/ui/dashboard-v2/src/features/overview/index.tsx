@@ -220,6 +220,16 @@ function ActivityOverviewChart({ c, prod, sys }: {
       grid: { left: 32, right: 16, top: 8, bottom: 40 },
       tooltip: {
         trigger: 'axis',
+        confine: true,
+        position: (point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: {contentSize: number[]; viewSize: number[]}) => {
+          const [x, y] = point
+          const [w, h] = size.contentSize
+          const [vw, vh] = size.viewSize
+          return [
+            Math.min(x + 12, vw - w - 4),
+            Math.max(4, Math.min(y - h / 2, vh - h - 4)),
+          ]
+        },
         formatter: (params: {seriesName:string; value:number; dataIndex:number}[]) => {
           const lines = params.map(p => {
             const raw = series.find(s => s.name === p.seriesName)?.raw[p.dataIndex] ?? 0
@@ -473,7 +483,7 @@ export function Overview() {
           {/* Row 3 — activity overview + cache */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · cache · lines · net · cpu · 24h</CardTitle></CardHeader>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · lines · net · cpu · 24h</CardTitle></CardHeader>
               <CardContent className='pb-3'>
                 {c?.efficiency?.length
                   ? <ActivityOverviewChart c={c} prod={productivity} sys={c.system ?? []} />
