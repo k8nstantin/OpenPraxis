@@ -67,11 +67,13 @@ function fmtTok(n: number) {
   return String(n)
 }
 
-function EventBadge({ event }: { event: ActivityEvent['event'] }) {
+function EventBadge({ event, isRunning }: { event: ActivityEvent['event']; isRunning: boolean }) {
   if (event === 'started')
-    return <Badge variant='outline' className='border-blue-400 text-blue-400 w-20 justify-center text-xs'>started</Badge>
+    return isRunning
+      ? <Badge variant='outline' className='border-blue-400 text-blue-400 w-20 justify-center text-xs gap-1'><Loader2 className='h-3 w-3 animate-spin' />running</Badge>
+      : <Badge variant='outline' className='border-muted-foreground text-muted-foreground w-20 justify-center text-xs'>running</Badge>
   if (event === 'completed')
-    return <Badge variant='outline' className='border-emerald-500 text-emerald-500 w-20 justify-center text-xs'>completed</Badge>
+    return <Badge variant='outline' className='border-emerald-500 text-emerald-500 w-20 justify-center text-xs'>done</Badge>
   return <Badge variant='destructive' className='w-20 justify-center text-xs'>failed</Badge>
 }
 
@@ -85,7 +87,7 @@ function EventRow({ ev, activeRunUids }: { ev: ActivityEvent; activeRunUids: Set
         {fmtTime(ev)}
       </span>
 
-      <EventBadge event={ev.event} />
+      <EventBadge event={ev.event} isRunning={isRunning} />
 
       <span className='flex-1 min-w-0 truncate font-medium' title={ev.entity_title}>
         {ev.entity_title}
@@ -119,10 +121,6 @@ function EventRow({ ev, activeRunUids }: { ev: ActivityEvent; activeRunUids: Set
           <span className='text-emerald-400'>+{ev.lines_added}</span>
           {ev.lines_removed > 0 && <span className='text-rose-400'> −{ev.lines_removed}</span>}
         </span>
-      )}
-
-      {isRunning && (
-        <Loader2 className='h-3 w-3 text-blue-400 animate-spin flex-shrink-0' />
       )}
 
       {ev.entity_type && ev.entity_type !== 'interactive' && (
