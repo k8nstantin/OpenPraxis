@@ -185,12 +185,20 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 		}
 
 		// ── Hourly efficiency ─────────────────────────────────────────────
+		// Use the latest row per run_uid so both completed runs and still-running
+		// interactive sessions (which have cache_hit_rate_pct on their sample rows)
+		// contribute one data point each.
+		effWhere := `(` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 		rows3, err := n.DB().QueryContext(r.Context(), `
 			SELECT `+hourExpr+` as hour,
 			       COALESCE(AVG(CASE WHEN turns>0 THEN turns END),0),
 			       COALESCE(AVG(CASE WHEN turns>0 AND actions>0 THEN CAST(actions AS REAL)/turns END),0),
 			       COALESCE(AVG(CASE WHEN cache_hit_rate_pct>0 THEN cache_hit_rate_pct END),0)
-			FROM execution_log WHERE `+whereClause+`
+			FROM execution_log el
+			INNER JOIN (
+			  SELECT run_uid, MAX(id) AS max_id FROM execution_log GROUP BY run_uid
+			) latest ON el.id = latest.max_id
+			WHERE `+effWhere+`
 			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows3.Close()

@@ -169,13 +169,15 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
 }
 
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
+  // Use null for hours with no runs so ECharts draws a gap instead of dropping to 0%
+  const values = data.map(d => d.cache_hit_rate_pct > 0 ? +d.cache_hit_rate_pct.toFixed(1) : null)
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
+      tooltip: { trigger: 'axis', formatter: (p: {value:number|null}[]) => p[0]?.value != null ? `${p[0].value}%` : 'no data' },
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: data.map(d => +d.cache_hit_rate_pct.toFixed(1)), smooth: true, showSymbol: false,
+      series: [{ type: 'line', data: values, smooth: true, showSymbol: false, connectNulls: false,
         lineStyle: { color: '#10b981', width: 2 },
         areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
           colorStops: [{ offset:0, color:'#10b981aa' },{ offset:1, color:'#10b98100' }] } } }],
@@ -184,6 +186,8 @@ function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
 }
 
 function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
+  const turns = data.map(d => d.avg_turns > 0 ? +d.avg_turns.toFixed(1) : null)
+  const apts  = data.map(d => d.avg_actions_per_turn > 0 ? +d.avg_actions_per_turn.toFixed(1) : null)
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
@@ -191,8 +195,8 @@ function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
       xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
-        { name: 'turns/run',    type: 'line', data: data.map(d => +d.avg_turns.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 } },
-        { name: 'actions/turn', type: 'line', data: data.map(d => +d.avg_actions_per_turn.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } },
+        { name: 'turns/run',    type: 'line', data: turns, smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#a78bfa', width: 2 } },
+        { name: 'actions/turn', type: 'line', data: apts,  smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#38bdf8', width: 2 } },
       ],
     }} />
   )

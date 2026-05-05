@@ -270,7 +270,7 @@ function TurnsLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_turns.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
+      series: [{ type: 'line', data: eff.map(d => d.avg_turns > 0 ? +d.avg_turns.toFixed(1) : null), smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
     }} />
   )
 }
