@@ -2,6 +2,28 @@
 
 Moved out of the main README to keep the landing page focused on what OpenPraxis **is** rather than what just changed. See the ["Changelog" link in the README](../README.md#deeper-references) to land here from the top of the repo.
 
+## v0.7.0 — May 2026
+
+### Stats page — full execution history with per-chart zoom
+
+New `/stats` route in the Governance sidebar. All data from `execution_log`, no joins.
+
+**5 tabs, all charts independently zoomable** — each chart header has `1d · 2d · 3d · 1w · 2w · 1m · 3m · All`. Change the range on one chart without affecting others.
+
+| Tab | Charts |
+|-----|--------|
+| **Runs** | Daily runs (completed/failed), avg duration trend, terminal reasons donut, retry distribution |
+| **Efficiency** | Avg turns/run, cache hit rate %, context window %, tokens/turn, actions/turn, compactions |
+| **Tokens** | Daily token volumes (stacked), cache read/write ratio, output tokens, reasoning tokens |
+| **Productivity** | Lines added/removed, commits + files changed, tests run/passed/failed — backfilled from git history |
+| **Agents** | Runs by model, runs by agent runtime, interactive vs autonomous split |
+
+**History backfill** — `started_at` timestamps used for real run dates (going back to April 11), not `created_at` which was stamped at migration time. Git log merged into Productivity for lines/commits data.
+
+| Runs | Efficiency | Tokens |
+|------|------------|--------|
+| ![](images/stats-runs-v1.png) | ![](images/stats-efficiency-v1.png) | ![](images/stats-tokens-v1.png) |
+
 ## v0.6.0 — May 2026
 
 ### Entity Unification + Execution Log Architecture
