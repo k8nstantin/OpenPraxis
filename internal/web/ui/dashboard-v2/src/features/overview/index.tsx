@@ -238,7 +238,7 @@ function ActivityOverviewChart({ c, prod, sys }: {
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
       xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 8, formatter: '{value}%' }, splitLine: { lineStyle: { opacity: 0.2 } } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.2 } } },
       series: series.map(s => ({
         name: s.name,
         type: 'line',
