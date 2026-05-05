@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
-	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/peer"
@@ -178,118 +178,53 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		// Task runner — spawns autonomous agents. RecoverInFlight is the
-		// RC/M5 replacement for the blanket CleanupOrphaned sweep: it
-		// resolves `on_restart_behavior` per task and honours stop /
-		// restart / fail. Must run before the scheduler starts, otherwise
-		// a `restart`-eligible orphan races with the first tick. The
-		// legacy CleanupOrphaned sweep runs after as a defensive fallback
-		// for rows the resolver could not classify (e.g. transient DB
-		// lookup errors).
-
-		// Backfill cost_usd for existing runs that have output but no cost recorded
-		if backfilled, err := n.Tasks.BackfillCosts(); err == nil && backfilled > 0 {
-			slog.Info("backfilled cost data", "runs", backfilled)
-		}
-
-		// Backfill execution_log from task_runs (one-shot, idempotent).
-		if migrated, err := executionlog.BackfillFromTaskRuns(ctx, n.Index.DB()); err != nil {
-			slog.Warn("execution_log backfill failed", "error", err)
-		} else if migrated > 0 {
-			slog.Info("execution_log: backfilled rows from task_runs", "count", migrated)
-		}
-
-		// Post-task subsystem torn out per operator request 2026-04-30.
-		// To be redesigned. Only dependent activation remains on
-		// task_completed events.
-		_ = n.Watcher
-		_ = n.Comments
-
+		// Task runner — spawns autonomous agent subprocesses.
+		// Architecture: schedule.Runner fires entity_uid from the schedules
+		// table → runner executes the entity → stats go to execution_log.
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
-
-			if event == "task_completed" {
-				go func() {
-					time.Sleep(5 * time.Second)
-					taskID := data["task_id"]
-					status := data["status"]
-					if status == "completed" || status == "max_turns" {
-						activated, actErr := n.Tasks.ActivateDependents(taskID)
-						if actErr != nil {
-							slog.Error("activate dependents failed", "task_id", taskID, "error", actErr)
-						} else if activated > 0 {
-							slog.Info("activated dependent tasks", "task_id", taskID, "count", activated)
-						}
-					}
-				}()
-			}
 		})
 
-		// RC/M5 orphan recovery: resolve on_restart_behavior per task and
-		// flip stuck running/paused rows accordingly. Runs BEFORE the
-		// scheduler starts so a restart-eligible orphan is not missed by
-		// the first tick. CleanupOrphaned is kept as a defensive fallback
-		// for rows the recovery path could not classify.
 		if err := runner.RecoverInFlight(ctx); err != nil {
-			slog.Warn("recover in-flight tasks failed; falling back to blanket cleanup",
-				"error", err)
-			n.Tasks.CleanupOrphaned()
+			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
-		// Task scheduler — initial interval is 10s; the
-		// `scheduler_tick_seconds` knob (system scope) overrides this and
-		// is re-read on every tick so operator changes take effect live.
-		scheduler := task.NewScheduler(n.Tasks, 10*time.Second, func(t *task.Task) {
-			slog.Info("task fired", "task_id", t.ID, "title", t.Title, "manifest_id", t.ManifestID, "schedule", t.Schedule)
-
-			// Resolve manifest — standalone tasks have no manifest
-			var manifestTitle, manifestContent string
-			if t.ManifestID != "" {
-				m, _ := n.Manifests.Get(t.ManifestID)
-				if m == nil {
-					if _, err := n.Tasks.RecordRun(t.ID, "manifest not found: "+t.ManifestID, "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); err != nil {
-					slog.Error("record run failed", "reason", "manifest not found", "error", err)
-				}
-					return
-				}
-				manifestTitle = m.Title
-				manifestContent = m.Content
-			} else {
-				manifestTitle = t.Title
-				manifestContent = t.Description
-			}
-
-			// Load visceral rules
-			rules, _ := n.Index.ListByType("visceral", 100)
-			var visceralText string
-			for i, r := range rules {
-				visceralText += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
-			}
-
-			// Spawn the agent
-			if err := runner.Execute(t, manifestTitle, manifestContent, visceralText); err != nil {
-				if _, recErr := n.Tasks.RecordRun(t.ID, "execution error: "+err.Error(), "failed", 0, 0, 0, 0, time.Now(), task.Usage{}, ""); recErr != nil {
-					slog.Error("record run failed", "reason", "execution error", "error", recErr)
-				}
-				hub.Broadcast(web.Event{Type: "task_failed", Data: map[string]string{
-					"task_id": t.ID, "error": err.Error(),
-				}})
-			}
-		}, n)
-		scheduler.SetResolver(n.SettingsResolver)
-		scheduler.Start()
-		defer scheduler.Stop()
-
-		// Schedules consumer — registers every current+enabled row in
-		// the schedules table against an in-memory robfig/cron/v3 ticker.
-		// Dispatches by entity_kind: today only `task`; product/manifest
-		// dispatchers slot in here when their fire semantics are defined.
-		// HTTP handlers in handlers_schedule.go call ScheduleRunner.Reload
-		// after every Create/Close so the in-memory cron stays in sync.
+		// Schedule-driven dispatcher — the sole source of task firing.
+		// Reads entity_uid from the schedules table; looks up entity +
+		// description from entities+comments; executes via the runner.
 		scheduleRunner := schedule.NewRunner(n.Schedules, map[string]schedule.DispatchFunc{
 			"task": func(ctx context.Context, entityID string, scheduleID int64) error {
-				now := time.Now().UTC().Format(time.RFC3339)
-				return n.Tasks.UpdateSchedule(entityID, "once", now)
+				e, err := n.Entities.Get(entityID)
+				if err != nil || e == nil {
+					return fmt.Errorf("entity not found: %s", entityID)
+				}
+
+				// Build agent content from latest description_revision comment.
+				var content string
+				ct := comments.TypeDescriptionRevision
+				revs, _ := n.Comments.List(ctx, comments.TargetEntity, entityID, 1, &ct)
+				if len(revs) > 0 {
+					content = revs[0].Body
+				}
+				if content == "" {
+					content = e.Title
+				}
+
+				// Load visceral rules for the prompt.
+				rules, _ := n.Index.ListByType("visceral", 100)
+				var visceralText string
+				for i, r := range rules {
+					visceralText += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
+				}
+
+				slog.Info("schedule fired entity", "entity_uid", entityID, "type", e.Type, "title", e.Title)
+
+				// Execute against the legacy task runner using entity_uid.
+				t, _ := n.Tasks.Get(entityID)
+				if t == nil {
+					return fmt.Errorf("task record not found for entity: %s", entityID)
+				}
+				return runner.Execute(t, e.Title, content, visceralText)
 			},
 		})
 		n.ScheduleRunner = scheduleRunner
@@ -297,65 +232,27 @@ var serveCmd = &cobra.Command{
 			slog.Error("schedule runner start failed", "error", err)
 		}
 
-		// Cross-process action watcher — applies pause/resume/cancel signals
-		// written by other binaries (MCP) to tasks this runner owns.
 		runner.StartActionWatcher(2 * time.Second)
 
-		// Continuous SystemSampler — writes one row per tick into
-		// system_host_samples, independent of any task. Same cadence as
-		// the per-run HostSampler (host_sampler_tick_seconds knob, default
-		// 5s). Powers the Stats tab System Capacity panel.
+		// System host metrics sampler — writes CPU/RSS/disk to
+		// system_host_samples for the Stats tab System Capacity panel.
 		systemSampler := task.NewSystemSampler(n.Tasks.DB(), n.HostSamplerTick())
 		systemSampler.Start(ctx)
 		defer systemSampler.Stop()
 
-		// --- Startup State Log ---
+		// --- Startup state summary ---
 		fmt.Println("\n  === OpenPraxis State ===")
 		fmt.Printf("  Peer:      %s\n", cfg.Node.UUID)
-		fmt.Printf("  MAC:       %s\n", cfg.Node.MAC)
 		fmt.Printf("  Name:      %s %s\n", cfg.Node.Avatar, cfg.Node.DisplayName)
 
-		// Visceral rules
-		if rules, err := n.Index.ListByType("visceral", 100); err == nil {
+		if rules, err := n.Index.ListByType("visceral", 100); err == nil && len(rules) > 0 {
 			fmt.Printf("  Visceral:  %d rules\n", len(rules))
-			for i, r := range rules {
-				text := r.L2
-				if len(text) > 60 { text = text[:60] + "..." }
-				fmt.Printf("    %d. [%s] %s\n", i+1, r.ID, text)
-			}
 		}
-
-		// Active manifests
-		if manifests, err := n.Manifests.List("open", 50); err == nil {
+		if active, err := n.Entities.List("task", "active", 0); err == nil {
+			fmt.Printf("  Tasks:     %d active\n", len(active))
+		}
+		if manifests, err := n.Entities.List("manifest", "active", 0); err == nil {
 			fmt.Printf("  Manifests: %d active\n", len(manifests))
-			for _, m := range manifests {
-				fmt.Printf("    [%s] %s\n", m.ID, m.Title)
-			}
-		}
-
-		// Pending tasks
-		if tasks, err := n.Tasks.List("", 100); err == nil {
-			running := 0; scheduled := 0; waiting := 0; completed := 0
-			for _, t := range tasks {
-				switch t.Status {
-				case "running": running++
-				case "scheduled": scheduled++
-				case "waiting": waiting++
-				case "completed": completed++
-				}
-			}
-			fmt.Printf("  Tasks:     %d total (%d running, %d scheduled, %d waiting, %d completed)\n",
-				len(tasks), running, scheduled, waiting, completed)
-		}
-
-		// Top memories
-		if mems, err := n.Index.ListByPrefix("/", 5); err == nil {
-			fmt.Printf("  Memories:  latest %d\n", len(mems))
-			for _, m := range mems {
-				text := m.L0
-				if len(text) > 60 { text = text[:60] + "..." }
-				fmt.Printf("    [%s] %s\n", m.ID, text)
-			}
 		}
 		fmt.Println("  =====================")
 

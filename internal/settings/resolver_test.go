@@ -379,7 +379,6 @@ func TestResolver_ResolveAll_MixedProvenance(t *testing.T) {
 		{"max_turns", ScopeTask, "t1"},
 		{"temperature", ScopeManifest, "m1"},
 		{"default_model", ScopeProduct, "p1"},
-		{"daily_budget_usd", ScopeSystem, ""},
 		{"approval_mode", ScopeSystem, ""},
 	}
 	for _, tc := range cases {

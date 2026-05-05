@@ -10,19 +10,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// BackfillFromTaskRuns copies all existing task_runs rows into execution_log.
-// Idempotent: returns 0 immediately if any task-kind rows already exist.
-func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
-	var existing int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM execution_log WHERE entity_kind='task' AND run_number > 0`,
-	).Scan(&existing); err != nil {
-		return 0, fmt.Errorf("backfill: check existing: %w", err)
-	}
-	if existing > 0 {
-		return 0, nil
-	}
+// backfillNS is the UUID v5 namespace used to derive deterministic IDs for
+// task_runs rows. Stable across runs so INSERT OR IGNORE is truly idempotent.
+var backfillNS = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
+// BackfillFromTaskRuns copies all existing task_runs rows into execution_log.
+// Idempotent: skips any row whose derived id already exists in execution_log.
+func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 	rows, err := db.QueryContext(ctx, `SELECT
 		task_id, run_number, output, status, actions, lines,
 		cost_usd, turns, started_at, completed_at,
@@ -39,14 +33,14 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 	defer rows.Close()
 
 	type taskRunRow struct {
-		taskID, output, status, model, pricingVersion   string
-		agentRuntime, agentVersion                      string
+		taskID, output, status, model, pricingVersion    string
+		agentRuntime, agentVersion                       string
 		startedAt, completedAt, cancelledAt, cancelledBy string
 		branch, commitSHA, worktreePath                  string
 		runNumber, actions, lines, turns                 int
 		inputTokens, outputTokens                        int
 		cacheReadTokens, cacheCreateTokens               int
-		errors, compactions, filesChanged                int
+		errors_, compactions, filesChanged               int
 		linesAdded, linesRemoved, exitCode, commits      int
 		prNumber                                         int
 		costUSD                                          float64
@@ -63,7 +57,7 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			&r.inputTokens, &r.outputTokens, &r.cacheReadTokens, &r.cacheCreateTokens,
 			&r.model, &r.pricingVersion, &r.durationMS, &r.agentRuntime, &r.agentVersion,
 			&r.peakCPUPct, &r.avgCPUPct, &r.peakRSSMB, &r.avgRSSMB,
-			&r.errors, &r.compactions, &r.filesChanged, &r.linesAdded, &r.linesRemoved,
+			&r.errors_, &r.compactions, &r.filesChanged, &r.linesAdded, &r.linesRemoved,
 			&r.exitCode, &r.cancelledAt, &r.cancelledBy,
 			&r.branch, &r.commitSHA, &r.commits, &r.prNumber, &r.worktreePath,
 		); err != nil {
@@ -82,8 +76,10 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 	defer tx.Rollback() //nolint:errcheck
 
 	inserted := 0
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, tr := range batch {
-		id, _ := uuid.NewV7()
+		// Deterministic UUID so re-running backfill hits the same PK and INSERT OR IGNORE skips it.
+		id := uuid.NewSHA1(backfillNS, []byte(fmt.Sprintf("task_runs:%s:%d", tr.taskID, tr.runNumber)))
 
 		startedAtMS := parseTimeMS(tr.startedAt)
 		completedAtMS := parseTimeMS(tr.completedAt)
@@ -98,12 +94,14 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			prNumber = &n
 		}
 
+		event := legacyStatusToEvent(tr.status)
+
 		r := Row{
 			ID:                id.String(),
-			EntityKind:        KindTask,
-			EntityID:          tr.taskID,
+			RunUID:            id.String(),
+			EntityUID:         tr.taskID,
+			Event:             event,
 			RunNumber:         tr.runNumber,
-			Status:            tr.status,
 			TerminalReason:    terminalReason(tr.status),
 			StartedAt:         startedAtMS,
 			CompletedAt:       completedAtMS,
@@ -117,14 +115,14 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			AgentRuntime:      tr.agentRuntime,
 			AgentVersion:      tr.agentVersion,
 			PricingVersion:    tr.pricingVersion,
-			InputTokens:       tr.inputTokens,
-			OutputTokens:      tr.outputTokens,
-			CacheReadTokens:   tr.cacheReadTokens,
-			CacheCreateTokens: tr.cacheCreateTokens,
+			InputTokens:       int64(tr.inputTokens),
+			OutputTokens:      int64(tr.outputTokens),
+			CacheReadTokens:   int64(tr.cacheReadTokens),
+			CacheCreateTokens: int64(tr.cacheCreateTokens),
 			CostUSD:           tr.costUSD,
 			Turns:             tr.turns,
 			Actions:           tr.actions,
-			Errors:            tr.errors,
+			Errors:            tr.errors_,
 			Compactions:       tr.compactions,
 			FilesChanged:      tr.filesChanged,
 			LinesAdded:        tr.linesAdded,
@@ -139,14 +137,14 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			PeakRSSMB:         tr.peakRSSMB,
 			AvgRSSMB:          tr.avgRSSMB,
 			ToolCallsJSON:     "{}",
-			LastOutput:        tr.output,
+			CreatedAt:         now,
 		}
 		ComputeDerived(&r)
 
-		_, err := tx.ExecContext(ctx, `INSERT INTO execution_log (
-			id, entity_kind, entity_id, run_number, trigger, node_id, status,
-			terminal_reason, started_at, completed_at, duration_ms, ttfb_ms,
-			exit_code, error, cancelled_at, cancelled_by, provider, model,
+		res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO execution_log (
+			id, run_uid, entity_uid, event, run_number, trigger, node_id,
+			terminal_reason, started_at, completed_at, cancelled_at, cancelled_by,
+			duration_ms, ttfb_ms, exit_code, error, provider, model,
 			model_context_size, agent_runtime, agent_version, pricing_version,
 			input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
 			reasoning_tokens, tool_use_tokens, cost_usd, estimated_cost_usd,
@@ -155,14 +153,15 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			errors, compactions, parallel_tasks, tool_calls_json,
 			lines_added, lines_removed, files_changed, commits, pr_number,
 			branch, commit_sha, worktree_path,
-			peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb, disk_used_gb,
-			last_output
+			cpu_pct, rss_mb, disk_used_gb,
+			peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
+			created_by, created_at
 		) VALUES (
-			?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+			?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 		)`,
-			r.ID, r.EntityKind, r.EntityID, r.RunNumber, r.Trigger, r.NodeID, r.Status,
-			r.TerminalReason, r.StartedAt, r.CompletedAt, r.DurationMS, r.TTFBMS,
-			r.ExitCode, r.Error, r.CancelledAt, r.CancelledBy, r.Provider, r.Model,
+			r.ID, r.RunUID, r.EntityUID, r.Event, r.RunNumber, r.Trigger, r.NodeID,
+			r.TerminalReason, r.StartedAt, r.CompletedAt, r.CancelledAt, r.CancelledBy,
+			r.DurationMS, r.TTFBMS, r.ExitCode, r.Error, r.Provider, r.Model,
 			r.ModelContextSize, r.AgentRuntime, r.AgentVersion, r.PricingVersion,
 			r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreateTokens,
 			r.ReasoningTokens, r.ToolUseTokens, r.CostUSD, r.EstimatedCostUSD,
@@ -171,13 +170,16 @@ func BackfillFromTaskRuns(ctx context.Context, db *sql.DB) (int, error) {
 			r.Errors, r.Compactions, r.ParallelTasks, r.ToolCallsJSON,
 			r.LinesAdded, r.LinesRemoved, r.FilesChanged, r.Commits, r.PRNumber,
 			r.Branch, r.CommitSHA, r.WorktreePath,
-			r.PeakCPUPct, r.AvgCPUPct, r.PeakRSSMB, r.AvgRSSMB, r.DiskUsedGB,
-			r.LastOutput,
+			r.CPUPct, r.RSSMB, r.DiskUsedGB,
+			r.PeakCPUPct, r.AvgCPUPct, r.PeakRSSMB, r.AvgRSSMB,
+			r.CreatedBy, r.CreatedAt,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("backfill: insert row: %w", err)
 		}
-		inserted++
+		if n, _ := res.RowsAffected(); n > 0 {
+			inserted++
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

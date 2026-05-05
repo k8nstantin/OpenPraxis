@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	"github.com/gorilla/mux"
@@ -109,20 +108,15 @@ func setupResolveTestNode(t *testing.T) (*node.Node, *task.Store, *comments.Stor
 	if err != nil {
 		t.Fatalf("NewStore tasks: %v", err)
 	}
-	manifests, err := manifest.NewStore(db)
+	entities, err := entity.NewStore(db)
 	if err != nil {
-		t.Fatalf("NewStore manifests: %v", err)
-	}
-	products, err := product.NewStore(db)
-	if err != nil {
-		t.Fatalf("NewStore products: %v", err)
+		t.Fatalf("NewStore entities: %v", err)
 	}
 	cs := comments.NewStore(db)
 
 	return &node.Node{
-		Comments:  cs,
-		Tasks:     tasks,
-		Manifests: manifests,
-		Products:  products,
+		Comments: cs,
+		Tasks:    tasks,
+		Entities: entities,
 	}, tasks, cs
 }

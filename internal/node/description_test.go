@@ -10,8 +10,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
@@ -27,13 +26,9 @@ func newDescriptionTestNode(t *testing.T) *Node {
 	if err := comments.InitSchema(db); err != nil {
 		t.Fatalf("comments schema: %v", err)
 	}
-	pStore, err := product.NewStore(db)
+	eStore, err := entity.NewStore(db)
 	if err != nil {
-		t.Fatalf("product store: %v", err)
-	}
-	mStore, err := manifest.NewStore(db)
-	if err != nil {
-		t.Fatalf("manifest store: %v", err)
+		t.Fatalf("entity store: %v", err)
 	}
 	tStore, err := task.NewStore(db)
 	if err != nil {
@@ -44,10 +39,9 @@ func newDescriptionTestNode(t *testing.T) *Node {
 		Config: &config.Config{
 			Node: config.NodeConfig{UUID: "peer-test-uuid"},
 		},
-		Products:  pStore,
-		Manifests: mStore,
-		Tasks:     tStore,
-		Comments:  comments.NewStore(db),
+		Entities: eStore,
+		Tasks:    tStore,
+		Comments: comments.NewStore(db),
 	}
 }
 
@@ -66,19 +60,21 @@ func TestRecordDescriptionChange_NoOpWhenUnchanged(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
 
-	p, err := n.Products.Create("P1", "same body", "open", n.PeerID(), nil)
+	p, err := n.Entities.Create(entity.TypeProduct, "P1", entity.StatusActive, nil, n.PeerID(), "test")
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
 
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "same body", "")
+	// currentDescription for an entity returns its Title, so new body "P1"
+	// matches the stored title — should be a no-op.
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "P1", "")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if id != "" {
 		t.Fatalf("expected empty id on no-op, got %q", id)
 	}
-	if got := countRevisions(t, n, comments.TargetProduct, p.ID); got != 0 {
+	if got := countRevisions(t, n, comments.TargetProduct, p.EntityUID); got != 0 {
 		t.Fatalf("expected 0 revisions, got %d", got)
 	}
 }
@@ -87,19 +83,19 @@ func TestRecordDescriptionChange_RecordsRevisionOnChange(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
 
-	p, err := n.Products.Create("P1", "original body", "open", n.PeerID(), nil)
+	p, err := n.Entities.Create(entity.TypeProduct, "P1", entity.StatusActive, nil, n.PeerID(), "test")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "new body", "")
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "new body", "")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if id == "" {
 		t.Fatalf("expected new comment id, got empty")
 	}
-	if got := countRevisions(t, n, comments.TargetProduct, p.ID); got != 1 {
+	if got := countRevisions(t, n, comments.TargetProduct, p.EntityUID); got != 1 {
 		t.Fatalf("expected 1 revision, got %d", got)
 	}
 
@@ -122,12 +118,12 @@ func TestRecordDescriptionChange_WhitespaceOnlyChangeIsNoOp(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
 
-	p, err := n.Products.Create("P1", "body", "open", n.PeerID(), nil)
+	p, err := n.Entities.Create(entity.TypeProduct, "body", entity.StatusActive, nil, n.PeerID(), "test")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "  body\n", "")
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "  body\n", "")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -136,38 +132,33 @@ func TestRecordDescriptionChange_WhitespaceOnlyChangeIsNoOp(t *testing.T) {
 	}
 }
 
-func TestRecordDescriptionChange_ManifestUsesContent(t *testing.T) {
+func TestRecordDescriptionChange_ManifestEntity(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
 
-	m, err := n.Manifests.Create("M1", "short summary", "original spec", "draft", n.PeerID(), n.PeerID(), "", "", nil, nil)
+	m, err := n.Entities.Create(entity.TypeManifest, "original spec", entity.StatusDraft, nil, n.PeerID(), "test")
 	if err != nil {
-		t.Fatalf("create manifest: %v", err)
+		t.Fatalf("create manifest entity: %v", err)
 	}
 
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetManifest, m.ID, "revised spec", "")
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetManifest, m.EntityUID, "revised spec", "")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if id == "" {
 		t.Fatalf("expected revision to be recorded")
 	}
-	if got := countRevisions(t, n, comments.TargetManifest, m.ID); got != 1 {
+	if got := countRevisions(t, n, comments.TargetManifest, m.EntityUID); got != 1 {
 		t.Fatalf("got %d revisions", got)
 	}
 
-	// Changing summary (not content) should NOT trigger a revision — the
-	// helper compares against Content for manifests.
-	id, err = n.RecordDescriptionChange(ctx, comments.TargetManifest, m.ID, "original spec", "")
+	// Passing the same body back should be a no-op.
+	id, err = n.RecordDescriptionChange(ctx, comments.TargetManifest, m.EntityUID, "original spec", "")
 	if err != nil {
-		t.Fatalf("record: %v", err)
+		t.Fatalf("record no-op: %v", err)
 	}
-	// Wait — we just added a revision with 'revised spec' but left the
-	// denormalised Content at 'original spec' because we never called
-	// Update. The helper's current-body read will still see 'original
-	// spec', so passing that as newBody must be a no-op.
 	if id != "" {
-		t.Fatalf("expected no-op when new body matches current content, got %q", id)
+		t.Fatalf("expected no-op when new body matches current title, got %q", id)
 	}
 }
 
@@ -195,11 +186,11 @@ func TestRecordDescriptionChange_TaskUsesDescription(t *testing.T) {
 func TestRecordDescriptionChange_EmptyBodyIsNoOp(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
-	p, err := n.Products.Create("P1", "body", "open", n.PeerID(), nil)
+	p, err := n.Entities.Create(entity.TypeProduct, "body", entity.StatusActive, nil, n.PeerID(), "test")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "", "")
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "", "")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -223,11 +214,11 @@ func TestRecordDescriptionChange_MissingEntityIsNoOp(t *testing.T) {
 func TestRecordDescriptionChange_AuthorOverride(t *testing.T) {
 	n := newDescriptionTestNode(t)
 	ctx := context.Background()
-	p, err := n.Products.Create("P1", "body", "open", n.PeerID(), nil)
+	p, err := n.Entities.Create(entity.TypeProduct, "body", entity.StatusActive, nil, n.PeerID(), "test")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.ID, "new body", "alice")
+	id, err := n.RecordDescriptionChange(ctx, comments.TargetProduct, p.EntityUID, "new body", "alice")
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}

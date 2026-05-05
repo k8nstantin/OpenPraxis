@@ -9,32 +9,20 @@ import { CommentsTab } from './tabs/comments'
 import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
-import { LiveOutputTab } from './tabs/live-output'
 import { MainTab } from './tabs/main'
-import { ScheduleTab } from './tabs/schedule'
-import { StatsTab } from './tabs/stats'
 
-// Tab strip — base 7 (Main · Execution · Comments · Deps · DAG ·
-// Schedule · Stats) + a Task-only "Live Output" between Schedule and
-// Stats that streams the current/most-recent run's stdout/stderr.
-// `live_output` is added to the union here so URL routing accepts it
-// across all kinds; the UI hides the trigger for product/manifest.
+// Tabs: Main · Execution · Comments · Dependencies · DAG
+// Stats, Schedule, and Live Output removed — will be rebuilt from execution_log
 const TAB_IDS = [
   'main',
   'execution',
   'comments',
   'dependencies',
   'dag',
-  'schedule',
-  'live_output',
-  'stats',
 ] as const
 
 export type EntityTabId = (typeof TAB_IDS)[number]
 
-// Right-pane content for the master-detail layout. Renders breadcrumb +
-// title + status + 5-tab strip for the selected entity. No outer
-// Header/Main — the parent EntityPage owns those wrappers.
 export function EntityDetailPane({
   kind,
   entityId,
@@ -47,10 +35,16 @@ export function EntityDetailPane({
   onTabChange: (tab: EntityTabId) => void
 }) {
   const entity = useEntity(kind, entityId)
-  const Icon =
-    kind === 'product' ? Boxes : kind === 'task' ? CheckSquare : FileText
-  const noun =
-    kind === 'product' ? 'product' : kind === 'task' ? 'task' : 'manifest'
+  const iconMap: Record<string, React.ElementType> = {
+    product: Boxes, task: CheckSquare, manifest: FileText,
+    skill: FileText, idea: FileText,
+  }
+  const nounMap: Record<string, string> = {
+    product: 'product', manifest: 'manifest', task: 'task',
+    skill: 'skill', idea: 'idea',
+  }
+  const Icon = iconMap[kind] ?? FileText
+  const noun = nounMap[kind] ?? kind
 
   if (!entityId) {
     return (
@@ -85,7 +79,7 @@ export function EntityDetailPane({
                     {entity.data.title}
                   </h1>
                   <code className='text-muted-foreground font-mono text-xs'>
-                    {entity.data.id}
+                    {entity.data.entity_uid}
                   </code>
                 </div>
                 <EntityStatusControl
@@ -105,15 +99,10 @@ export function EntityDetailPane({
           >
             <TabsList>
               <TabsTrigger value='main'>Main</TabsTrigger>
-              <TabsTrigger value='execution'>Execution Control</TabsTrigger>
+              <TabsTrigger value='execution'>Execution</TabsTrigger>
               <TabsTrigger value='comments'>Comments</TabsTrigger>
               <TabsTrigger value='dependencies'>Dependencies</TabsTrigger>
               <TabsTrigger value='dag'>DAG</TabsTrigger>
-              <TabsTrigger value='schedule'>Schedule</TabsTrigger>
-              {kind === 'task' && (
-                <TabsTrigger value='live_output'>Live Output</TabsTrigger>
-              )}
-              <TabsTrigger value='stats'>Stats</TabsTrigger>
             </TabsList>
 
             <TabsContent value='main'>
@@ -130,17 +119,6 @@ export function EntityDetailPane({
             </TabsContent>
             <TabsContent value='dag'>
               <DAGTab kind={kind} entityId={entityId} />
-            </TabsContent>
-            <TabsContent value='schedule'>
-              <ScheduleTab kind={kind} entityId={entityId} />
-            </TabsContent>
-            {kind === 'task' && (
-              <TabsContent value='live_output'>
-                <LiveOutputTab entityId={entityId} />
-              </TabsContent>
-            )}
-            <TabsContent value='stats'>
-              <StatsTab kind={kind} entityId={entityId} />
             </TabsContent>
           </Tabs>
         </div>

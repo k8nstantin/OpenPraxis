@@ -220,9 +220,8 @@ func passthroughResolver(_ comments.TargetType, raw string) (string, error) {
 	return raw, nil
 }
 
-// nodeTargetResolver builds a TargetResolver backed by the node's
-// entity stores. Each store's Get expects the full 36-char UUID (post
-// marker rip-out — `id = ?` exact match only).
+// nodeTargetResolver builds a TargetResolver backed by the node's entity store.
+// Each store's Get expects the full 36-char UUID (post marker rip-out).
 func nodeTargetResolver(n *node.Node) TargetResolver {
 	return func(target comments.TargetType, raw string) (string, error) {
 		switch target {
@@ -238,42 +237,18 @@ func nodeTargetResolver(n *node.Node) TargetResolver {
 				return "", fmt.Errorf("target task not found: %s", raw)
 			}
 			return t.ID, nil
-		case comments.TargetManifest:
-			if n.Manifests == nil {
+		case comments.TargetManifest, comments.TargetProduct, comments.TargetIdea:
+			if n.Entities == nil {
 				return raw, nil
 			}
-			m, err := n.Manifests.Get(raw)
+			e, err := n.Entities.Get(raw)
 			if err != nil {
-				return "", fmt.Errorf("resolve target manifest %q: %w", raw, err)
+				return "", fmt.Errorf("resolve target %s %q: %w", target, raw, err)
 			}
-			if m == nil {
-				return "", fmt.Errorf("target manifest not found: %s", raw)
+			if e == nil {
+				return "", fmt.Errorf("target %s not found: %s", target, raw)
 			}
-			return m.ID, nil
-		case comments.TargetProduct:
-			if n.Products == nil {
-				return raw, nil
-			}
-			p, err := n.Products.Get(raw)
-			if err != nil {
-				return "", fmt.Errorf("resolve target product %q: %w", raw, err)
-			}
-			if p == nil {
-				return "", fmt.Errorf("target product not found: %s", raw)
-			}
-			return p.ID, nil
-		case comments.TargetIdea:
-			if n.Ideas == nil {
-				return raw, nil
-			}
-			i, err := n.Ideas.Get(raw)
-			if err != nil {
-				return "", fmt.Errorf("resolve target idea %q: %w", raw, err)
-			}
-			if i == nil {
-				return "", fmt.Errorf("target idea not found: %s", raw)
-			}
-			return i.ID, nil
+			return e.EntityUID, nil
 		}
 		return raw, nil
 	}

@@ -79,6 +79,122 @@ func ParseCostFromOutput(output string) (costUSD float64, turns int) {
 	return 0, 0
 }
 
+// ParseTestsFromOutput scans task output for common test result patterns
+// and returns (testsRun, testsPassed, testsFailed).
+// Recognises: Go test output, Jest, pytest, npm test.
+func ParseTestsFromOutput(output string) (run, passed, failed int) {
+	if output == "" {
+		return
+	}
+	for _, line := range strings.Split(output, "\n") {
+		// Go: "ok  package (0.123s)" or "FAIL package"
+		if strings.HasPrefix(line, "ok  ") || strings.HasPrefix(line, "ok\t") {
+			run++
+			passed++
+			continue
+		}
+		if strings.HasPrefix(line, "FAIL\t") || strings.HasPrefix(line, "FAIL ") {
+			run++
+			failed++
+			continue
+		}
+		// pytest: "X passed, Y failed"
+		if strings.Contains(line, " passed") {
+			var p, f int
+			fmt.Sscanf(line, "%d passed", &p)
+			fmt.Sscanf(line, "%d failed", &f)
+			if p > 0 || f > 0 {
+				run += p + f
+				passed += p
+				failed += f
+			}
+			continue
+		}
+		// Jest: "Tests: X passed, Y failed, Z total"
+		if strings.Contains(line, "Tests:") && strings.Contains(line, "passed") {
+			var p, f, total int
+			fmt.Sscanf(line, "Tests: %d passed", &p)
+			fmt.Sscanf(line, "Tests: %d failed", &f)
+			fmt.Sscanf(line, "Tests: %d total", &total)
+			if total > 0 {
+				run = total
+				passed = p
+				failed = f
+			}
+			continue
+		}
+	}
+	return
+}
+
+// ParseOutputMetrics extracts compaction count, error count, reasoning tokens,
+// and TTFB from the full stream-json output of a run.
+func ParseOutputMetrics(output string) (compactions, errors int, reasoningTokens int64, ttfbMS int64) {
+	if output == "" {
+		return
+	}
+	var firstAssistantSeen bool
+	lines := strings.Split(output, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+		t, _ := event["type"].(string)
+
+		// TTFB: first assistant event index × ~avg ms per line is unreliable;
+		// instead use the first non-system line position as a proxy.
+		if !firstAssistantSeen && t == "assistant" {
+			// Line index as proxy for TTFB (each line ≈ one event).
+			// Better than nothing when clock timestamps aren't in the stream.
+			ttfbMS = int64(i * 50) // crude but consistent
+			firstAssistantSeen = true
+		}
+
+		// Compactions: system events with subtype "compact_history".
+		if t == "system" {
+			if sub, _ := event["subtype"].(string); sub == "compact_history" || sub == "compaction" {
+				compactions++
+			}
+		}
+
+		// Errors: error events or tool results with is_error:true.
+		if t == "tool_result" {
+			if isErr, _ := event["is_error"].(bool); isErr {
+				errors++
+			}
+		}
+		if t == "error" {
+			errors++
+		}
+
+		// Reasoning tokens: from the result event usage block.
+		if t == "result" {
+			if usage, ok := event["usage"].(map[string]any); ok {
+				if rt, ok := usage["reasoning_tokens"].(float64); ok {
+					reasoningTokens = int64(rt)
+				}
+			}
+		}
+
+		// Also pick up reasoning tokens from assistant message usage.
+		if t == "assistant" {
+			if msg, ok := event["message"].(map[string]any); ok {
+				if usage, ok := msg["usage"].(map[string]any); ok {
+					if rt, ok := usage["reasoning_tokens"].(float64); ok && rt > 0 {
+						reasoningTokens = int64(rt)
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
 // BackfillCosts parses cost_usd from output for runs that have cost_usd=0 but non-empty output.
 func (s *Store) BackfillCosts() (int, error) {
 	rows, err := s.db.Query(`SELECT id, output FROM task_runs WHERE cost_usd = 0 AND output != '' LIMIT 5000`)

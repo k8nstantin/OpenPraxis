@@ -3,6 +3,8 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
 // writeJSON sends a JSON response with 200 OK.
@@ -26,4 +28,18 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// apiHostStats returns a live snapshot of host CPU/RSS metrics.
+// Feeds the node stats chip on the overview dashboard.
+func apiHostStats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=5")
+		sample, err := task.ReadHostMetrics()
+		if err != nil {
+			writeError(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, sample)
+	}
 }

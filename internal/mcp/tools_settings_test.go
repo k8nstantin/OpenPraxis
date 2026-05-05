@@ -88,14 +88,6 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 // about visceral clamping.
 func noVisceralRules(_ context.Context) ([]string, error) { return nil, nil }
 
-// budgetRuleLoader returns a single rule mirroring rule #8 ("daily budget =
-// $100") so tests can exercise the visceral cap path deterministically.
-func budgetRuleLoader(ceiling string) VisceralRuleLoader {
-	return func(_ context.Context) ([]string, error) {
-		return []string{"daily budget = " + ceiling}, nil
-	}
-}
-
 // -------- settings_catalog ---------------------------------------------------
 
 func TestTool_SettingsCatalog_ReturnsAllKnobs(t *testing.T) {
@@ -270,38 +262,6 @@ func TestTool_SettingsSet_SliderOverRange_ReturnsWarningButPersists(t *testing.T
 	}
 	if entry.Value != "99999" {
 		t.Errorf("persisted value: got %q want %q", entry.Value, "99999")
-	}
-}
-
-func TestTool_SettingsSet_DailyBudgetOverVisceralCap_Rejected(t *testing.T) {
-	h := newSettingsHarness(t)
-	ctx := context.Background()
-
-	// Visceral rule #8 caps daily_budget_usd at $100.
-	_, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
-		"product", "p1", "daily_budget_usd", "500", "mcp:sess-A")
-	if err == nil {
-		t.Fatal("expected visceral cap rejection, got nil")
-	}
-	if !strings.Contains(err.Error(), "Visceral rule") {
-		t.Errorf("error should reference visceral rule, got: %v", err)
-	}
-
-	// Must NOT have written anything.
-	if _, gerr := h.store.Get(ctx, settings.ScopeProduct, "p1", "daily_budget_usd"); !errors.Is(gerr, sql.ErrNoRows) {
-		t.Errorf("write leaked past visceral cap: %v", gerr)
-	}
-
-	// Value at the cap must pass.
-	if _, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
-		"product", "p1", "daily_budget_usd", "100", "mcp:sess-A"); err != nil {
-		t.Fatalf("value at cap should pass: %v", err)
-	}
-
-	// Non-budget keys must not be blocked even when visceral rules are loaded.
-	if _, err := DoSettingsSet(ctx, h.store, budgetRuleLoader("$100"),
-		"product", "p1", "max_turns", "200", "mcp:sess-A"); err != nil {
-		t.Fatalf("unrelated key blocked by cap path: %v", err)
 	}
 }
 

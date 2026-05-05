@@ -3,7 +3,6 @@ package web
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -81,23 +80,22 @@ func resolveScheduleEntity(n *node.Node, kind, id string) (string, error) {
 	if id == "" {
 		return "", nil
 	}
+	// All entity kinds resolve through the unified entity store first.
+	if n.Entities != nil {
+		e, err := n.Entities.Get(id)
+		if err == nil && e != nil {
+			return e.EntityUID, nil
+		}
+	}
+	// Legacy fallback for entities that predate the entity store migration.
 	switch kind {
-	case schedule.KindProduct:
-		return n.ResolveProductID(id)
-	case schedule.KindManifest:
-		return n.ResolveManifestID(id)
 	case schedule.KindTask:
-		if n.Tasks == nil {
-			return id, nil
+		if n.Tasks != nil {
+			t, err := n.Tasks.Get(id)
+			if err == nil && t != nil {
+				return t.ID, nil
+			}
 		}
-		t, err := n.Tasks.Get(id)
-		if err != nil {
-			return "", fmt.Errorf("resolve task %q: %w", id, err)
-		}
-		if t == nil {
-			return "", fmt.Errorf("task not found: %s", id)
-		}
-		return t.ID, nil
 	}
 	return id, nil
 }
@@ -114,6 +112,26 @@ func apiSchedulesList(n *node.Node) http.HandlerFunc {
 		q := r.URL.Query()
 		kind := q.Get("entity_kind")
 		rawID := q.Get("entity_id")
+
+		var (
+			rows []*schedule.Schedule
+			err  error
+		)
+
+		// No entity filter → return all current schedules (used by the Schedules tab).
+		if kind == "" && rawID == "" {
+			allRows, err := n.Schedules.ListAllCurrent(r.Context())
+			if err != nil {
+				writeScheduleError(w, "query_error", err.Error(), 500)
+				return
+			}
+			if allRows == nil {
+				allRows = []*schedule.Schedule{}
+			}
+			writeJSON(w, allRows)
+			return
+		}
+
 		if kind == "" || rawID == "" {
 			writeScheduleError(w, "missing_params",
 				"entity_kind + entity_id are required",
@@ -126,15 +144,12 @@ func apiSchedulesList(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		var rows []*schedule.Schedule
 		switch {
 		case q.Get("history") == "true":
 			rows, err = n.Schedules.ListHistory(r.Context(), kind, id)
 		case q.Get("as_of") != "":
 			ts, perr := time.Parse(time.RFC3339Nano, q.Get("as_of"))
 			if perr != nil {
-				// Try RFC3339 (no fractional seconds) as a fallback —
-				// most callers won't send nanos.
 				ts, perr = time.Parse(time.RFC3339, q.Get("as_of"))
 			}
 			if perr != nil {
@@ -270,6 +285,59 @@ func apiScheduleClose(n *node.Node) http.HandlerFunc {
 			}
 		}
 		writeJSON(w, map[string]any{"ok": true, "id": id})
+	}
+}
+
+// apiSchedulesHistory returns recently closed (valid_to != '') schedules,
+// newest-first by valid_to, capped at 200 rows.
+func apiSchedulesHistory(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := n.DB().QueryContext(r.Context(), `
+			SELECT id, entity_kind, entity_id, run_at, cron_expr, timezone,
+			       max_runs, runs_so_far, stop_at, enabled, metadata,
+			       valid_from, valid_to, created_by, reason, created_at
+			FROM schedules
+			WHERE valid_to != ''
+			ORDER BY valid_to DESC
+			LIMIT 200`)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		defer rows.Close()
+		type row struct {
+			ID         int64  `json:"id"`
+			EntityKind string `json:"entity_kind"`
+			EntityID   string `json:"entity_id"`
+			RunAt      string `json:"run_at"`
+			CronExpr   string `json:"cron_expr"`
+			Timezone   string `json:"timezone"`
+			MaxRuns    int    `json:"max_runs"`
+			RunsSoFar  int    `json:"runs_so_far"`
+			StopAt     string `json:"stop_at"`
+			Enabled    bool   `json:"enabled"`
+			Metadata   string `json:"metadata"`
+			ValidFrom  string `json:"valid_from"`
+			ValidTo    string `json:"valid_to"`
+			CreatedBy  string `json:"created_by"`
+			Reason     string `json:"reason"`
+			CreatedAt  string `json:"created_at"`
+		}
+		var result []row
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.ID, &r.EntityKind, &r.EntityID, &r.RunAt, &r.CronExpr,
+				&r.Timezone, &r.MaxRuns, &r.RunsSoFar, &r.StopAt, &r.Enabled, &r.Metadata,
+				&r.ValidFrom, &r.ValidTo, &r.CreatedBy, &r.Reason, &r.CreatedAt); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			result = append(result, r)
+		}
+		if result == nil {
+			result = []row{}
+		}
+		writeJSON(w, result)
 	}
 }
 

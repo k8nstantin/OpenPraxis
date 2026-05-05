@@ -166,16 +166,13 @@ export function CommentsTab({
           )
         )
       }
-      // Description-as-comment: keep the entity's stored description /
-      // content field as the source of truth. Post the comment row as a
-      // versioned audit trail, then PATCH the canonical field so the
-      // Main tab's DescriptionView reflects the new body. Manifests use
-      // `content` for the spec body; products + tasks use `description`.
+      // Description-as-comment: post the comment row as a versioned audit
+      // trail and also PATCH the entity so the description history endpoint
+      // reflects the new body. All entity types use `description` as the
+      // field key on PUT /api/entities/:id.
       if (composeType === 'description_revision' && body) {
-        const patch =
-          kind === 'manifest' ? { content: body } : { description: body }
         try {
-          await update.mutateAsync(patch)
+          await update.mutateAsync({ description: body })
         } catch (err) {
           console.error('description PATCH after comment post failed', err)
         }

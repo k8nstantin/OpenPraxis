@@ -198,38 +198,3 @@ func TestSetDependency_SCDHistoryAccumulates(t *testing.T) {
 	}
 }
 
-// TestBackfillTaskDepSCD_Idempotent — legacy tasks with a non-empty
-// depends_on column but no SCD row get one seeded on first run;
-// second run is a no-op.
-func TestBackfillTaskDepSCD_Idempotent(t *testing.T) {
-	s := openRepoTestStore(t)
-	// Manual insert: mimic a pre-SCD row — tasks.depends_on set,
-	// task_dependency empty.
-	parent := mustCreateTask(t, s, "P", "")
-	orphan, _ := s.Create("mf-1", "legacy", "", "once", "claude-code", "node", "t", "")
-	if _, err := s.db.Exec(`UPDATE tasks SET depends_on = ? WHERE id = ?`, parent.ID, orphan.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM task_dependency WHERE task_id = ?`, orphan.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Store.NewStore already ran the backfill, so force a second
-	// round to assert idempotency on top of whatever the legacy
-	// state produced.
-	n, err := s.BackfillTaskDepSCD()
-	if err != nil {
-		t.Fatalf("first explicit backfill: %v", err)
-	}
-	// Exactly one row seeded — the legacy orphan.
-	if n != 1 {
-		t.Errorf("first backfill inserted %d, want 1", n)
-	}
-	n, err = s.BackfillTaskDepSCD()
-	if err != nil {
-		t.Fatalf("second backfill: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("second backfill inserted %d, want 0 (idempotent)", n)
-	}
-}

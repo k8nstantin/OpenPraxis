@@ -257,12 +257,11 @@ func apiTemplatePreview(n *node.Node) http.HandlerFunc {
 					Description: tk.Description,
 					Agent:       tk.Agent,
 				}
-				if tk.ManifestID != "" && n.Manifests != nil {
-					if m, err := n.Manifests.Get(tk.ManifestID); err == nil && m != nil {
+				if tk.ManifestID != "" && n.Entities != nil {
+					if e, err := n.Entities.Get(tk.ManifestID); err == nil && e != nil {
 						data.Manifest = templates.ManifestView{
-							ID:      m.ID,
-							Title:   m.Title,
-							Content: m.Content,
+							ID:    e.EntityUID,
+							Title: e.Title,
 						}
 					}
 				}

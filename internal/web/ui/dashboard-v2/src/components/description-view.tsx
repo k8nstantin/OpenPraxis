@@ -40,15 +40,10 @@ function writeMode(m: Mode): void {
 // flips together.
 export function DescriptionView({
   raw,
-  rendered: _rendered,
   className,
   emptyLabel = 'No description set.',
 }: {
   raw: string | undefined
-  // rendered (server-side body_html) is no longer used — BlockNote's
-  // read-only view re-renders directly from markdown so the visual
-  // matches compose 1:1. Kept in the prop signature for callers.
-  rendered: string | undefined
   className?: string
   emptyLabel?: string
 }) {

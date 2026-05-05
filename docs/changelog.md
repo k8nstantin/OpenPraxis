@@ -2,6 +2,72 @@
 
 Moved out of the main README to keep the landing page focused on what OpenPraxis **is** rather than what just changed. See the ["Changelog" link in the README](../README.md#deeper-references) to land here from the top of the repo.
 
+## v0.7.0 — May 2026
+
+### Stats page — full execution history with per-chart zoom
+
+New `/stats` route in the Governance sidebar. All data from `execution_log`, no joins.
+
+**5 tabs, all charts independently zoomable** — each chart header has `1d · 2d · 3d · 1w · 2w · 1m · 3m · All`. Change the range on one chart without affecting others.
+
+| Tab | Charts |
+|-----|--------|
+| **Runs** | Daily runs (completed/failed), avg duration trend, terminal reasons donut, retry distribution |
+| **Efficiency** | Avg turns/run, cache hit rate %, context window %, tokens/turn, actions/turn, compactions |
+| **Tokens** | Daily token volumes (stacked), cache read/write ratio, output tokens, reasoning tokens |
+| **Productivity** | Lines added/removed, commits + files changed, tests run/passed/failed — backfilled from git history |
+| **Agents** | Runs by model, runs by agent runtime, interactive vs autonomous split |
+
+**History backfill** — `started_at` timestamps used for real run dates (going back to April 11), not `created_at` which was stamped at migration time. Git log merged into Productivity for lines/commits data.
+
+| Runs | Efficiency | Tokens |
+|------|------------|--------|
+| ![](images/stats-runs-v1.png) | ![](images/stats-efficiency-v1.png) | ![](images/stats-tokens-v1.png) |
+
+## v0.6.0 — May 2026
+
+### Entity Unification + Execution Log Architecture
+
+**The most significant architectural change since v0.1.** Collapses five separate entity tables into one unified `entities` table and rewrites all execution tracking into a single append-only `execution_log`.
+
+#### Core architecture changes
+
+- **`entities` table (SCD-2)** — all entity types in one table: `product | manifest | task | idea | skill`. Every change creates a new row; time travel is native.
+- **`execution_log` (append-only, event-sourced)** — every run writes `event=started → sample (every 5s) → completed|failed` with full metrics: turns, actions, tokens, CPU, RSS, lines, commits, tests.
+- **13 legacy tables dropped** at startup: `products`, `manifests`, `ideas`, `task_runs`, `task_run_host_samples`, `task_dependency`, `product_dependencies`, `manifest_dependencies`, `idea_manifest_links`, `task_manifests`, `task_runtime_state`, `execution_log_samples`, `execution_log_legacy`, `model_pricing`.
+- **`relationships` table** is the single source for all edges (owns, depends_on, links_to) across all entity types.
+- **`comments` table** stores all text content (descriptions, notes, decisions) for every entity type.
+- **`schedules` table (SCD-2)** drives when entities run — the scheduler reads this, not the tasks table.
+
+#### Interactive session tracking
+
+Claude Code sessions now write to `execution_log` in real time:
+- MCP `AfterInitialize` → `event=started` row
+- Every 5 seconds → `event=sample` row (CPU/RSS from system sampler)
+- Every 30 seconds → `event=sample` row with full transcript metrics (turns, tokens, cache hit rate)
+- `SessionEnd` hook → `event=completed` row with final transcript metrics
+
+#### New portal features
+
+- **Overview page** — 8 stat cards + 8 ECharts pulled from `execution_log` and git history: runs per hour, cache hit rate trend, avg turns/run, cache reuse ratio, lines added/removed, commits per hour, terminal reasons donut, interactive vs autonomous split.
+- **Unified entity menus** — all 5 entity types (Products, Manifests, Tasks, Skills, Ideas) use one identical component: expand arrow, `+ New` button, status dot, full UUID, latest first.
+- **Skills + Ideas** — added to sidebar with dedicated routes and full entity detail (Main · Execution · Comments · Dependencies · DAG).
+- **Schedules page** — standalone tab with Active / History tabs and a create form.
+- **Git productivity** — `GET /api/stats/git` reads real commit history and merges with execution_log for lines/commits/files charts.
+- **Cost removed** — all hardcoded pricing rates deleted. Cost will be redesigned with a proper billing integration.
+
+#### Breaking changes
+
+- `/api/products`, `/api/manifests`, `/api/tasks` CRUD endpoints removed. Use `/api/entities?type=<kind>`.
+- `product_create`, `manifest_create`, `task_create` MCP tools removed. Use `entity_create`.
+- Stats and Schedule tabs removed from entity detail. Will be rebuilt from `execution_log`.
+
+#### Screenshots
+
+| Overview | Products | Schedules |
+|----------|----------|-----------|
+| ![](images/overview-v3.png) | ![](images/products-v3.png) | ![](images/schedules-v3.png) |
+
 ## v0.5.0 — May 2026
 
 ### Breaking changes

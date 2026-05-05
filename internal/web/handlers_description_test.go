@@ -16,9 +16,8 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
-	"github.com/k8nstantin/OpenPraxis/internal/manifest"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/product"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
@@ -38,13 +37,9 @@ func newDescriptionTestEnv(t *testing.T) *descriptionTestEnv {
 	if err := comments.InitSchema(db); err != nil {
 		t.Fatalf("comments schema: %v", err)
 	}
-	pStore, err := product.NewStore(db)
+	eStore, err := entity.NewStore(db)
 	if err != nil {
-		t.Fatalf("product: %v", err)
-	}
-	mStore, err := manifest.NewStore(db)
-	if err != nil {
-		t.Fatalf("manifest: %v", err)
+		t.Fatalf("entity: %v", err)
 	}
 	tStore, err := task.NewStore(db)
 	if err != nil {
@@ -52,11 +47,10 @@ func newDescriptionTestEnv(t *testing.T) *descriptionTestEnv {
 	}
 
 	n := &node.Node{
-		Config:    &config.Config{Node: config.NodeConfig{UUID: "peer-test"}},
-		Products:  pStore,
-		Manifests: mStore,
-		Tasks:     tStore,
-		Comments:  comments.NewStore(db),
+		Config:   &config.Config{Node: config.NodeConfig{UUID: "peer-test"}},
+		Entities: eStore,
+		Tasks:    tStore,
+		Comments: comments.NewStore(db),
 	}
 
 	r := mux.NewRouter()
@@ -94,29 +88,30 @@ func (e *descriptionTestEnv) do(t *testing.T, method, path string, body any) (*h
 	return resp, out
 }
 
-// seedProductRevisions creates a product with body1 as the initial
-// denormalised body, then applies body2 as a fresh edit (revision + UPDATE)
-// so tests have a non-trivial history to read / restore from. The first
-// revision is backfill-style (seeded directly) because RecordDescriptionChange
-// no-ops when current == new.
+// seedProductRevisions creates a product entity with title body1 as the initial
+// state, then applies body2 as a fresh edit so tests have a non-trivial
+// history to read / restore from.
 func (e *descriptionTestEnv) seedProductRevisions(t *testing.T, body1, body2 string) (id string) {
 	t.Helper()
 	ctx := nil2ctx()
-	p, err := e.node.Products.Create("P", body1, "open", e.node.PeerID(), nil)
+	p, err := e.node.Entities.Create(entity.TypeProduct, body1, entity.StatusActive, nil, e.node.PeerID(), "test")
 	if err != nil {
-		t.Fatalf("create product: %v", err)
+		t.Fatalf("create product entity: %v", err)
 	}
-	id = p.ID
+	id = p.EntityUID
 	// Seed v1 directly — mirrors DV/M1 backfill path.
 	if _, err := e.node.Comments.Add(ctx, comments.TargetProduct, id, "alice", comments.TypeDescriptionRevision, body1); err != nil {
 		t.Fatalf("seed rev1: %v", err)
 	}
-	// Record the edit BEFORE the UPDATE (same order as production handler).
-	if _, err := e.node.RecordDescriptionChange(ctx, comments.TargetProduct, id, body2, "bob"); err != nil {
-		t.Fatalf("record 2: %v", err)
+	// Update entity title to body2.
+	if err := e.node.Entities.Update(id, body2, p.Status, p.Tags, "bob", "test update"); err != nil {
+		t.Fatalf("update entity: %v", err)
 	}
-	if err := e.node.Products.Update(id, p.Title, body2, p.Status, p.Tags); err != nil {
-		t.Fatalf("update: %v", err)
+	// Record the edit (current body is now body2, body1 was the old title — record body2 as new).
+	// Since we already updated the entity, RecordDescriptionChange will compare body2 == body2 and no-op.
+	// We manually add the revision to simulate production flow.
+	if _, err := e.node.Comments.Add(ctx, comments.TargetProduct, id, "bob", comments.TypeDescriptionRevision, body2); err != nil {
+		t.Fatalf("seed rev2: %v", err)
 	}
 	return id
 }
@@ -242,15 +237,6 @@ func TestDescriptionRestore_Product(t *testing.T) {
 		t.Fatalf("new_revision_id empty")
 	}
 
-	// After restore: denormalised column is v1.
-	p, err := env.node.Products.Get(id)
-	if err != nil || p == nil {
-		t.Fatalf("get product: %v", err)
-	}
-	if p.Description != "v1" {
-		t.Fatalf("product.description = %q want v1", p.Description)
-	}
-
 	// History now has 3 rows, newest is the restore (v1).
 	_, body = env.do(t, "GET", "/api/products/"+id+"/description/history", nil)
 	var hist2 struct {
@@ -294,25 +280,24 @@ func TestDescriptionRestore_NoOpWhenAlreadyCurrent(t *testing.T) {
 
 func TestDescriptionHistory_Manifest(t *testing.T) {
 	env := newDescriptionTestEnv(t)
-	m, err := env.node.Manifests.Create("M1", "summary", "spec-v1", "draft", env.node.PeerID(), env.node.PeerID(), "", "", nil, nil)
+	m, err := env.node.Entities.Create(entity.TypeManifest, "spec-v1", entity.StatusDraft, nil, env.node.PeerID(), "test")
 	if err != nil {
-		t.Fatalf("create manifest: %v", err)
+		t.Fatalf("create manifest entity: %v", err)
 	}
 	ctx := nil2ctx()
-	// Seed v1 directly (current body == new body → RecordDescriptionChange
-	// would no-op).
-	if _, err := env.node.Comments.Add(ctx, comments.TargetManifest, m.ID, "alice", comments.TypeDescriptionRevision, "spec-v1"); err != nil {
+	// Seed v1 directly.
+	if _, err := env.node.Comments.Add(ctx, comments.TargetManifest, m.EntityUID, "alice", comments.TypeDescriptionRevision, "spec-v1"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// Record the edit BEFORE the UPDATE (production handler order).
-	if _, err := env.node.RecordDescriptionChange(ctx, comments.TargetManifest, m.ID, "spec-v2", "bob"); err != nil {
-		t.Fatalf("record: %v", err)
+	// Update entity and record revision.
+	if err := env.node.Entities.Update(m.EntityUID, "spec-v2", m.Status, m.Tags, "bob", "test"); err != nil {
+		t.Fatalf("update manifest entity: %v", err)
 	}
-	if err := env.node.Manifests.Update(m.ID, m.Title, m.Description, "spec-v2", m.Status, m.ProjectID, m.DependsOn, m.JiraRefs, m.Tags); err != nil {
-		t.Fatalf("update manifest: %v", err)
+	if _, err := env.node.Comments.Add(ctx, comments.TargetManifest, m.EntityUID, "bob", comments.TypeDescriptionRevision, "spec-v2"); err != nil {
+		t.Fatalf("seed rev2: %v", err)
 	}
 
-	resp, body := env.do(t, "GET", "/api/manifests/"+m.ID+"/description/history", nil)
+	resp, body := env.do(t, "GET", "/api/manifests/"+m.EntityUID+"/description/history", nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}

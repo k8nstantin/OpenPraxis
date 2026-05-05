@@ -72,18 +72,21 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 		}
 		nodes := make([]nodeOut, 0, len(rows))
 		for _, id := range productIDs {
-			if p, _ := n.Products.Get(id); p != nil {
-				nodes = append(nodes, nodeOut{ID: p.ID, Kind: relationships.KindProduct, Title: p.Title, Status: p.Status})
+			if e, _ := n.Entities.Get(id); e != nil {
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindProduct, Title: e.Title, Status: e.Status})
 			}
 		}
 		for _, id := range manifestIDs {
-			if m, _ := n.Manifests.Get(id); m != nil {
-				nodes = append(nodes, nodeOut{ID: m.ID, Kind: relationships.KindManifest, Title: m.Title, Status: m.Status})
+			if e, _ := n.Entities.Get(id); e != nil {
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindManifest, Title: e.Title, Status: e.Status})
 			}
 		}
 		for _, id := range taskIDs {
 			if t, _ := n.Tasks.Get(id); t != nil {
 				nodes = append(nodes, nodeOut{ID: t.ID, Kind: relationships.KindTask, Title: t.Title, Status: t.Status})
+			} else if e, _ := n.Entities.Get(id); e != nil {
+				// Tasks created via /api/entities live in the entity store, not the legacy task store.
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindTask, Title: e.Title, Status: e.Status})
 			}
 		}
 
