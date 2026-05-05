@@ -182,72 +182,63 @@ const xLabelOpts = { fontSize: 9, interval: 0 }
 // ── Execution charts ───────────────────────────────────────────────────────
 
 
-// Normalize an array to 0–100 (percentage of its max).
-function normalize(arr: number[]): number[] {
-  const max = Math.max(...arr, 1)
-  return arr.map(v => +((v / max) * 100).toFixed(1))
-}
-
-// Single chart: turns, actions, cache hit %, lines+/-, net rx/tx, files, cpu — all 0–100% of peak.
+// Activity overview: actual values, dual y-axis.
+// Left axis: turns + actions/turn (small counts).
+// Right axis: lines+/−, files, net rx/tx (larger or different scale).
 function ActivityOverviewChart({ c, prod, sys }: {
   c: ChartsData
   prod: ChartsData['productivity']
   sys: ChartsData['system']
 }) {
   const hours = c.efficiency.map(d => hourLabel(d.hour))
-
-  // Build hour→index map for system lookup (system may have different bucketing)
   const sysMap = new Map(sys.map(s => [s.hour, s]))
-  const sysFor = (hour: string) => sysMap.get(hour) ?? { avg_cpu_pct: 0, avg_net_rx_mbps: 0, avg_net_tx_mbps: 0, avg_mem_used_mb: 0 }
-
-  // Align productivity and system to efficiency hours
+  const sysFor = (h: string) => sysMap.get(h) ?? { avg_net_rx_mbps: 0, avg_net_tx_mbps: 0 }
   const prodMap = new Map(prod.map(p => [p.hour, p]))
-  const prodFor = (hour: string) => prodMap.get(hour) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
+  const prodFor = (h: string) => prodMap.get(h) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
 
-  const series = [
-    { name: 'turns',       raw: c.efficiency.map(d => d.avg_turns),            color: '#a78bfa' },
-    { name: 'actions/t',   raw: c.efficiency.map(d => d.avg_actions_per_turn),  color: '#38bdf8' },
-    { name: 'lines +',     raw: c.efficiency.map(d => prodFor(d.hour).lines_added),    color: '#34d399' },
-    { name: 'lines −',     raw: c.efficiency.map(d => prodFor(d.hour).lines_removed),  color: '#f43f5e' },
-    { name: 'files',       raw: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
-    { name: 'net rx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_rx_mbps),  color: '#6366f1' },
-    { name: 'net tx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_tx_mbps),  color: '#ec4899' },
+  const left = [
+    { name: 'turns',     data: c.efficiency.map(d => +d.avg_turns.toFixed(1)),           color: '#a78bfa' },
+    { name: 'actions/t', data: c.efficiency.map(d => +d.avg_actions_per_turn.toFixed(2)), color: '#38bdf8' },
+  ]
+  const right = [
+    { name: 'lines +',  data: c.efficiency.map(d => prodFor(d.hour).lines_added),   color: '#34d399' },
+    { name: 'lines −',  data: c.efficiency.map(d => prodFor(d.hour).lines_removed), color: '#f43f5e' },
+    { name: 'files',    data: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
+    { name: 'net rx',   data: c.efficiency.map(d => +sysFor(d.hour).avg_net_rx_mbps.toFixed(2)), color: '#6366f1' },
+    { name: 'net tx',   data: c.efficiency.map(d => +sysFor(d.hour).avg_net_tx_mbps.toFixed(2)), color: '#ec4899' },
   ]
 
   return (
     <EChart height={260} option={{
-      grid: { left: 36, right: 24, top: 12, bottom: 44 },
+      grid: { left: 44, right: 56, top: 12, bottom: 44 },
       tooltip: {
         trigger: 'axis',
         confine: true,
         position: (point: number[], _p: unknown, _d: unknown, _r: unknown, size: {contentSize: number[]; viewSize: number[]}) => {
           const [x] = point
-          const [w, h] = size.contentSize
+          const [w] = size.contentSize
           const [vw] = size.viewSize
-          // Flip to left when in right half so tooltip never bleeds right edge
-          const left = x > vw / 2 ? x - w - 20 : x + 20
-          return [Math.max(0, left), 12]
-        },
-        formatter: (params: {seriesName:string; value:number; dataIndex:number}[]) => {
-          const lines = params.map(p => {
-            const raw = series.find(s => s.name === p.seriesName)?.raw[p.dataIndex] ?? 0
-            return `${p.seriesName}: ${raw.toFixed(1)}`
-          })
-          return [hours[params[0]?.dataIndex ?? 0], ...lines].join('<br/>')
+          return [x > vw / 2 ? x - w - 20 : x + 20, 12]
         },
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
       xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.2 } } },
-      series: series.map(s => ({
-        name: s.name,
-        type: 'line',
-        data: normalize(s.raw),
-        smooth: true,
-        smoothMonotone: 'x',
-        showSymbol: false,
-        lineStyle: { color: s.color, width: 1.5 },
-      })),
+      yAxis: [
+        { type: 'value', name: 'turns', nameTextStyle: { fontSize: 8 }, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+        { type: 'value', name: 'lines/net', nameTextStyle: { fontSize: 8 }, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' },
+      ],
+      series: [
+        ...left.map(s => ({
+          name: s.name, type: 'line' as const, yAxisIndex: 0,
+          data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false,
+          lineStyle: { color: s.color, width: 1.5 },
+        })),
+        ...right.map(s => ({
+          name: s.name, type: 'line' as const, yAxisIndex: 1,
+          data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false,
+          lineStyle: { color: s.color, width: 1.5 },
+        })),
+      ],
     }} />
   )
 }
