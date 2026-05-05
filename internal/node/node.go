@@ -91,6 +91,16 @@ type Node struct {
 	// sessionLastSample throttles PostToolUse hook writes to execution_log.
 	sessionSampleMu   sync.Mutex
 	sessionLastSample map[string]time.Time
+
+	// netDiskBaseline tracks the previous IOCounter reading for delta-rate calculation.
+	sysBaselineMu sync.Mutex
+	sysBaseline   struct {
+		at      time.Time
+		netRx   uint64
+		netTx   uint64
+		diskR   uint64
+		diskW   uint64
+	}
 }
 
 // New creates and initializes a Node.
@@ -719,40 +729,69 @@ func (n *Node) AgentForSession(sessionID string) string {
 	return ""
 }
 
-// SystemSnapshot reads live system metrics directly via gopsutil.
-// Used by the MCP session sampler to populate execution_log sample rows.
-// Returns zero values on any error so callers can safely ignore.
+// SystemSnapshot reads live system metrics via gopsutil.
+// Net and disk rates are computed as delta since the previous call.
+// Returns zero values on any error.
 func (n *Node) SystemSnapshot() (cpu, rssMB, memUsedMB, memTotalMB, netRx, netTx, diskR, diskW, loadAvg float64) {
 	if pcts, err := gpcpu.Percent(0, false); err == nil && len(pcts) > 0 {
 		cpu = pcts[0]
 	}
 	if vm, err := gpmem.VirtualMemory(); err == nil && vm != nil {
-		rssMB     = float64(vm.Used) / (1024 * 1024)
-		memUsedMB = float64(vm.Used) / (1024 * 1024)
+		rssMB      = float64(vm.Used) / (1024 * 1024)
+		memUsedMB  = float64(vm.Used) / (1024 * 1024)
 		memTotalMB = float64(vm.Total) / (1024 * 1024)
 	}
 	if la, err := gpload.Avg(); err == nil && la != nil {
 		loadAvg = la.Load1
 	}
-	// Net and disk rates: read twice with a short interval for delta-based rate.
-	// Uses the same approach as the host sampler in task/host_metrics.go.
-	if iocs1, err := gpnet.IOCounters(false); err == nil && len(iocs1) > 0 {
-		// Instantaneous snapshot — delta will be computed on next sample by the
-		// consumer. For now, store the current instantaneous values as totals;
-		// the task runner's sampler computes proper deltas. For the MCP sampler
-		// we use a simplified 1s measurement.
-		iocs2, err2 := func() ([]gpnet.IOCountersStat, error) {
-			return gpnet.IOCounters(false)
-		}()
-		_ = err2
-		if len(iocs2) > 0 {
-			netRx = float64(iocs2[0].BytesRecv-iocs1[0].BytesRecv) * 8 / 1e6
-			netTx = float64(iocs2[0].BytesSent-iocs1[0].BytesSent) * 8 / 1e6
-			if netRx < 0 { netRx = 0 }
-			if netTx < 0 { netTx = 0 }
+
+	now := time.Now()
+	n.sysBaselineMu.Lock()
+	defer n.sysBaselineMu.Unlock()
+
+	// Net rate: sum only non-loopback interfaces to exclude loopback noise.
+	if iocs, err := gpnet.IOCounters(true); err == nil {
+		var rx, tx uint64
+		for _, ioc := range iocs {
+			if ioc.Name != "lo" && ioc.Name != "lo0" {
+				rx += ioc.BytesRecv
+				tx += ioc.BytesSent
+			}
 		}
+		if !n.sysBaseline.at.IsZero() {
+			dt := now.Sub(n.sysBaseline.at).Seconds()
+			if dt > 0 {
+				netRx = float64(rx-n.sysBaseline.netRx) / dt / (1024 * 1024)
+				netTx = float64(tx-n.sysBaseline.netTx) / dt / (1024 * 1024)
+				if netRx < 0 { netRx = 0 }
+				if netTx < 0 { netTx = 0 }
+			}
+		}
+		n.sysBaseline.netRx = rx
+		n.sysBaseline.netTx = tx
 	}
-	_ = gpdisk.Usage // disk I/O rates require delta; sampler handles this
+
+	// Disk I/O rate: delta since last call.
+	if diocs, err := gpdisk.IOCounters(); err == nil {
+		var rb, wb uint64
+		for _, d := range diocs {
+			rb += d.ReadBytes
+			wb += d.WriteBytes
+		}
+		if !n.sysBaseline.at.IsZero() {
+			dt := now.Sub(n.sysBaseline.at).Seconds()
+			if dt > 0 {
+				diskR = float64(rb-n.sysBaseline.diskR) / dt / (1024 * 1024)
+				diskW = float64(wb-n.sysBaseline.diskW) / dt / (1024 * 1024)
+				if diskR < 0 { diskR = 0 }
+				if diskW < 0 { diskW = 0 }
+			}
+		}
+		n.sysBaseline.diskR = rb
+		n.sysBaseline.diskW = wb
+	}
+
+	n.sysBaseline.at = now
 	return
 }
 
