@@ -233,16 +233,18 @@ function buildActivityRows(
 
 function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
   const labels = rows.map(r => r.label)
+  // Left axis: turns only — keeps it readable when actions >> turns
   const left = [
-    { name: 'turns',   data: rows.map(r => r.turns),   color: '#a78bfa' },
-    { name: 'actions', data: rows.map(r => r.actions),  color: '#38bdf8' },
+    { name: 'turns', data: rows.map(r => r.turns), color: '#a78bfa' },
   ]
+  // Right axis: actions + lines + files + net — all share this scale
   const right = [
-    { name: 'lines +', data: rows.map(r => r.linesAdded),   color: '#34d399' },
-    { name: 'lines −', data: rows.map(r => r.linesRemoved), color: '#f43f5e' },
-    { name: 'files',   data: rows.map(r => r.files),         color: '#fb923c' },
-    { name: 'net rx',  data: rows.map(r => r.netRx),         color: '#6366f1' },
-    { name: 'net tx',  data: rows.map(r => r.netTx),         color: '#ec4899' },
+    { name: 'actions', data: rows.map(r => r.actions),       color: '#38bdf8' },
+    { name: 'lines +', data: rows.map(r => r.linesAdded),    color: '#34d399' },
+    { name: 'lines −', data: rows.map(r => r.linesRemoved),  color: '#f43f5e' },
+    { name: 'files',   data: rows.map(r => r.files),          color: '#fb923c' },
+    { name: 'net rx',  data: rows.map(r => r.netRx),          color: '#6366f1' },
+    { name: 'net tx',  data: rows.map(r => r.netTx),          color: '#ec4899' },
   ]
   const leftMax  = Math.max(1, ...left.flatMap(s => s.data))
   const rightMax = Math.max(1, ...right.flatMap(s => s.data))
