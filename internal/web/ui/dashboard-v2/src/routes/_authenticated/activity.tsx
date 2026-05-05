@@ -1,12 +1,29 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import {
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+} from '@tanstack/react-table'
 import { formatDistanceToNow, format } from 'date-fns'
 import { Loader2 } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { DataTableColumnHeader } from '@/components/data-table/column-header'
 
 export const Route = createFileRoute('/_authenticated/activity')({
   component: ActivityPage,
@@ -17,9 +34,7 @@ interface ActivityEvent {
   entity_uid: string
   entity_title: string
   entity_type: string
-  event: 'started' | 'sample' | 'completed' | 'failed'
-  trigger: string
-  model: string
+  event: 'started' | 'completed' | 'failed'
   terminal_reason: string
   started_at: number
   duration_ms: number
@@ -32,6 +47,9 @@ interface ActivityEvent {
   lines_removed: number
   error: string
   created_at: string
+  // computed
+  isRunning?: boolean
+  realDate?: Date
 }
 
 function realDate(ev: ActivityEvent): Date {
@@ -59,141 +77,160 @@ function entityPath(type: string, uid: string): string | null {
     skill: '/skills', idea: '/ideas',
   }
   const base = map[type]
-  if (!base) return null
-  return `${base}?id=${uid}&tab=runs`
+  return base ? `${base}?id=${uid}&tab=runs` : null
 }
 
-// Grid columns: time | status | entity | turns | actions | tokens | cache | dur | lines | ago
-const GRID = 'grid grid-cols-[9rem_5rem_1fr_4rem_4rem_5rem_4rem_5rem_7rem_7rem] gap-x-3 items-center'
+function StatusCell({ ev }: { ev: ActivityEvent }) {
+  if (ev.event === 'started' && ev.isRunning)
+    return (
+      <Badge variant='outline' className='border-blue-400 text-blue-400 gap-1 whitespace-nowrap'>
+        <Loader2 className='h-3 w-3 animate-spin' />running
+      </Badge>
+    )
+  if (ev.event === 'completed')
+    return <Badge variant='outline' className='border-emerald-500 text-emerald-500'>done</Badge>
+  if (ev.event === 'failed')
+    return <Badge variant='destructive'>failed</Badge>
+  return null
+}
 
-function EventRow({ ev, isRunning }: { ev: ActivityEvent; isRunning: boolean }) {
+export function ActivityPage() {
   const navigate = useNavigate()
-  const totalTok = ev.input_tokens + ev.output_tokens
-  const path = entityPath(ev.entity_type, ev.entity_uid)
+  const [sorting, setSorting] = useState<SortingState>([])
 
-  const handleClick = () => {
-    if (!path) return
-    navigate({ to: path } as Parameters<typeof navigate>[0])
-  }
-
-  return (
-    <div
-      className={`${GRID} py-2 px-2 border-b last:border-0 text-xs hover:bg-muted/30 transition-colors ${path ? 'cursor-pointer' : ''}`}
-      onClick={path ? handleClick : undefined}
-    >
-      {/* time */}
-      <span className='text-muted-foreground font-mono truncate' title={ev.created_at}>
-        {format(realDate(ev), 'MMM d, HH:mm')}
-      </span>
-
-      {/* status */}
-      {ev.event === 'started' && isRunning ? (
-        <Badge variant='outline' className='border-blue-400 text-blue-400 gap-1 justify-center text-xs'>
-          <Loader2 className='h-3 w-3 animate-spin' />running
-        </Badge>
-      ) : ev.event === 'started' ? (
-        <Badge variant='outline' className='border-sky-600 text-sky-600 justify-center text-xs'>running</Badge>
-      ) : ev.event === 'completed' ? (
-        <Badge variant='outline' className='border-emerald-500 text-emerald-500 justify-center text-xs'>done</Badge>
-      ) : (
-        <Badge variant='destructive' className='justify-center text-xs'>failed</Badge>
-      )}
-
-      {/* entity */}
-      <span className='font-medium truncate' title={ev.entity_title}>
-        {ev.entity_title}
-        {ev.entity_type && ev.entity_type !== 'interactive' && (
-          <span className='text-muted-foreground font-normal ml-1'>· {ev.entity_type}</span>
-        )}
-      </span>
-
-      {/* turns */}
-      <span className='font-mono text-muted-foreground text-right'>
-        {ev.turns > 0 ? ev.turns : '—'}
-      </span>
-
-      {/* actions */}
-      <span className='font-mono text-muted-foreground text-right'>
-        {ev.actions > 0 ? ev.actions : '—'}
-      </span>
-
-      {/* tokens */}
-      <span className='font-mono text-muted-foreground text-right'>
-        {fmtTok(totalTok)}
-      </span>
-
-      {/* cache */}
-      <span className={`font-mono text-right ${ev.cache_hit_rate_pct > 0 ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-        {ev.cache_hit_rate_pct > 0 ? `${ev.cache_hit_rate_pct.toFixed(0)}%` : '—'}
-      </span>
-
-      {/* duration */}
-      <span className='font-mono text-muted-foreground text-right'>
-        {fmtDur(ev.duration_ms)}
-      </span>
-
-      {/* lines */}
-      <span className='font-mono text-right'>
-        {ev.lines_added > 0
-          ? <><span className='text-emerald-400'>+{ev.lines_added}</span>{ev.lines_removed > 0 && <span className='text-rose-400'> −{ev.lines_removed}</span>}</>
-          : <span className='text-muted-foreground'>—</span>
-        }
-      </span>
-
-      {/* ago */}
-      <span className='text-muted-foreground text-right truncate'>
-        {formatDistanceToNow(realDate(ev), { addSuffix: true })}
-      </span>
-    </div>
-  )
-}
-
-function ActiveFeed({ events }: { events: ActivityEvent[] }) {
-  const activeRunUids = useMemo(() => {
-    const terminal = new Set(
-      events.filter((e) => e.event === 'completed' || e.event === 'failed').map((e) => e.run_uid)
-    )
-    return new Set(
-      events
-        .filter((e) => e.event === 'started' && !terminal.has(e.run_uid))
-        .map((e) => e.run_uid)
-    )
-  }, [events])
-
-  return (
-    <div className='rounded-md border text-sm'>
-      {/* header row */}
-      <div className={`${GRID} px-2 py-1.5 border-b bg-muted/30 text-xs text-muted-foreground font-medium`}>
-        <span>time</span>
-        <span>status</span>
-        <span>entity</span>
-        <span className='text-right'>turns</span>
-        <span className='text-right'>actions</span>
-        <span className='text-right'>tokens</span>
-        <span className='text-right'>cache</span>
-        <span className='text-right'>dur</span>
-        <span className='text-right'>lines</span>
-        <span className='text-right'>ago</span>
-      </div>
-      {events
-        .filter((ev) => ev.event !== 'started' || activeRunUids.has(ev.run_uid))
-        .map((ev, i) => (
-          <EventRow
-            key={`${ev.run_uid}-${ev.event}-${i}`}
-            ev={ev}
-            isRunning={activeRunUids.has(ev.run_uid)}
-          />
-        ))}
-    </div>
-  )
-}
-
-function ActivityPage() {
-  const { data: events, isLoading, isError } = useQuery<ActivityEvent[]>({
+  const { data: raw, isLoading, isError } = useQuery<ActivityEvent[]>({
     queryKey: ['activity-events'],
     queryFn: () => fetch('/api/execution/recent?limit=200').then((r) => r.json()),
     refetchInterval: 5_000,
     staleTime: 3_000,
+  })
+
+  // Compute active run_uids, attach to rows, drop stale started rows
+  const events = useMemo(() => {
+    if (!raw) return []
+    const terminal = new Set(
+      raw.filter((e) => e.event === 'completed' || e.event === 'failed').map((e) => e.run_uid)
+    )
+    const activeRunUids = new Set(
+      raw.filter((e) => e.event === 'started' && !terminal.has(e.run_uid)).map((e) => e.run_uid)
+    )
+    return raw
+      .filter((e) => e.event !== 'started' || activeRunUids.has(e.run_uid))
+      .map((e) => ({ ...e, isRunning: activeRunUids.has(e.run_uid), realDate: realDate(e) }))
+  }, [raw])
+
+  const columns: ColumnDef<ActivityEvent>[] = useMemo(() => [
+    {
+      id: 'time',
+      accessorFn: (row) => row.realDate,
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Time' />,
+      cell: ({ row }) => (
+        <span className='font-mono text-xs text-muted-foreground whitespace-nowrap'>
+          {format(row.original.realDate!, 'MMM d, HH:mm')}
+          <span className='block text-[10px]'>{formatDistanceToNow(row.original.realDate!, { addSuffix: true })}</span>
+        </span>
+      ),
+      sortingFn: 'datetime',
+    },
+    {
+      id: 'status',
+      accessorKey: 'event',
+      header: 'Status',
+      cell: ({ row }) => <StatusCell ev={row.original} />,
+      enableSorting: false,
+    },
+    {
+      id: 'entity',
+      accessorKey: 'entity_title',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Entity' />,
+      cell: ({ row }) => (
+        <span className='font-medium truncate block max-w-xs' title={row.original.entity_title}>
+          {row.original.entity_title}
+          {row.original.entity_type && row.original.entity_type !== 'interactive' && (
+            <span className='text-muted-foreground font-normal ml-1.5 text-xs'>
+              {row.original.entity_type}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'turns',
+      accessorKey: 'turns',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Turns' className='justify-end' />,
+      cell: ({ getValue }) => {
+        const v = getValue() as number
+        return <span className='font-mono text-xs text-right block'>{v > 0 ? v : '—'}</span>
+      },
+    },
+    {
+      id: 'actions',
+      accessorKey: 'actions',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Actions' className='justify-end' />,
+      cell: ({ getValue }) => {
+        const v = getValue() as number
+        return <span className='font-mono text-xs text-right block'>{v > 0 ? v : '—'}</span>
+      },
+    },
+    {
+      id: 'tokens',
+      accessorFn: (row) => row.input_tokens + row.output_tokens,
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Tokens' className='justify-end' />,
+      cell: ({ getValue }) => (
+        <span className='font-mono text-xs text-right block text-muted-foreground'>
+          {fmtTok(getValue() as number)}
+        </span>
+      ),
+    },
+    {
+      id: 'cache',
+      accessorKey: 'cache_hit_rate_pct',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Cache' className='justify-end' />,
+      cell: ({ getValue }) => {
+        const v = getValue() as number
+        return (
+          <span className={`font-mono text-xs text-right block ${v > 0 ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {v > 0 ? `${v.toFixed(0)}%` : '—'}
+          </span>
+        )
+      },
+    },
+    {
+      id: 'duration',
+      accessorKey: 'duration_ms',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Dur' className='justify-end' />,
+      cell: ({ getValue }) => (
+        <span className='font-mono text-xs text-right block text-muted-foreground'>
+          {fmtDur(getValue() as number)}
+        </span>
+      ),
+    },
+    {
+      id: 'lines',
+      accessorKey: 'lines_added',
+      header: ({ column }) => <DataTableColumnHeader column={column} title='Lines' className='justify-end' />,
+      cell: ({ row }) => (
+        <span className='font-mono text-xs text-right block'>
+          {row.original.lines_added > 0 ? (
+            <>
+              <span className='text-emerald-400'>+{row.original.lines_added}</span>
+              {row.original.lines_removed > 0 && (
+                <span className='text-rose-400'> −{row.original.lines_removed}</span>
+              )}
+            </>
+          ) : <span className='text-muted-foreground'>—</span>}
+        </span>
+      ),
+    },
+  ], [])
+
+  const table = useReactTable({
+    data: events,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   })
 
   return (
@@ -202,24 +239,60 @@ function ActivityPage() {
       <Main>
         <div className='mb-4 flex items-center justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Activity</h1>
-          {events && <span className='text-sm text-muted-foreground'>{events.length} events</span>}
+          {events.length > 0 && (
+            <span className='text-sm text-muted-foreground'>{events.length} events</span>
+          )}
         </div>
 
         {isLoading && (
           <div className='space-y-1'>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <Skeleton key={i} className='h-9 w-full' />
+            {Array.from({ length: 10 }).map((_, i) => (
+              <Skeleton key={i} className='h-10 w-full' />
             ))}
           </div>
         )}
 
         {isError && <div className='text-sm text-rose-400'>Failed to load activity.</div>}
 
-        {events?.length === 0 && (
+        {!isLoading && events.length === 0 && (
           <div className='text-muted-foreground text-sm py-12 text-center'>No activity yet.</div>
         )}
 
-        {events && events.length > 0 && <ActiveFeed events={events} />}
+        {events.length > 0 && (
+          <div className='rounded-md border'>
+            <Table>
+              <TableHeader>
+                {table.getHeaderGroups().map((hg) => (
+                  <TableRow key={hg.id}>
+                    {hg.headers.map((header) => (
+                      <TableHead key={header.id}>
+                        {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.map((row) => {
+                  const path = entityPath(row.original.entity_type, row.original.entity_uid)
+                  return (
+                    <TableRow
+                      key={row.id}
+                      className={path ? 'cursor-pointer' : ''}
+                      onClick={path ? () => navigate({ to: path } as Parameters<typeof navigate>[0]) : undefined}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </Main>
     </>
   )
