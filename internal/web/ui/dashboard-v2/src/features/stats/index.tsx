@@ -7,6 +7,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
 import { ActivityChart } from '@/features/overview'
+import { LineChart, toMs } from '@/components/charts'
+
+// Helper: convert a day string "2026-05-05" to UTC ms timestamp
+const dayMs = (day: string) => toMs(day)
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -221,16 +225,7 @@ function DurationLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.runs.length) return <Empty />
   const runs = padDays(data.runs, d => ({ day: d, completed: 0, failed: 0, avg_dur_sec: 0, max_dur_sec: 0, avg_run_number: 0 }))
-  const days = runs.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}s' } },
-      series: [{ type: 'line', data: runs.map(d => +d.avg_dur_sec.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'avg dur', data: runs.map(d => [dayMs(d.day), +d.avg_dur_sec.toFixed(1)] as [number,number]), color: '#a78bfa', area: true }]} yLeft={{ unit: 's' }} />
 }
 
 function TerminalReasonsChart({ range }: { range: RangeDays }) {
@@ -267,80 +262,35 @@ function TurnsLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.efficiency.length) return <Empty />
   const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 36, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_turns.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'avg turns', data: eff.map(d => [dayMs(d.day), +d.avg_turns.toFixed(1)] as [number,number]), color: '#a78bfa', area: true }]} />
 }
 
 function CacheHitLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.efficiency.length) return <Empty />
   const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 36, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_cache_hit_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#10b98155' },{ offset:1, color:'#10b98100' }] } } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'cache hit', data: eff.map(d => [dayMs(d.day), +d.avg_cache_hit_pct.toFixed(1)] as [number,number]), color: '#10b981', area: true }]} yLeft={{ min: 0, max: 100, unit: '%' }} />
 }
 
 function ContextPctLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.efficiency.length) return <Empty />
   const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 36, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_context_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#f59e0b', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#f59e0b44' },{ offset:1, color:'#f59e0b00' }] } } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'ctx window', data: eff.map(d => [dayMs(d.day), +d.avg_context_pct.toFixed(1)] as [number,number]), color: '#f59e0b', area: true }]} yLeft={{ min: 0, max: 100, unit: '%' }} />
 }
 
 function TokensPerTurnLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.efficiency.length) return <Empty />
   const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_tokens_per_turn.toFixed(0)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'tok/turn', data: eff.map(d => [dayMs(d.day), +d.avg_tokens_per_turn.toFixed(0)] as [number,number]), color: '#38bdf8' }]} />
 }
 
 function ActionsPerTurnLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.efficiency.length) return <Empty />
   const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 36, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_actions_per_turn.toFixed(2)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#6366f1', width: 2 } }],
-    }} />
-  )
+  return <LineChart series={[{ name: 'actions/turn', data: eff.map(d => [dayMs(d.day), +d.avg_actions_per_turn.toFixed(2)] as [number,number]), color: '#6366f1' }]} />
 }
 
 function CompactionsBarChart({ range }: { range: RangeDays }) {
@@ -386,16 +336,10 @@ function CacheRatioLineChart({ range }: { range: RangeDays }) {
   const { data } = useStatsHistory(range)
   if (!data?.tokens.length) return <Empty />
   const tok = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
-  const days = tok.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 36, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0 }), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type:'linear',x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'#10b98155'},{offset:1,color:'#10b98100'}] } } }],
-    }} />
-  )
+  return <LineChart
+    series={[{ name: 'cache reuse', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return [dayMs(d.day), t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0] as [number,number] }), color: '#10b981', area: true }]}
+    yLeft={{ min: 0, max: 100, unit: '%' }}
+  />
 }
 
 function OutputTokensBarChart({ range }: { range: RangeDays }) {
