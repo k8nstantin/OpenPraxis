@@ -255,7 +255,7 @@ export function BlockNoteComposer({
       onKeyDownCapture={onKeyDownCapture}
     >
       <Toolbar editor={editor as BlockNoteEditor} />
-      <BlockNoteView editor={editor} theme='dark' slashMenu={false}>
+      <BlockNoteView editor={editor} theme='dark' slashMenu={false} style={{ minHeight: '160px', padding: '4px 0' }}>
         <SuggestionMenuController
           triggerCharacter='@'
           minQueryLength={1}
