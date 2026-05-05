@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
@@ -182,68 +183,160 @@ const xLabelOpts = { fontSize: 9, interval: 0 }
 // ── Execution charts ───────────────────────────────────────────────────────
 
 
-// Activity overview: actual values, dual y-axis.
-// Left axis: turns + actions/turn (small counts).
-// Right axis: lines+/−, files, net rx/tx (larger or different scale).
-function ActivityOverviewChart({ c, prod, sys }: {
-  c: ChartsData
-  prod: ChartsData['productivity']
-  sys: ChartsData['system']
-}) {
-  const hours = c.efficiency.map(d => hourLabel(d.hour))
-  const sysMap = new Map(sys.map(s => [s.hour, s]))
-  const sysFor = (h: string) => sysMap.get(h) ?? { avg_net_rx_mbps: 0, avg_net_tx_mbps: 0 }
-  const prodMap = new Map(prod.map(p => [p.hour, p]))
-  const prodFor = (h: string) => prodMap.get(h) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
+const ACTIVITY_RANGES = [
+  { label: '1d', days: 1 },
+  { label: '2d', days: 2 },
+  { label: '3d', days: 3 },
+  { label: '1w', days: 7 },
+  { label: '2w', days: 14 },
+  { label: '1m', days: 30 },
+  { label: '3m', days: 90 },
+  { label: 'All', days: 0 },
+] as const
+type ActivityRange = typeof ACTIVITY_RANGES[number]['days']
 
+interface ActivityRow {
+  label: string
+  turns: number; actions: number
+  linesAdded: number; linesRemoved: number; files: number
+  netRx: number; netTx: number
+}
+
+function buildActivityRows(
+  efficiency: { avg_turns: number; avg_actions: number; avg_net_rx_mbps?: number; avg_net_tx_mbps?: number }[],
+  labels: string[],
+  getLinesAdded: (i: number) => number,
+  getLinesRemoved: (i: number) => number,
+  getFiles: (i: number) => number,
+  getNetRx: (i: number) => number,
+  getNetTx: (i: number) => number,
+): ActivityRow[] {
+  return efficiency.map((e, i) => ({
+    label: labels[i],
+    turns: +e.avg_turns.toFixed(0),
+    actions: +e.avg_actions.toFixed(0),
+    linesAdded: getLinesAdded(i),
+    linesRemoved: getLinesRemoved(i),
+    files: getFiles(i),
+    netRx: +getNetRx(i).toFixed(2),
+    netTx: +getNetTx(i).toFixed(2),
+  }))
+}
+
+function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
+  const labels = rows.map(r => r.label)
   const left = [
-    { name: 'turns',   data: c.efficiency.map(d => +d.avg_turns.toFixed(1)),   color: '#a78bfa' },
-    { name: 'actions', data: c.efficiency.map(d => +d.avg_actions.toFixed(1)), color: '#38bdf8' },
+    { name: 'turns',   data: rows.map(r => r.turns),   color: '#a78bfa' },
+    { name: 'actions', data: rows.map(r => r.actions),  color: '#38bdf8' },
   ]
   const right = [
-    { name: 'lines +',  data: c.efficiency.map(d => prodFor(d.hour).lines_added),   color: '#34d399' },
-    { name: 'lines −',  data: c.efficiency.map(d => prodFor(d.hour).lines_removed), color: '#f43f5e' },
-    { name: 'files',    data: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
-    { name: 'net rx',   data: c.efficiency.map(d => +sysFor(d.hour).avg_net_rx_mbps.toFixed(2)), color: '#6366f1' },
-    { name: 'net tx',   data: c.efficiency.map(d => +sysFor(d.hour).avg_net_tx_mbps.toFixed(2)), color: '#ec4899' },
+    { name: 'lines +', data: rows.map(r => r.linesAdded),   color: '#34d399' },
+    { name: 'lines −', data: rows.map(r => r.linesRemoved), color: '#f43f5e' },
+    { name: 'files',   data: rows.map(r => r.files),         color: '#fb923c' },
+    { name: 'net rx',  data: rows.map(r => r.netRx),         color: '#6366f1' },
+    { name: 'net tx',  data: rows.map(r => r.netTx),         color: '#ec4899' },
   ]
+  const leftMax  = Math.max(1, ...left.flatMap(s => s.data))
+  const rightMax = Math.max(1, ...right.flatMap(s => s.data))
 
   return (
     <EChart height={260} option={{
       grid: { left: 44, right: 56, top: 12, bottom: 44 },
       tooltip: {
-        trigger: 'axis',
-        confine: true,
-        position: (point: number[], _p: unknown, _d: unknown, _r: unknown, size: {contentSize: number[]; viewSize: number[]}) => {
-          const [x] = point
-          const [w] = size.contentSize
-          const [vw] = size.viewSize
+        trigger: 'axis', confine: true,
+        position: (pt: number[], _p: unknown, _d: unknown, _r: unknown, sz: {contentSize:number[];viewSize:number[]}) => {
+          const [x] = pt; const [w] = sz.contentSize; const [vw] = sz.viewSize
           return [x > vw / 2 ? x - w - 20 : x + 20, 12]
         },
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 }, boundaryGap: false },
-      yAxis: (() => {
-        const leftMax = Math.max(1, ...left.flatMap(s => s.data))
-        const rightMax = Math.max(1, ...right.flatMap(s => s.data))
-        return [
-          { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-          { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
-        ]
-      })(),
+      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 8 }, boundaryGap: false },
+      yAxis: [
+        { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1),  alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+        { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
+      ],
       series: [
-        ...left.map(s => ({
-          name: s.name, type: 'line' as const, yAxisIndex: 0,
-          data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false,
-          lineStyle: { color: s.color, width: 1.5 },
-        })),
-        ...right.map(s => ({
-          name: s.name, type: 'line' as const, yAxisIndex: 1,
-          data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false,
-          lineStyle: { color: s.color, width: 1.5 },
-        })),
+        ...left.map(s  => ({ name: s.name, type: 'line' as const, yAxisIndex: 0, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 1.5 } })),
+        ...right.map(s => ({ name: s.name, type: 'line' as const, yAxisIndex: 1, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 1.5 } })),
       ],
     }} />
+  )
+}
+
+// Self-contained activity chart: 1d=hourly today, 2d+/All=daily history.
+export function ActivityChart({ defaultRange = 1 }: { defaultRange?: ActivityRange } = {}) {
+  const [range, setRange] = useState<ActivityRange>(defaultRange)
+
+  // Hourly data (1d only)
+  const { data: charts } = useQuery<ChartsData>({
+    queryKey: ['stats', 'charts'],
+    queryFn: () => fetch('/api/stats/charts').then(r => r.json()),
+    enabled: range === 1,
+    refetchInterval: 60_000, staleTime: 30_000,
+  })
+
+  // Daily history data (2d+)
+  const { data: hist } = useQuery<{
+    efficiency: { day: string; avg_turns: number; avg_actions: number }[]
+    productivity: { day: string; lines_added: number; lines_removed: number; files_changed: number }[]
+    system_daily: { day: string; avg_net_rx_mbps: number; avg_net_tx_mbps: number }[]
+  }>({
+    queryKey: ['stats', 'history', range],
+    queryFn: () => fetch(range === 0 ? '/api/stats/history' : `/api/stats/history?days=${range}`).then(r => r.json()),
+    enabled: range !== 1,
+    refetchInterval: 60_000, staleTime: 30_000,
+  })
+
+  let rows: ActivityRow[] = []
+
+  if (range === 1 && charts) {
+    const sys = charts.system ?? []
+    const sysMap = new Map(sys.map(s => [s.hour, s]))
+    const prodMap = new Map((charts.productivity ?? []).map(p => [p.hour, p]))
+    rows = buildActivityRows(
+      charts.efficiency,
+      charts.efficiency.map(d => hourLabel(d.hour)),
+      i => prodMap.get(charts.efficiency[i].hour)?.lines_added ?? 0,
+      i => prodMap.get(charts.efficiency[i].hour)?.lines_removed ?? 0,
+      i => prodMap.get(charts.efficiency[i].hour)?.files_changed ?? 0,
+      i => sysMap.get(charts.efficiency[i].hour)?.avg_net_rx_mbps ?? 0,
+      i => sysMap.get(charts.efficiency[i].hour)?.avg_net_tx_mbps ?? 0,
+    )
+  } else if (range !== 1 && hist) {
+    const sysMap = new Map((hist.system_daily ?? []).map(s => [s.day, s]))
+    const prodMap = new Map((hist.productivity ?? []).map(p => [p.day, p]))
+    rows = buildActivityRows(
+      hist.efficiency,
+      hist.efficiency.map(d => d.day.slice(5)),
+      i => prodMap.get(hist.efficiency[i].day)?.lines_added ?? 0,
+      i => prodMap.get(hist.efficiency[i].day)?.lines_removed ?? 0,
+      i => prodMap.get(hist.efficiency[i].day)?.files_changed ?? 0,
+      i => sysMap.get(hist.efficiency[i].day)?.avg_net_rx_mbps ?? 0,
+      i => sysMap.get(hist.efficiency[i].day)?.avg_net_tx_mbps ?? 0,
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader className='pb-1 pt-3'>
+        <div className='flex items-center justify-between gap-2'>
+          <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>
+            Activity · turns · actions · lines · net · {range === 1 ? 'today' : range === 0 ? 'all time' : `${range}d`}
+          </CardTitle>
+          <div className='inline-flex shrink-0 rounded border bg-muted/20 p-px text-[9px]'>
+            {ACTIVITY_RANGES.map(r => (
+              <button key={r.days} type='button' onClick={() => setRange(r.days)}
+                className={cn('rounded px-1.5 py-0.5 transition-colors',
+                  range === r.days ? 'bg-primary/20 text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'
+                )}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className='pb-3'>
+        {rows.length > 0 ? <ActivityChartInner rows={rows} /> : <div className='h-[260px] flex items-center justify-center text-xs text-muted-foreground'>Loading…</div>}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -473,15 +566,8 @@ export function Overview() {
             </div>
           )}
 
-          {/* Row 3 — activity overview full width */}
-          <Card>
-            <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · lines · net · cpu · today</CardTitle></CardHeader>
-            <CardContent className='pb-3'>
-              {c?.efficiency?.length
-                ? <ActivityOverviewChart c={c} prod={productivity} sys={c.system ?? []} />
-                : <Empty />}
-            </CardContent>
-          </Card>
+          {/* Row 3 — activity chart (self-contained, same as Stats page) */}
+          <ActivityChart />
 
           {/* Row 4 — commits + lines */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>

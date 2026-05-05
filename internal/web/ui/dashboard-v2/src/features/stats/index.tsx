@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
+import { ActivityChart } from '@/features/overview'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -667,60 +668,10 @@ function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
 
 // ── Activity overview chart (daily, same series as Overview hourly) ───────────
 
-function StatsActivityChart({ data, git }: { data: StatsHistory; git: { daily: { day: string; lines_added: number; lines_removed: number; files_changed: number }[] } | undefined }) {
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-
-  const gitMap = new Map((git?.daily ?? []).map(g => [g.day, g]))
-  const sys = data.system_daily ?? []
-  const sysMap = new Map(sys.map(s => [s.day, s]))
-  const getLines = (day: string) => gitMap.get(day) ?? data.productivity.find(p => p.day === day) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
-  const getSys = (day: string) => sysMap.get(day) ?? { avg_net_rx_mbps: 0, avg_net_tx_mbps: 0 }
-
-  const left = [
-    { name: 'turns',   data: eff.map(d => +d.avg_turns.toFixed(1)),   color: '#a78bfa' },
-    { name: 'actions', data: eff.map(d => +d.avg_actions.toFixed(1)), color: '#38bdf8' },
-  ]
-  const right = [
-    { name: 'lines +',  data: eff.map(d => getLines(d.day).lines_added),   color: '#34d399' },
-    { name: 'lines −',  data: eff.map(d => getLines(d.day).lines_removed), color: '#f43f5e' },
-    { name: 'files',    data: eff.map(d => getLines(d.day).files_changed),  color: '#fb923c' },
-    { name: 'net rx',   data: eff.map(d => +getSys(d.day).avg_net_rx_mbps.toFixed(2)), color: '#6366f1' },
-    { name: 'net tx',   data: eff.map(d => +getSys(d.day).avg_net_tx_mbps.toFixed(2)), color: '#ec4899' },
-  ]
-
-  const leftMax  = Math.max(1, ...left.flatMap(s => s.data))
-  const rightMax = Math.max(1, ...right.flatMap(s => s.data))
-
-  return (
-    <EChart height={260} option={{
-      grid: { left: 44, right: 56, top: 12, bottom: 44 },
-      tooltip: {
-        trigger: 'axis',
-        confine: true,
-        position: (point: number[], _p: unknown, _d: unknown, _r: unknown, size: { contentSize: number[]; viewSize: number[] }) => {
-          const [x] = point; const [w] = size.contentSize; const [vw] = size.viewSize
-          return [x > vw / 2 ? x - w - 20 : x + 20, 12]
-        },
-      },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 }, boundaryGap: false },
-      yAxis: [
-        { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1),  alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-        { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
-      ],
-      series: [
-        ...left.map(s  => ({ name: s.name,  type: 'line' as const, yAxisIndex: 0, data: s.data,  smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color,  width: 1.5 } })),
-        ...right.map(s => ({ name: s.name,  type: 'line' as const, yAxisIndex: 1, data: s.data,  smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color,  width: 1.5 } })),
-      ],
-    }} />
-  )
-}
 
 export function StatsPage() {
   const [range, setRange] = useState<RangeDays>(7)
   const { data, isLoading } = useStatsHistory(range)
-  const { data: git } = useGitHistory(range)
 
   return (
     <>
@@ -747,18 +698,9 @@ export function StatsPage() {
           </div>
         </div>
 
-        {data && (
-          <Card className='mb-4'>
-            <CardHeader className='pb-1 pt-3'>
-              <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>
-                Activity · turns · actions · lines · net · {range === 0 ? 'all time' : `${range}d`}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className='pb-3'>
-              <StatsActivityChart data={data} git={git} />
-            </CardContent>
-          </Card>
-        )}
+        <div className='mb-4'>
+          <ActivityChart defaultRange={7} />
+        </div>
 
         {isLoading ? (
           <div className='text-muted-foreground text-sm'>Loading…</div>
