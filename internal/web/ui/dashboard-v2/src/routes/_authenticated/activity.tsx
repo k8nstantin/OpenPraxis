@@ -37,13 +37,19 @@ interface ActivityEvent {
   created_at: string
 }
 
-function fmtAgo(ts: string) {
-  try { return formatDistanceToNow(new Date(ts), { addSuffix: true }) }
-  catch { return ts }
+function realDate(ev: ActivityEvent): Date {
+  // started_at is Unix ms; prefer it over created_at which may be a migration timestamp.
+  if (ev.started_at && ev.started_at > 0) return new Date(ev.started_at)
+  return new Date(ev.created_at)
 }
 
-function fmtTime(ts: string) {
-  try { return format(new Date(ts), 'HH:mm:ss') }
+function fmtAgo(ev: ActivityEvent) {
+  try { return formatDistanceToNow(realDate(ev), { addSuffix: true }) }
+  catch { return '' }
+}
+
+function fmtTime(ev: ActivityEvent) {
+  try { return format(realDate(ev), 'MMM d, HH:mm') }
   catch { return '' }
 }
 
@@ -75,8 +81,8 @@ function EventRow({ ev, activeRunUids }: { ev: ActivityEvent; activeRunUids: Set
 
   return (
     <div className='flex items-center gap-3 py-2 border-b last:border-0 hover:bg-muted/20 px-1 text-sm'>
-      <span className='text-muted-foreground font-mono text-xs w-16 flex-shrink-0' title={ev.created_at}>
-        {fmtTime(ev.created_at)}
+      <span className='text-muted-foreground font-mono text-xs w-24 flex-shrink-0' title={ev.created_at}>
+        {fmtTime(ev)}
       </span>
 
       <EventBadge event={ev.event} />
@@ -124,7 +130,7 @@ function EventRow({ ev, activeRunUids }: { ev: ActivityEvent; activeRunUids: Set
       )}
 
       <span className='text-muted-foreground text-xs w-20 text-right flex-shrink-0'>
-        {fmtAgo(ev.created_at)}
+        {fmtAgo(ev)}
       </span>
     </div>
   )
@@ -190,7 +196,7 @@ function ActiveFeed({ events }: { events: ActivityEvent[] }) {
   return (
     <div className='rounded-md border'>
       <div className='flex items-center gap-3 px-1 py-1.5 border-b bg-muted/30 text-xs text-muted-foreground font-medium'>
-        <span className='w-16 flex-shrink-0'>time</span>
+        <span className='w-24 flex-shrink-0'>time</span>
         <span className='w-20 flex-shrink-0'>event</span>
         <span className='flex-1'>entity</span>
         <span className='min-w-[4rem] text-right'>turns/actions</span>
