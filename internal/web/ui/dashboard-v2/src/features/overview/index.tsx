@@ -210,7 +210,6 @@ function ActivityOverviewChart({ c, prod, sys }: {
     { name: 'lines +',     raw: c.efficiency.map(d => prodFor(d.hour).lines_added),    color: '#34d399' },
     { name: 'lines −',     raw: c.efficiency.map(d => prodFor(d.hour).lines_removed),  color: '#f43f5e' },
     { name: 'files',       raw: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
-    { name: 'cpu %',       raw: c.efficiency.map(d => sysFor(d.hour).avg_cpu_pct),      color: '#f59e0b' },
     { name: 'net rx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_rx_mbps),  color: '#6366f1' },
     { name: 'net tx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_tx_mbps),  color: '#ec4899' },
   ]
