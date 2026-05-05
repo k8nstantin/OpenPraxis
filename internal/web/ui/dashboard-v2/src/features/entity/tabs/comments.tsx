@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   useCreateEntityComment,
   useEntityComments,
@@ -21,17 +21,21 @@ import {
 import { cn } from '@/lib/utils'
 import { useQueryClient } from '@tanstack/react-query'
 import { CommentAttachments } from '@/components/comment-attachments'
-import { AttachmentComposer, usePendingFiles } from '@/components/content-block'
-import { uploadAttachment, attachmentKeys } from '@/lib/queries/attachments'
+import {
+  BlockNoteComposer,
+  type BlockNoteComposerHandle,
+} from '@/components/blocknote-composer'
+import { BlockNoteReadView } from '@/components/blocknote-read-view'
+import { claimAttachment } from '@/lib/queries/attachments'
 
 const TYPE_LABEL: Record<string, string> = {
-  execution_review:    'Execution Review',
-  description_revision:'Description',
-  agent_note:          'Agent Note',
-  user_note:           'Note',
-  watcher_finding:     'Watcher Finding',
-  decision:            'Decision',
-  link:                'Link',
+  execution_review:     'Execution Review',
+  description_revision: 'Description',
+  agent_note:           'Agent Note',
+  user_note:            'Note',
+  watcher_finding:      'Watcher Finding',
+  decision:             'Decision',
+  link:                 'Link',
 }
 
 const COMPOSE_TYPES = [
@@ -45,8 +49,8 @@ const COMPOSE_TYPES = [
 function fmtTime(v: string | number | undefined): string {
   if (!v) return ''
   try {
-    const d = typeof v === 'number' ? new Date(v) : new Date(v)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    return new Date(typeof v === 'number' ? v : v)
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch { return String(v) }
 }
 
@@ -59,9 +63,8 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
   const [filter, setFilter] = useState('all')
   const [composeType, setComposeType] = useState<keyof typeof TYPE_LABEL>('user_note')
   const [composing, setComposing] = useState(false)
-  const [body, setBody] = useState('')
   const [posting, setPosting] = useState(false)
-  const files = usePendingFiles()
+  const composerRef = useRef<BlockNoteComposerHandle>(null)
 
   const real = useMemo<Comment[]>(() => {
     if (!comments.data) return []
@@ -79,37 +82,34 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
     })
   }, [real, filter])
 
-  const close = () => { setComposing(false); setBody(''); files.clear() }
+  const close = () => { setComposing(false); composerRef.current?.clear() }
 
   const post = async () => {
-    const text = body.trim()
-    if (!text && files.pending.length === 0) return
+    if (!composerRef.current) return
+    const body = (await composerRef.current.getMarkdown()).trim()
+    const attachmentIds = composerRef.current.getAttachmentIDs()
+    if (!body && attachmentIds.length === 0) return
     setPosting(true)
     try {
       const created = await create.mutateAsync({
         author: 'operator',
         type: composeType,
-        body: text || '(attachment only)',
+        body: body || '(attachment only)',
       }) as { id?: string } | undefined
 
       const newId = created?.id
-      if (newId) {
-        for (const p of files.pending) {
-          try {
-            const aid = await uploadAttachment(p.file)
-            await fetch(`/api/attachments/${aid}/claim`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ comment_id: newId }),
-            })
-          } catch { /* non-fatal */ }
-        }
-        qc.invalidateQueries({ queryKey: attachmentKeys.byComment(newId) })
+      if (newId && attachmentIds.length > 0) {
+        await Promise.all(
+          attachmentIds.map(aid => claimAttachment(aid, newId).catch(err => {
+            console.error('attachment claim failed', aid, err)
+          }))
+        )
+        qc.invalidateQueries({ queryKey: ['attachments', 'comment', newId] })
       }
 
       // Description-as-comment: also PATCH the entity description field
-      if (composeType === 'description_revision' && text) {
-        update.mutate({ description: text } as Parameters<typeof update.mutate>[0])
+      if (composeType === 'description_revision' && body) {
+        update.mutate({ description: body } as Parameters<typeof update.mutate>[0])
       }
 
       close()
@@ -122,7 +122,6 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
 
   return (
     <div className='space-y-3'>
-
       {/* Toolbar */}
       <div className='flex items-center justify-between gap-3'>
         <span className='text-muted-foreground text-sm'>
@@ -148,43 +147,43 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
         </div>
       </div>
 
-      {/* Composer */}
+      {/* BlockNote Composer */}
       {composing && (
-        <div className='space-y-2'>
-          <div className='flex items-center gap-2'>
-            <Select value={composeType} onValueChange={v => setComposeType(v as keyof typeof TYPE_LABEL)}>
-              <SelectTrigger className='h-7 w-44 text-xs'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COMPOSE_TYPES.map(t => (
-                  <SelectItem key={t} value={t}>{TYPE_LABEL[t]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button type='button' variant='ghost' size='sm' className='h-7 px-2 text-xs ml-auto' onClick={close}>Cancel</Button>
-          </div>
-          <AttachmentComposer
-            body={body}
-            onBodyChange={setBody}
-            pending={files.pending}
-            onAdd={files.add}
-            onRemove={files.remove}
-            onSubmit={post}
-            placeholder={
-              composeType === 'description_revision'
-                ? 'Write description… Markdown supported, drag/paste files (Cmd-Enter to post)'
-                : 'Add a comment… drag/paste files to attach (Cmd-Enter to post)'
-            }
-            submitLabel={
-              composeType === 'description_revision' ? 'Post as Description' : 'Post'
-            }
-            submitting={posting}
-          />
-          {create.isError && (
-            <p className='text-xs text-rose-400'>Post failed: {String(create.error)}</p>
-          )}
-        </div>
+        <Card className='gap-0 py-0'>
+          <CardContent className='space-y-2 px-3 py-2'>
+            <BlockNoteComposer
+              ref={composerRef}
+              onSave={post}
+              onCancel={close}
+              placeholder={
+                composeType === 'description_revision'
+                  ? 'Write description… drop files, paste images, type / for blocks (Cmd-Enter to post)'
+                  : 'Add a comment… drop files, paste images, type / for blocks (Cmd-Enter to post)'
+              }
+            />
+            <div className='flex items-center justify-end gap-2'>
+              {create.isError && (
+                <span className='mr-auto text-xs text-rose-400'>Post failed: {String(create.error)}</span>
+              )}
+              <Select value={composeType} onValueChange={v => setComposeType(v as keyof typeof TYPE_LABEL)}>
+                <SelectTrigger className='h-7 w-40 text-xs'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMPOSE_TYPES.map(t => (
+                    <SelectItem key={t} value={t}>{TYPE_LABEL[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type='button' variant='ghost' size='sm' onClick={close} disabled={posting}>Cancel</Button>
+              <Button type='button' size='sm' onClick={post} disabled={posting}>
+                {posting
+                  ? composeType === 'description_revision' ? 'Saving…' : 'Posting…'
+                  : composeType === 'description_revision' ? 'Post as Description' : 'Post'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Comment list */}
@@ -222,16 +221,7 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                     <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
                   </div>
 
-                  {/* Body — render HTML if available, else raw markdown */}
-                  {(c as { body_html?: string }).body_html ? (
-                    <div
-                      className='md-body prose prose-invert prose-sm max-w-none'
-                      dangerouslySetInnerHTML={{ __html: (c as { body_html?: string }).body_html! }}
-                    />
-                  ) : c.body ? (
-                    <pre className='font-mono text-xs whitespace-pre-wrap break-words'>{c.body}</pre>
-                  ) : null}
-
+                  <BlockNoteReadView markdown={c.body ?? ''} />
                   <CommentAttachments commentId={c.id} />
                 </div>
               ))}
