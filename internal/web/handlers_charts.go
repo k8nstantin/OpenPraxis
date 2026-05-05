@@ -200,21 +200,34 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 		var d chartsData
 
 		// ── Hourly activity ───────────────────────────────────────────────
-		// Include all three states: running (started, no terminal yet),
-		// completed, and failed — so interactive sessions appear immediately.
+		// Activity query:
+		// - completed/failed: bucketed by their own timestamp (when the run ended)
+		// - running (no terminal): bucketed by LATEST event timestamp — the most
+		//   recent sample row shows when the session was last active, not when it started.
+		//   A session started 20h ago but sampled 5 min ago appears in the current hour.
 		actWhere := `(` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 		rows, err := n.DB().QueryContext(r.Context(), `
 			SELECT `+hourExpr+` as hour,
 			       SUM(CASE WHEN event='completed' THEN 1 ELSE 0 END),
 			       SUM(CASE WHEN event='failed'    THEN 1 ELSE 0 END),
-			       SUM(CASE WHEN event='started'
-			                 AND run_uid NOT IN (
-			                   SELECT run_uid FROM execution_log
-			                   WHERE event IN ('completed','failed')
-			                 ) THEN 1 ELSE 0 END)
+			       0 as running
 			FROM execution_log WHERE `+actWhere+`
-			  AND event IN ('completed','failed','started')
-			GROUP BY hour ORDER BY hour ASC`)
+			  AND event IN ('completed','failed')
+			GROUP BY hour
+			UNION ALL
+			-- Running sessions: bucket by latest event time for that run_uid
+			SELECT `+hourExpr+` as hour,
+			       0, 0, COUNT(DISTINCT run_uid) as running
+			FROM execution_log el
+			INNER JOIN (
+			  SELECT run_uid, MAX(id) AS max_id FROM execution_log GROUP BY run_uid
+			) latest ON el.id = latest.max_id
+			WHERE el.run_uid NOT IN (
+			  SELECT run_uid FROM execution_log WHERE event IN ('completed','failed')
+			)
+			AND (` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10) + `
+			GROUP BY hour
+			ORDER BY hour ASC`)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {

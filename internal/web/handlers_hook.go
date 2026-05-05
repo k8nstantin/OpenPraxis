@@ -457,8 +457,9 @@ func init() {
 		for _, t := range turns {
 			if t.Role == "assistant" {
 				turnCount++
-			} else if t.Role == "user" && len(t.Content) > 6 && t.Content[:6] == "[tool:" {
-				actionCount++
+				// readTranscript formats each tool_use block as "[tool: name]\n"
+				// on assistant turns — count occurrences to get action count.
+				actionCount += strings.Count(t.Content, "[tool:")
 			}
 		}
 		return node.LiveSessionCost{

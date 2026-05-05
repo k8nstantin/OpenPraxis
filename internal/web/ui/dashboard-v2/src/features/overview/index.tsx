@@ -58,8 +58,20 @@ function useOverviewStats() {
 
 function useChartsData() {
   return useQuery({
-    queryKey: ['stats', 'charts', 'today'],
+    queryKey: ['stats', 'charts', 24],
     queryFn: () => fetch('/api/stats/charts').then(r => r.json()) as Promise<ChartsData>,
+    refetchInterval: 60_000, staleTime: 30_000,
+  })
+}
+
+interface WeekRun { day: string; completed: number; failed: number }
+function useWeekRuns() {
+  return useQuery({
+    queryKey: ['stats', 'history', 7, 'runs'],
+    queryFn: () =>
+      fetch('/api/stats/history?days=7')
+        .then(r => r.json())
+        .then((d: { runs: WeekRun[] }) => d.runs ?? []) as Promise<WeekRun[]>,
     refetchInterval: 60_000, staleTime: 30_000,
   })
 }
@@ -172,18 +184,17 @@ const xLabelOpts = { fontSize: 9, interval: 0 }
 
 // ── Execution charts ───────────────────────────────────────────────────────
 
-function ActivityChart({ data }: { data: ChartsData['activity'] }) {
-  const hours  = data.map(d => hourLabel(d.hour))
+function RunsWeekChart({ data }: { data: WeekRun[] }) {
+  const days = data.map(d => d.day.slice(5)) // "MM-DD"
   return (
     <EChart height={160} option={{
-      grid: { left: 32, right: 16, top: 8, bottom: 24 },
+      grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: hours, axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
-        { name: 'running',   type: 'bar', stack: 'runs', data: data.map(d => d.running ?? 0),   itemStyle: { color: '#38bdf8' } },
-        { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981' } },
-        { name: 'failed',    type: 'bar', stack: 'runs', data: data.map(d => d.failed),    itemStyle: { color: '#f43f5e' } },
+        { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981', borderRadius: [2,2,0,0] } },
+        { name: 'failed',    type: 'bar', stack: 'runs', data: data.map(d => d.failed),    itemStyle: { color: '#f43f5e', borderRadius: [2,2,0,0] } },
       ],
     }} />
   )
@@ -368,6 +379,7 @@ export function Overview() {
   const { data: c } = useChartsData()
   const { data: g } = useGitStats()
   const { data: sys } = useSysStats()
+  const { data: week } = useWeekRuns()
 
   const commits      = (g?.total_commits  ?? 0) || (c?.total_commits      ?? 0)
   const linesAdded   = (g?.total_added    ?? 0) || (c?.total_lines_added  ?? 0)
@@ -418,8 +430,8 @@ export function Overview() {
           {/* Row 3 — activity + cache */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Runs per hour · 24h</CardTitle></CardHeader>
-              <CardContent className='pb-3'>{c?.activity?.length ? <ActivityChart data={c.activity} /> : <Empty />}</CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Runs · last 7 days</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{week && week.length > 0 ? <RunsWeekChart data={week} /> : <Empty />}</CardContent>
             </Card>
             <Card>
               <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate % · 24h</CardTitle></CardHeader>
