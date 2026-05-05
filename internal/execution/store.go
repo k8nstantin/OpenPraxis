@@ -81,6 +81,13 @@ type Row struct {
 	AvgCPUPct          float64  `json:"avg_cpu_pct"`
 	PeakRSSMB          float64  `json:"peak_rss_mb"`
 	AvgRSSMB           float64  `json:"avg_rss_mb"`
+	NetRxMbps          float64  `json:"net_rx_mbps"`
+	NetTxMbps          float64  `json:"net_tx_mbps"`
+	DiskReadMBps       float64  `json:"disk_read_mbps"`
+	DiskWriteMBps      float64  `json:"disk_write_mbps"`
+	MemUsedMB          float64  `json:"mem_used_mb"`
+	MemTotalMB         float64  `json:"mem_total_mb"`
+	LoadAvg1m          float64  `json:"load_avg_1m"`
 	CreatedBy          string   `json:"created_by"`
 	CreatedAt          string   `json:"created_at"`
 	SessionID          string   `json:"session_id"` // Claude Code / MCP session that generated this row
@@ -158,6 +165,24 @@ func addSessionIDColumn(db *sql.DB) {
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_execlog_session ON execution_log(session_id, created_at DESC)`)
 }
 
+// addSystemMetricColumns adds network/disk/memory columns for OS-level telemetry.
+// Idempotent — duplicate column errors are swallowed.
+// Uses DEFAULT 0 only to satisfy SQLite's ALTER TABLE requirement for existing rows;
+// the CREATE TABLE definition has no default so new rows must supply the value.
+func addSystemMetricColumns(db *sql.DB) {
+	for _, col := range []string{
+		`ALTER TABLE execution_log ADD COLUMN net_rx_mbps     REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN net_tx_mbps     REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN disk_read_mbps  REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN disk_write_mbps REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN mem_used_mb     REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN mem_total_mb    REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN load_avg_1m     REAL NOT NULL DEFAULT 0`,
+	} {
+		db.Exec(col)
+	}
+}
+
 // addProductivityColumns adds test tracking columns introduced after the initial
 // schema. Idempotent — duplicate column errors are swallowed.
 func addProductivityColumns(db *sql.DB) {
@@ -178,6 +203,7 @@ func InitSchema(db *sql.DB) error {
 	// Add columns that postdate the initial schema.
 	addSessionIDColumn(db)
 	addProductivityColumns(db)
+	addSystemMetricColumns(db)
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS execution_log (
     id                  TEXT PRIMARY KEY,
@@ -237,6 +263,13 @@ func InitSchema(db *sql.DB) error {
     avg_cpu_pct         REAL    NOT NULL DEFAULT 0,
     peak_rss_mb         REAL    NOT NULL DEFAULT 0,
     avg_rss_mb          REAL    NOT NULL DEFAULT 0,
+    net_rx_mbps         REAL    NOT NULL,
+    net_tx_mbps         REAL    NOT NULL,
+    disk_read_mbps      REAL    NOT NULL,
+    disk_write_mbps     REAL    NOT NULL,
+    mem_used_mb         REAL    NOT NULL,
+    mem_total_mb        REAL    NOT NULL,
+    load_avg_1m         REAL    NOT NULL,
     created_by          TEXT    NOT NULL DEFAULT '',
     created_at          TEXT    NOT NULL,
     session_id          TEXT    NOT NULL DEFAULT '',
@@ -306,10 +339,12 @@ func (s *Store) Insert(ctx context.Context, r Row) error {
 		branch, commit_sha, worktree_path,
 		cpu_pct, rss_mb, disk_used_gb,
 		peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
+		net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
+		mem_used_mb, mem_total_mb, load_avg_1m,
 		created_by, created_at, session_id,
 		tests_run, tests_passed, tests_failed
 	) VALUES (
-		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 	)`,
 		r.ID, r.RunUID, r.EntityUID, r.Event, r.RunNumber, r.Trigger, r.NodeID,
 		r.TerminalReason, r.StartedAt, r.CompletedAt, r.CancelledAt, r.CancelledBy,
@@ -324,6 +359,8 @@ func (s *Store) Insert(ctx context.Context, r Row) error {
 		r.Branch, r.CommitSHA, r.WorktreePath,
 		r.CPUPct, r.RSSMB, r.DiskUsedGB,
 		r.PeakCPUPct, r.AvgCPUPct, r.PeakRSSMB, r.AvgRSSMB,
+		r.NetRxMbps, r.NetTxMbps, r.DiskReadMBps, r.DiskWriteMBps,
+		r.MemUsedMB, r.MemTotalMB, r.LoadAvg1m,
 		r.CreatedBy, r.CreatedAt, r.SessionID,
 		r.TestsRun, r.TestsPassed, r.TestsFailed,
 	)
@@ -561,9 +598,11 @@ func (s *Store) MigrateFromLegacy(ctx context.Context) (int, error) {
 			branch, commit_sha, worktree_path,
 			cpu_pct, rss_mb, disk_used_gb,
 			peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
+			net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
+			mem_used_mb, mem_total_mb, load_avg_1m,
 			created_by, created_at
 		) SELECT
-			?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+			?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 		WHERE NOT EXISTS (SELECT 1 FROM execution_log WHERE id = ?)`,
 			lr.id, lr.id, lr.entityID, event, lr.runNumber, lr.trigger, lr.nodeID,
 			lr.terminalReason, lr.startedAt, lr.completedAt, lr.cancelledAt, lr.cancelledBy,
@@ -581,6 +620,7 @@ func (s *Store) MigrateFromLegacy(ctx context.Context) (int, error) {
 			lr.branch, lr.commitSHA, lr.worktreePath,
 			0.0, 0.0, lr.diskUsedGB,
 			lr.peakCPUPct, lr.avgCPUPct, lr.peakRSSMB, lr.avgRSSMB,
+			0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 			"", now,
 			// WHERE NOT EXISTS guard
 			lr.id,
@@ -619,6 +659,8 @@ const rowColumns = `id, run_uid, entity_uid, event, run_number, trigger, node_id
 	branch, commit_sha, worktree_path,
 	cpu_pct, rss_mb, disk_used_gb,
 	peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
+	net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
+	mem_used_mb, mem_total_mb, load_avg_1m,
 	created_by, created_at`
 
 func scanRow(rows *sql.Rows) (Row, error) {
@@ -637,6 +679,8 @@ func scanRow(rows *sql.Rows) (Row, error) {
 		&r.Branch, &r.CommitSHA, &r.WorktreePath,
 		&r.CPUPct, &r.RSSMB, &r.DiskUsedGB,
 		&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB, &r.AvgRSSMB,
+		&r.NetRxMbps, &r.NetTxMbps, &r.DiskReadMBps, &r.DiskWriteMBps,
+		&r.MemUsedMB, &r.MemTotalMB, &r.LoadAvg1m,
 		&r.CreatedBy, &r.CreatedAt,
 	); err != nil {
 		return Row{}, err

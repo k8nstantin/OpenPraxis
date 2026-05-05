@@ -1,3 +1,20 @@
+// Query keys for react-query cache invalidation
+export const attachmentKeys = {
+  byComment: (commentId: string) => ['attachments', 'comment', commentId] as const,
+}
+
+// Alias matching what ContentBlock/comments.tsx expect
+export const uploadAttachment = async (file: File): Promise<string> => {
+  const av = await uploadOrphanAttachment(file)
+  return av.id
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+}
+
 export type AttachmentView = {
   id: string
   comment_id: string

@@ -1,22 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
-import { Pencil, Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import {
   useEntity,
-  useEntityDescriptionHistory,
-  useUpdateEntity,
   type EntityKind,
 } from '@/lib/queries/entity'
 import type { Entity } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { DescriptionView } from '@/components/description-view'
 import { Gauge } from '@/components/gauge'
-import {
-  BlockNoteComposer,
-  type BlockNoteComposerHandle,
-} from '@/components/blocknote-composer'
+import { ContentBlock } from '@/components/content-block'
+
+// Label shown in ContentBlock per entity type
+const CONTENT_LABEL: Record<string, string> = {
+  product:  'Description',
+  manifest: 'Declaration',
+  task:     'Instructions',
+  skill:    'Description',
+  idea:     'Description',
+}
 
 // Main tab — stats grid + repo card + description editor + revision
 // history. Same Markup ↔ Rendered toggle on description view; Cmd-Enter
@@ -43,8 +44,6 @@ export function MainTab({
   entityId: string
 }) {
   const entity = useEntity(kind, entityId)
-  const history = useEntityDescriptionHistory(kind, entityId)
-  const update = useUpdateEntity(kind, entityId)
   const [repoInfo, setRepoInfo] = useState<Record<string, string | number>>(
     {}
   )
@@ -77,51 +76,10 @@ export function MainTab({
     }
   }, [kind, entityId])
 
-  const [editing, setEditing] = useState(false)
-  const [initialDraft, setInitialDraft] = useState('')
-  const [saving, setSaving] = useState(false)
-  const composerRef = useRef<BlockNoteComposerHandle>(null)
-
   const e = entity.data as Entity | undefined
-
-  // Description lives in comments (description_revision type). The Main tab
-  // shows the latest description_revision body from the history endpoint;
-  // currentText is derived from the most recent revision if any.
-  const latestRevision = history.data?.[0]
-  const currentText = (latestRevision?.body ?? '').trim()
-  const hasDesc = currentText.length > 0
-
-  const startEdit = () => {
-    setInitialDraft(currentText)
-    setEditing(true)
-  }
-  const cancel = () => {
-    setEditing(false)
-    composerRef.current?.clear()
-  }
-  const save = async () => {
-    if (!composerRef.current) return
-    setSaving(true)
-    try {
-      const draft = await composerRef.current.getMarkdown()
-      // Description is stored as a description_revision comment; the PUT
-      // endpoint drops a new SCD-2 revision row server-side. We send the
-      // body as a top-level `description` field which the backend records
-      // as a new revision.
-      await update.mutateAsync({ description: draft })
-      setEditing(false)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const created = e?.created_at ? new Date(e.created_at) : null
   const updatedDate = e?.valid_from ? new Date(e.valid_from) : null
-
-  // Description body comes from the latest description_revision comment.
-  const description = latestRevision?.body
+  // history is now shown inside ContentBlock — no separate query needed
 
   return (
     <div className='space-y-2'>
@@ -211,114 +169,14 @@ export function MainTab({
         </Card>
       ) : null}
 
-      <Card className='gap-0 py-0'>
-        <CardContent className='space-y-2 px-3 py-2'>
-          {!editing && !entity.isLoading ? (
-            <div className='flex justify-end'>
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                className='h-7 px-2 text-xs'
-                onClick={startEdit}
-              >
-                {hasDesc ? (
-                  <>
-                    <Pencil className='mr-1 h-3 w-3' />
-                    Edit
-                  </>
-                ) : (
-                  <>
-                    <Plus className='mr-1 h-3 w-3' />
-                    Add Description
-                  </>
-                )}
-              </Button>
-            </div>
-          ) : null}
-          {entity.isLoading ? (
-            <Skeleton className='h-24 w-full' />
-          ) : editing ? (
-            <div className='space-y-2'>
-              <BlockNoteComposer
-                ref={composerRef}
-                initialMarkdown={initialDraft}
-                onSave={save}
-                onCancel={cancel}
-                placeholder={
-                  kind === 'product'
-                    ? 'Product description… drop files, paste images, type / for blocks'
-                    : 'Manifest spec… drop files, paste images, type / for blocks'
-                }
-              />
-              <div className='flex items-center justify-end gap-2'>
-                {update.isError ? (
-                  <span className='mr-auto text-xs text-rose-400'>
-                    Save failed: {String(update.error)}
-                  </span>
-                ) : null}
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='sm'
-                  onClick={cancel}
-                  disabled={saving}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type='button'
-                  size='sm'
-                  onClick={save}
-                  disabled={saving}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <DescriptionView raw={description} />
-          )}
-        </CardContent>
-      </Card>
+      {/* ContentBlock: Description / Declaration / Instructions */}
+      <ContentBlock
+        entityId={entityId}
+        kind={kind}
+        label={CONTENT_LABEL[kind] ?? 'Description'}
+        placeholder={`Write ${(CONTENT_LABEL[kind] ?? 'description').toLowerCase()} here… Markdown supported, drag/paste files to attach`}
+      />
 
-      <Card className='gap-0 py-0'>
-        <CardContent className='space-y-1 px-3 py-2'>
-          <div className='flex items-center justify-between'>
-            <span className='text-muted-foreground text-xs uppercase tracking-wider'>
-              Revisions
-            </span>
-            <Badge variant='outline' className='text-[10px]'>
-              {history.data?.length ?? 0}
-            </Badge>
-          </div>
-          {history.isLoading ? (
-            <Skeleton className='h-12 w-full' />
-          ) : !history.data || history.data.length === 0 ? (
-            <div className='text-muted-foreground text-sm'>
-              No prior revisions recorded.
-            </div>
-          ) : (
-            <div className='divide-y'>
-              {history.data.map((rev) => (
-                <div key={rev.id} className='space-y-1 py-2 text-sm'>
-                  <div className='flex items-center justify-between'>
-                    <code className='font-mono text-[11px]'>
-                      {(rev.author ?? '').slice(0, 16)}
-                    </code>
-                    <span className='text-muted-foreground text-xs'>
-                      {fmtTime(rev.created_at)}
-                    </span>
-                  </div>
-                  <pre className='text-muted-foreground line-clamp-3 font-mono text-xs whitespace-pre-wrap break-words'>
-                    {rev.body}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

@@ -97,7 +97,7 @@ func NewServer(n *node.Node, db *sql.DB) *Server {
 					}
 					// Sampler writes only system metrics it natively has.
 					// Token/cost/turn data comes from the PostToolUse hook.
-					cpuPct, rssMB := s.node.LatestSystemSample()
+					cpu, rssMB, memUsed, memTotal, netRx, netTx, _, _, load := s.node.SystemSnapshot()
 					row := execution.Row{
 						ID:           uuid.Must(uuid.NewV7()).String(),
 						RunUID:       cur.RunUID,
@@ -108,8 +108,13 @@ func NewServer(n *node.Node, db *sql.DB) *Server {
 						NodeID:       s.node.PeerID(),
 						AgentRuntime: cur.Agent,
 						Actions:      cur.ToolCalls,
-						CPUPct:       cpuPct,
+						CPUPct:       cpu,
 						RSSMB:        rssMB,
+						MemUsedMB:    memUsed,
+						MemTotalMB:   memTotal,
+						NetRxMbps:    netRx,
+						NetTxMbps:    netTx,
+						LoadAvg1m:    load,
 						CreatedBy:    "mcp/sampler",
 					}
 					if err := s.node.ExecutionLog.Insert(context.Background(), row); err != nil {

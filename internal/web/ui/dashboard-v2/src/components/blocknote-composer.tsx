@@ -24,6 +24,7 @@ import {
   Underline,
   Layers,
   Package,
+  Paperclip,
 } from 'lucide-react'
 import { searchEntities, type EntityHit } from '@/lib/queries/entity-search'
 import { uploadOrphanAttachment } from '@/lib/queries/attachments'
@@ -70,7 +71,7 @@ function Sep() {
   return <span className='bg-border mx-0.5 inline-block h-4 w-px' />
 }
 
-function Toolbar({ editor }: { editor: BlockNoteEditor }) {
+function Toolbar({ editor, onAttach }: { editor: BlockNoteEditor; onAttach?: () => void }) {
   const block = () => editor.getTextCursorPosition().block
 
   const setType = (type: string, props?: Record<string, unknown>) =>
@@ -131,6 +132,14 @@ function Toolbar({ editor }: { editor: BlockNoteEditor }) {
       <ToolbarBtn title='Code block' onClick={() => setType('codeBlock')}>
         <Code className={cn(iconCls, 'opacity-70')} />
       </ToolbarBtn>
+      {onAttach && (
+        <>
+          <Sep />
+          <ToolbarBtn title='Attach file' onClick={onAttach}>
+            <Paperclip className={iconCls} />
+          </ToolbarBtn>
+        </>
+      )}
     </div>
   )
 }
@@ -149,6 +158,7 @@ export function BlockNoteComposer({
   ref?: React.Ref<BlockNoteComposerHandle>
 }) {
   const attachmentIdsRef = useRef<string[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const uploadFile = useCallback(async (file: File): Promise<string> => {
     const a = await uploadOrphanAttachment(file)
@@ -249,13 +259,29 @@ export function BlockNoteComposer({
     [editor]
   )
 
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    for (const file of files) {
+      const url = await uploadFile(file)
+      if (file.type.startsWith('image/')) {
+        editor.insertBlocks(
+          [{ type: 'image', props: { url, caption: file.name, previewWidth: 512 } } as never],
+          editor.getTextCursorPosition().block,
+          'after',
+        )
+      }
+    }
+    e.target.value = ''
+  }, [editor, uploadFile])
+
   return (
     <div
       className='border-border bg-card overflow-hidden rounded-md border'
       onKeyDownCapture={onKeyDownCapture}
     >
-      <Toolbar editor={editor as BlockNoteEditor} />
-      <BlockNoteView editor={editor} theme='dark' slashMenu={false}>
+      <input ref={fileInputRef} type='file' multiple className='hidden' onChange={handleFileChange} />
+      <Toolbar editor={editor as BlockNoteEditor} onAttach={() => fileInputRef.current?.click()} />
+      <BlockNoteView editor={editor} theme='dark' slashMenu={false} style={{ minHeight: '160px', padding: '4px 0' }}>
         <SuggestionMenuController
           triggerCharacter='@'
           minQueryLength={1}

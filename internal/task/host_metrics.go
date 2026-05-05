@@ -24,16 +24,21 @@ import (
 // per-run Run Stats card can overlay host load on the same timeline as
 // the model's own turn/cost/actions lines.
 type HostMetricsSample struct {
-	TS      time.Time `json:"ts"`
-	CPUPct  float64   `json:"cpu_pct"`
-	RSSMB   float64   `json:"rss_mb"`
-	// Disk capacity captured at the same tick — surfaces an agent
-	// ballooning the worktree on the per-run timeline.
-	DiskUsedGB  float64 `json:"disk_used_gb"`
-	DiskTotalGB float64 `json:"disk_total_gb"`
-	// Live task counters captured at the same tick as host CPU/RSS.
-	// Feeds the Run Stats card's 5-aligned-sparkline layout — same X-axis
-	// as CPU/RSS. Populated by a runner-supplied TaskStatFn closure.
+	TS          time.Time `json:"ts"`
+	CPUPct      float64   `json:"cpu_pct"`
+	RSSMB       float64   `json:"rss_mb"`
+	DiskUsedGB  float64   `json:"disk_used_gb"`
+	DiskTotalGB float64   `json:"disk_total_gb"`
+	// Network and disk I/O rates — written to execution_log so all
+	// system metrics live in one table.
+	NetRxMbps     float64 `json:"net_rx_mbps"`
+	NetTxMbps     float64 `json:"net_tx_mbps"`
+	DiskReadMBps  float64 `json:"disk_read_mbps"`
+	DiskWriteMBps float64 `json:"disk_write_mbps"`
+	MemUsedMB     float64 `json:"mem_used_mb"`
+	MemTotalMB    float64 `json:"mem_total_mb"`
+	LoadAvg1m     float64 `json:"load_avg_1m"`
+	// Live task counters
 	CostUSD float64 `json:"cost_usd"`
 	Turns   int     `json:"turns"`
 	Actions int     `json:"actions"`
@@ -240,8 +245,17 @@ func readProcMetrics(pid int) (HostMetricsSample, error) {
 		RSSMB:  rssKB / 1024.0,
 	}
 	if d, err := gpdisk.Usage("/"); err == nil && d != nil {
-		smp.DiskUsedGB = float64(d.Used) / (1024 * 1024 * 1024)
+		smp.DiskUsedGB  = float64(d.Used)  / (1024 * 1024 * 1024)
 		smp.DiskTotalGB = float64(d.Total) / (1024 * 1024 * 1024)
+	}
+	// Memory
+	if vm, err := gpmem.VirtualMemory(); err == nil && vm != nil {
+		smp.MemUsedMB  = float64(vm.Used)  / (1024 * 1024)
+		smp.MemTotalMB = float64(vm.Total) / (1024 * 1024)
+	}
+	// Load average
+	if la, err := gpload.Avg(); err == nil && la != nil {
+		smp.LoadAvg1m = la.Load1
 	}
 	return smp, nil
 }
