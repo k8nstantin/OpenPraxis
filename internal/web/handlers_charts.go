@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
@@ -121,23 +122,37 @@ func pad24TokenHours(data []tokenBucket) []tokenBucket {
 	return out
 }
 
-// apiStatsCharts handles GET /api/stats/charts.
-// Returns 24 hourly buckets across activity, productivity, efficiency,
-// and token economics — all from execution_log, no joins.
+// realTS returns a SQL expression that gives the real event timestamp as unix seconds.
+// started_at is stored in unix ms and is the authoritative timestamp;
+// created_at is a fallback for rows predating the started_at column.
+const realTS = `CASE WHEN started_at>0 THEN started_at/1000 ELSE strftime('%s', created_at) END`
+
+// hourExpr returns a SQL expression that buckets realTS into "YYYY-MM-DDTHH:00:00Z".
+const hourExpr = `strftime('%Y-%m-%dT%H:00:00Z', datetime(` + realTS + `, 'unixepoch'))`
+
+// apiStatsCharts handles GET /api/stats/charts?hours=N (default 24).
+// Returns hourly buckets using started_at as the canonical timestamp.
 func apiStatsCharts(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+		hours := 24
+		if h := r.URL.Query().Get("hours"); h != "" {
+			if v, err := strconv.Atoi(h); err == nil && v > 0 {
+				hours = v
+			}
+		}
+		sinceUnix := time.Now().UTC().Add(-time.Duration(hours) * time.Hour).Unix()
+		// WHERE clause uses realTS comparison (unix seconds)
+		whereClause := `event IN ('completed','failed') AND (` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 
 		var d chartsData
 
-		// ── Hourly activity (completed/failed per hour) ───────────────────
+		// ── Hourly activity ───────────────────────────────────────────────
 		rows, err := n.DB().QueryContext(r.Context(), `
-			SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) as hour,
+			SELECT `+hourExpr+` as hour,
 			       SUM(CASE WHEN event='completed' THEN 1 ELSE 0 END),
 			       SUM(CASE WHEN event='failed'    THEN 1 ELSE 0 END)
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?
-			GROUP BY hour ORDER BY hour ASC`, since)
+			FROM execution_log WHERE `+whereClause+`
+			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -148,16 +163,15 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// ── Hourly productivity ────────────────────────────────────────────
+		// ── Hourly productivity ───────────────────────────────────────────
 		rows2, err := n.DB().QueryContext(r.Context(), `
-			SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) as hour,
+			SELECT `+hourExpr+` as hour,
 			       COALESCE(SUM(lines_added),0), COALESCE(SUM(lines_removed),0),
 			       COALESCE(SUM(files_changed),0), COALESCE(SUM(commits),0),
 			       COALESCE(SUM(tests_run),0), COALESCE(SUM(tests_passed),0),
 			       COALESCE(SUM(tests_failed),0)
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?
-			GROUP BY hour ORDER BY hour ASC`, since)
+			FROM execution_log WHERE `+whereClause+`
+			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows2.Close()
 			for rows2.Next() {
@@ -170,15 +184,14 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// ── Hourly efficiency ──────────────────────────────────────────────
+		// ── Hourly efficiency ─────────────────────────────────────────────
 		rows3, err := n.DB().QueryContext(r.Context(), `
-			SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) as hour,
-			       AVG(turns),
-			       AVG(CASE WHEN turns>0 THEN CAST(actions AS REAL)/turns ELSE NULL END),
-			       AVG(cache_hit_rate_pct)
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?
-			GROUP BY hour ORDER BY hour ASC`, since)
+			SELECT `+hourExpr+` as hour,
+			       COALESCE(AVG(CASE WHEN turns>0 THEN turns END),0),
+			       COALESCE(AVG(CASE WHEN turns>0 AND actions>0 THEN CAST(actions AS REAL)/turns END),0),
+			       COALESCE(AVG(CASE WHEN cache_hit_rate_pct>0 THEN cache_hit_rate_pct END),0)
+			FROM execution_log WHERE `+whereClause+`
+			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows3.Close()
 			for rows3.Next() {
@@ -189,14 +202,14 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// ── Hourly token economics ─────────────────────────────────────────
+		// ── Hourly tokens ─────────────────────────────────────────────────
+		tokWhere := `event IN ('completed','failed','sample') AND (` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 		rows4, err := n.DB().QueryContext(r.Context(), `
-			SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) as hour,
+			SELECT `+hourExpr+` as hour,
 			       COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_create_tokens),0),
 			       COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
-			FROM execution_log
-			WHERE event IN ('completed','failed','sample') AND created_at >= ?
-			GROUP BY hour ORDER BY hour ASC`, since)
+			FROM execution_log WHERE `+tokWhere+`
+			GROUP BY hour ORDER BY hour ASC`)
 		if err == nil {
 			defer rows4.Close()
 			for rows4.Next() {
@@ -208,35 +221,32 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// ── Productivity totals ────────────────────────────────────────────
+		// ── Totals ────────────────────────────────────────────────────────
 		n.DB().QueryRowContext(r.Context(), `
 			SELECT COALESCE(SUM(commits),0), COALESCE(SUM(lines_added),0),
 			       COALESCE(SUM(lines_removed),0), COALESCE(SUM(files_changed),0),
 			       COUNT(DISTINCT CASE WHEN pr_number>0 THEN pr_number END),
 			       COALESCE(SUM(tests_run),0), COALESCE(SUM(tests_passed),0),
 			       COALESCE(SUM(tests_failed),0),
-			       COUNT(DISTINCT CASE WHEN worktree_path!='' THEN worktree_path END)
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?`, since).
+			       COUNT(DISTINCT CASE WHEN commit_sha!='' THEN commit_sha END)
+			FROM execution_log WHERE `+whereClause).
 			Scan(&d.TotalCommits, &d.TotalLinesAdded, &d.TotalLinesRemoved,
 				&d.TotalFilesChanged, &d.TotalPRsOpened,
 				&d.TotalTestsRun, &d.TotalTestsPassed, &d.TotalTestsFailed,
 				&d.ReposTouched)
 
-		// ── Interactive vs autonomous split ───────────────────────────────
+		// ── Interactive vs autonomous ─────────────────────────────────────
 		n.DB().QueryRowContext(r.Context(), `
-			SELECT COALESCE(SUM(CASE WHEN trigger='interactive' THEN 1 ELSE 0 END),0),
-			       COALESCE(SUM(CASE WHEN trigger!='interactive' THEN 1 ELSE 0 END),0)
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?`, since).
+			SELECT COALESCE(SUM(CASE WHEN trigger='interactive' OR agent_runtime='' THEN 1 ELSE 0 END),0),
+			       COALESCE(SUM(CASE WHEN trigger!='interactive' AND agent_runtime!='' THEN 1 ELSE 0 END),0)
+			FROM execution_log WHERE `+whereClause).
 			Scan(&d.InteractiveRuns, &d.AutonomousRuns)
 
 		// ── Terminal reasons ──────────────────────────────────────────────
 		rows5, err := n.DB().QueryContext(r.Context(), `
-			SELECT COALESCE(terminal_reason,'success') as reason, COUNT(*) as cnt
-			FROM execution_log
-			WHERE event IN ('completed','failed') AND created_at >= ?
-			GROUP BY reason ORDER BY cnt DESC LIMIT 10`, since)
+			SELECT COALESCE(NULLIF(terminal_reason,''),'success') as reason, COUNT(*) as cnt
+			FROM execution_log WHERE `+whereClause+`
+			GROUP BY reason ORDER BY cnt DESC LIMIT 10`)
 		if err == nil {
 			defer rows5.Close()
 			for rows5.Next() {
@@ -247,7 +257,6 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// Pad all series to full 24-hour grids so charts span the complete day.
 		d.Activity     = pad24ActivityHours(d.Activity)
 		d.Productivity = pad24ProductivityHours(d.Productivity)
 		d.Efficiency   = pad24EfficiencyHours(d.Efficiency)

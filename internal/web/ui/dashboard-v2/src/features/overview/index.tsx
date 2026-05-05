@@ -36,6 +36,16 @@ interface GitStats {
   hourly_buckets: { hour: string; lines_added: number; lines_removed: number; files_changed: number; commits: number }[]
 }
 
+interface SysSample {
+  ts: string
+  cpu_pct: number
+  mem_used_mb: number; mem_total_mb: number
+  net_rx_mbps: number; net_tx_mbps: number
+  disk_read_mbps: number; disk_write_mbps: number
+  disk_used_gb: number; disk_total_gb: number
+  load_1m: number
+}
+
 // ── Queries ───────────────────────────────────────────────────────────────
 
 function useOverviewStats() {
@@ -48,8 +58,8 @@ function useOverviewStats() {
 
 function useChartsData() {
   return useQuery({
-    queryKey: ['stats', 'charts'],
-    queryFn: () => fetch('/api/stats/charts').then(r => r.json()) as Promise<ChartsData>,
+    queryKey: ['stats', 'charts', 24],
+    queryFn: () => fetch('/api/stats/charts?hours=24').then(r => r.json()) as Promise<ChartsData>,
     refetchInterval: 60_000, staleTime: 30_000,
   })
 }
@@ -62,17 +72,24 @@ function useGitStats() {
   })
 }
 
-// Merge git hourly data with execution_log productivity data.
-// Git data is the source of truth for code metrics; execution_log fills in
-// tests and any future metrics the runner captures.
+function useSysStats() {
+  const now = new Date()
+  const from = new Date(now.getTime() - 60 * 60 * 1000) // last 60 min
+  return useQuery({
+    queryKey: ['system-stats', 'overview'],
+    queryFn: () => fetch(
+      `/api/system-stats?from=${from.toISOString()}&to=${now.toISOString()}`
+    ).then(r => r.json()).then((d: { samples: SysSample[] }) => d.samples ?? []) as Promise<SysSample[]>,
+    refetchInterval: 10_000, staleTime: 5_000,
+  })
+}
+
 function mergeProductivity(
   exec: ChartsData['productivity'],
   git: GitStats['hourly_buckets'],
 ): ChartsData['productivity'] {
   const map = new Map<string, ChartsData['productivity'][0]>()
-  for (const b of exec) {
-    map.set(b.hour, { ...b })
-  }
+  for (const b of exec) map.set(b.hour, { ...b })
   for (const g of git) {
     const existing = map.get(g.hour)
     if (existing) {
@@ -96,9 +113,15 @@ function fmt(n: number, dec = 0) {
   return n.toFixed(dec)
 }
 
+// "2026-05-04T14:00:00Z" → "Mon 14h" or just "14h"
 function hourLabel(iso: string) {
-  // "2026-05-04T14:00:00Z" → "14h"
-  return iso.slice(11, 13) + 'h'
+  const d = new Date(iso)
+  const h = d.getUTCHours().toString().padStart(2, '0')
+  // Show day prefix at midnight
+  if (d.getUTCHours() === 0) {
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()] + ' 0h'
+  }
+  return h + 'h'
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────
@@ -123,12 +146,14 @@ function Stat({ label, value, sub, accent }: {
   )
 }
 
-// ── Charts ────────────────────────────────────────────────────────────────
+function Empty() {
+  return <div className='h-[160px] flex items-center justify-center text-xs text-muted-foreground'>No data</div>
+}
+
+// ── Execution charts ───────────────────────────────────────────────────────
 
 function ActivityChart({ data }: { data: ChartsData['activity'] }) {
   const hours  = data.map(d => hourLabel(d.hour))
-  const ok     = data.map(d => d.completed)
-  const failed = data.map(d => d.failed)
   return (
     <EChart height={160} option={{
       grid: { left: 32, right: 8, top: 8, bottom: 24 },
@@ -136,105 +161,69 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
       xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
-        { name: 'completed', type: 'bar', stack: 'runs', data: ok,     itemStyle: { color: '#10b981' } },
-        { name: 'failed',    type: 'bar', stack: 'runs', data: failed, itemStyle: { color: '#f43f5e' } },
+        { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981' } },
+        { name: 'failed',    type: 'bar', stack: 'runs', data: data.map(d => d.failed),    itemStyle: { color: '#f43f5e' } },
       ],
     }} />
   )
 }
 
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
-  const hours = data.map(d => hourLabel(d.hour))
-  const rates = data.map(d => +d.cache_hit_rate_pct.toFixed(1))
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{
-        type: 'line', data: rates, smooth: true, showSymbol: false,
+      series: [{ type: 'line', data: data.map(d => +d.cache_hit_rate_pct.toFixed(1)), smooth: true, showSymbol: false,
         lineStyle: { color: '#10b981', width: 2 },
         areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
-          colorStops: [{ offset:0, color:'#10b981aa' },{ offset:1, color:'#10b98100' }] } },
-      }],
+          colorStops: [{ offset:0, color:'#10b981aa' },{ offset:1, color:'#10b98100' }] } } }],
     }} />
   )
 }
 
 function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
-  const hours = data.map(d => hourLabel(d.hour))
-  const turns = data.map(d => +d.avg_turns.toFixed(1))
-  const apts  = data.map(d => +d.avg_actions_per_turn.toFixed(1))
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
-        { name: 'turns/run',    type: 'line', data: turns, smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 } },
-        { name: 'actions/turn', type: 'line', data: apts,  smooth: true, showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } },
+        { name: 'turns/run',    type: 'line', data: data.map(d => +d.avg_turns.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 } },
+        { name: 'actions/turn', type: 'line', data: data.map(d => +d.avg_actions_per_turn.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } },
       ],
     }} />
   )
 }
 
 function LinesChart({ data }: { data: ChartsData['productivity'] }) {
-  const hours   = data.map(d => hourLabel(d.hour))
-  const added   = data.map(d => d.lines_added)
-  const removed = data.map(d => -d.lines_removed)
   return (
     <EChart height={160} option={{
       grid: { left: 40, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
-        { name: 'added',   type: 'bar', data: added,   itemStyle: { color: '#10b981' }, stack: 'lines' },
-        { name: 'removed', type: 'bar', data: removed, itemStyle: { color: '#f43f5e' }, stack: 'lines' },
+        { name: 'added',   type: 'bar', data: data.map(d => d.lines_added),    itemStyle: { color: '#10b981' }, stack: 'lines' },
+        { name: 'removed', type: 'bar', data: data.map(d => -d.lines_removed), itemStyle: { color: '#f43f5e' }, stack: 'lines' },
       ],
     }} />
   )
 }
 
 function CommitsChart({ data }: { data: ChartsData['productivity'] }) {
-  const hours   = data.map(d => hourLabel(d.hour))
-  const commits = data.map(d => d.commits)
-  const tests   = data.map(d => d.tests_run)
   return (
     <EChart height={160} option={{
       grid: { left: 32, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
-        { name: 'commits', type: 'bar', data: commits, itemStyle: { color: '#6366f1' } },
-        { name: 'tests',   type: 'bar', data: tests,   itemStyle: { color: '#f59e0b' } },
+        { name: 'commits', type: 'bar', data: data.map(d => d.commits),   itemStyle: { color: '#6366f1' } },
+        { name: 'tests',   type: 'bar', data: data.map(d => d.tests_run), itemStyle: { color: '#f59e0b' } },
       ],
-    }} />
-  )
-}
-
-function TokenRatioChart({ data }: { data: ChartsData['tokens'] }) {
-  const hours  = data.map(d => hourLabel(d.hour))
-  const ratios = data.map(d => {
-    const total = d.cache_read_tokens + d.cache_create_tokens
-    return total > 0 ? +(d.cache_read_tokens / total * 100).toFixed(1) : 0
-  })
-  return (
-    <EChart height={160} option={{
-      grid: { left: 36, right: 8, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `cache reuse ${p[0]?.value}%` },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
-      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{
-        name: 'cache reuse', type: 'line', data: ratios, smooth: true, showSymbol: false,
-        lineStyle: { color: '#10b981', width: 2 },
-        areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
-          colorStops: [{ offset:0, color:'#10b98155' },{ offset:1, color:'#10b98100' }] } },
-      }],
     }} />
   )
 }
@@ -244,18 +233,14 @@ function TerminalReasonsChart({ data }: { data: ChartsData['terminal_reasons'] }
     success: '#10b981', max_turns: '#f59e0b', error: '#f43f5e',
     process_error: '#f43f5e', timeout: '#fb923c', deliverable_missing: '#a78bfa',
   }
-  const items = data.map(d => ({
-    name: d.reason || 'success', value: d.count,
-    itemStyle: { color: colors[d.reason] ?? '#71717a' },
-  }))
   return (
     <EChart height={160} option={{
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      series: [{
-        type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
-        data: items, label: { show: false },
-      }],
+      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
+      series: [{ type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
+        data: data.map(d => ({ name: d.reason || 'success', value: d.count,
+          itemStyle: { color: colors[d.reason] ?? '#71717a' } })),
+        label: { show: false } }],
     }} />
   )
 }
@@ -264,14 +249,95 @@ function SplitChart({ interactive, autonomous }: { interactive: number; autonomo
   return (
     <EChart height={160} option={{
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      series: [{
-        type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
+      series: [{ type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
         data: [
           { name: 'interactive', value: interactive, itemStyle: { color: '#38bdf8' } },
           { name: 'autonomous',  value: autonomous,  itemStyle: { color: '#a78bfa' } },
-        ],
-        label: { show: false },
+        ], label: { show: false } }],
+    }} />
+  )
+}
+
+// ── System stats charts ────────────────────────────────────────────────────
+
+function downsample(samples: SysSample[], targetPoints = 120): SysSample[] {
+  if (samples.length <= targetPoints) return samples
+  const step = Math.ceil(samples.length / targetPoints)
+  return samples.filter((_, i) => i % step === 0)
+}
+
+function timeLabel(ts: string) {
+  const d = new Date(ts)
+  return d.getUTCHours().toString().padStart(2,'0') + ':' + d.getUTCMinutes().toString().padStart(2,'0')
+}
+
+function CPUChart({ samples }: { samples: SysSample[] }) {
+  const ds = downsample(samples)
+  return (
+    <EChart height={160} option={{
+      grid: { left: 36, right: 8, top: 8, bottom: 24 },
+      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `CPU ${p[0]?.value?.toFixed(1)}%` },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
+      series: [{
+        name: 'CPU %', type: 'line', data: ds.map(s => +s.cpu_pct.toFixed(1)),
+        smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 },
+        areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
+          colorStops: [{ offset:0, color:'#f59e0b55' }, { offset:1, color:'#f59e0b00' }] } },
       }],
+    }} />
+  )
+}
+
+function MemoryChart({ samples }: { samples: SysSample[] }) {
+  const ds = downsample(samples)
+  const total = ds[0]?.mem_total_mb ?? 16384
+  return (
+    <EChart height={160} option={{
+      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `RAM ${((p[0]?.value ?? 0)/1024).toFixed(1)} GB` },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      yAxis: { type: 'value', min: 0, max: total, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v/1024).toFixed(0)}G` } },
+      series: [{
+        name: 'RAM used', type: 'line', data: ds.map(s => +s.mem_used_mb.toFixed(0)),
+        smooth: true, showSymbol: false, lineStyle: { color: '#38bdf8', width: 1.5 },
+        areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
+          colorStops: [{ offset:0, color:'#38bdf855' }, { offset:1, color:'#38bdf800' }] } },
+      }],
+    }} />
+  )
+}
+
+function NetworkChart({ samples }: { samples: SysSample[] }) {
+  const ds = downsample(samples)
+  return (
+    <EChart height={160} option={{
+      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
+      series: [
+        { name: 'rx', type: 'line', data: ds.map(s => +s.net_rx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 1.5 } },
+        { name: 'tx', type: 'line', data: ds.map(s => +s.net_tx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 1.5 } },
+      ],
+    }} />
+  )
+}
+
+function DiskIOChart({ samples }: { samples: SysSample[] }) {
+  const ds = downsample(samples)
+  return (
+    <EChart height={160} option={{
+      grid: { left: 40, right: 8, top: 8, bottom: 24 },
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
+      series: [
+        { name: 'read',  type: 'line', data: ds.map(s => +s.disk_read_mbps.toFixed(2)),  smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 } },
+        { name: 'write', type: 'line', data: ds.map(s => +s.disk_write_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#f43f5e', width: 1.5 } },
+      ],
     }} />
   )
 }
@@ -282,19 +348,18 @@ export function Overview() {
   const { data: s } = useOverviewStats()
   const { data: c } = useChartsData()
   const { data: g } = useGitStats()
+  const { data: sys } = useSysStats()
 
-  // Use git data for code metrics (it's the authoritative source)
-  // Fall back to execution_log totals if git is unavailable
-  const commits      = (g?.total_commits     ?? 0) || (c?.total_commits      ?? 0)
-  const linesAdded   = (g?.total_added       ?? 0) || (c?.total_lines_added  ?? 0)
-  const linesRemoved = (g?.total_removed     ?? 0) || (c?.total_lines_removed ?? 0)
-  const files        = (g?.total_files       ?? 0) || (c?.total_files_changed ?? 0)
-
-  // Merge git + execution_log productivity for charts
+  const commits      = (g?.total_commits  ?? 0) || (c?.total_commits      ?? 0)
+  const linesAdded   = (g?.total_added    ?? 0) || (c?.total_lines_added  ?? 0)
+  const linesRemoved = (g?.total_removed  ?? 0) || (c?.total_lines_removed ?? 0)
+  const files        = (g?.total_files    ?? 0) || (c?.total_files_changed ?? 0)
   const productivity = mergeProductivity(c?.productivity ?? [], g?.hourly_buckets ?? [])
-
   const totalTok = (s?.input_tokens ?? 0) + (s?.output_tokens ?? 0) +
                    (s?.cache_read_tokens ?? 0) + (s?.cache_create_tokens ?? 0)
+
+  // Current system snapshot (latest sample)
+  const latestSys = sys?.length ? sys[sys.length - 1] : null
 
   return (
     <>
@@ -319,114 +384,120 @@ export function Overview() {
             <Card><CardContent className='pt-4'><Stat label='Tests'    value={String(c?.total_tests_run ?? 0)} sub={c?.total_tests_failed ? `${c.total_tests_failed} failed` : 'all passed'} accent={c?.total_tests_failed ? 'rose' : 'green'} /></CardContent></Card>
           </div>
 
-          {/* Row 2 — productivity stats */}
-          <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
-            <Card><CardContent className='pt-4'><Stat label='Repos touched' value={String(c?.repos_touched ?? 0)} /></CardContent></Card>
-            <Card><CardContent className='pt-4'><Stat label='PRs opened'    value={String(c?.total_prs_opened ?? 0)} accent='violet' /></CardContent></Card>
-            <Card><CardContent className='pt-4'><Stat label='Interactive'   value={String(c?.interactive_runs ?? 0)} sub='sessions' accent='sky' /></CardContent></Card>
-            <Card><CardContent className='pt-4'><Stat label='Autonomous'    value={String(c?.autonomous_runs ?? 0)} sub='runs' accent='violet' /></CardContent></Card>
-          </div>
+          {/* Row 2 — system snapshot */}
+          {latestSys && (
+            <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6'>
+              <Card><CardContent className='pt-4'><Stat label='CPU' value={`${latestSys.cpu_pct.toFixed(1)}%`} sub={`load ${latestSys.load_1m.toFixed(2)}`} accent='amber' /></CardContent></Card>
+              <Card><CardContent className='pt-4'><Stat label='RAM' value={`${(latestSys.mem_used_mb/1024).toFixed(1)}G`} sub={`of ${(latestSys.mem_total_mb/1024).toFixed(0)}G`} accent='sky' /></CardContent></Card>
+              <Card><CardContent className='pt-4'><Stat label='Net RX' value={`${latestSys.net_rx_mbps.toFixed(1)}`} sub='Mbps' accent='green' /></CardContent></Card>
+              <Card><CardContent className='pt-4'><Stat label='Net TX' value={`${latestSys.net_tx_mbps.toFixed(1)}`} sub='Mbps' accent='violet' /></CardContent></Card>
+              <Card><CardContent className='pt-4'><Stat label='Disk R' value={`${latestSys.disk_read_mbps.toFixed(1)}`} sub='MB/s' accent='amber' /></CardContent></Card>
+              <Card><CardContent className='pt-4'><Stat label='Disk W' value={`${latestSys.disk_write_mbps.toFixed(1)}`} sub='MB/s' accent='rose' /></CardContent></Card>
+            </div>
+          )}
 
-          {/* Row 3 — activity + cache hit */}
+          {/* Row 3 — activity + cache */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Runs per hour</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.activity?.length ? <ActivityChart data={c.activity} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Runs per hour · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{c?.activity?.length ? <ActivityChart data={c.activity} /> : <Empty />}</CardContent>
             </Card>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate %</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.efficiency?.length ? <CacheHitChart data={c.efficiency} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate % · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{c?.efficiency?.length ? <CacheHitChart data={c.efficiency} /> : <Empty />}</CardContent>
             </Card>
           </div>
 
           {/* Row 4 — efficiency + token ratio */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Avg turns/run · actions/turn</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.efficiency?.length ? <AvgTurnsChart data={c.efficiency} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Avg turns · actions/turn · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{c?.efficiency?.length ? <AvgTurnsChart data={c.efficiency} /> : <Empty />}</CardContent>
             </Card>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache reuse ratio</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.tokens?.length ? <TokenRatioChart data={c.tokens} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Lines added / removed · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{productivity.length ? <LinesChart data={productivity} /> : <Empty />}</CardContent>
             </Card>
           </div>
 
-          {/* Row 5 — productivity charts */}
+          {/* Row 5 — system charts */}
+          {sys && sys.length > 0 && (
+            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+              <Card>
+                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>CPU % · last 60 min</CardTitle></CardHeader>
+                <CardContent className='pb-3'><CPUChart samples={sys} /></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>RAM · last 60 min</CardTitle></CardHeader>
+                <CardContent className='pb-3'><MemoryChart samples={sys} /></CardContent>
+              </Card>
+            </div>
+          )}
+          {sys && sys.length > 0 && (
+            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+              <Card>
+                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Network RX / TX · last 60 min</CardTitle></CardHeader>
+                <CardContent className='pb-3'><NetworkChart samples={sys} /></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Disk read / write · last 60 min</CardTitle></CardHeader>
+                <CardContent className='pb-3'><DiskIOChart samples={sys} /></CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Row 6 — commits + quality split */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Lines added / removed</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {productivity.length ? <LinesChart data={productivity} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Commits · tests · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{productivity.length ? <CommitsChart data={productivity} /> : <Empty />}</CardContent>
             </Card>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Commits · tests per hour</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {productivity.length ? <CommitsChart data={productivity} /> : <Empty />}
-              </CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Terminal reasons · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>{c?.terminal_reasons?.length ? <TerminalReasonsChart data={c.terminal_reasons} /> : <Empty />}</CardContent>
             </Card>
           </div>
 
-          {/* Row 6 — quality split */}
+          {/* Row 7 — interactive/autonomous + token bar */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Terminal reasons</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.terminal_reasons?.length ? <TerminalReasonsChart data={c.terminal_reasons} /> : <Empty />}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Interactive vs autonomous</CardTitle></CardHeader>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Interactive vs autonomous · 24h</CardTitle></CardHeader>
               <CardContent className='pb-3'>
                 {(c?.interactive_runs ?? 0) + (c?.autonomous_runs ?? 0) > 0
                   ? <SplitChart interactive={c?.interactive_runs ?? 0} autonomous={c?.autonomous_runs ?? 0} />
                   : <Empty />}
               </CardContent>
             </Card>
+            {totalTok > 0 && (
+              <Card>
+                <CardContent className='pt-4 pb-3'>
+                  <div className='flex items-center justify-between text-xs text-muted-foreground mb-1.5'>
+                    <span>Token split · {fmt(totalTok)} total</span>
+                    <span>cache {(s?.cache_hit_rate_pct ?? 0).toFixed(0)}%</span>
+                  </div>
+                  <div className='h-3 rounded-full overflow-hidden flex gap-px bg-zinc-900'>
+                    {[
+                      { v: s?.cache_read_tokens ?? 0,  c: 'bg-emerald-500', l: 'cache read' },
+                      { v: s?.input_tokens ?? 0,        c: 'bg-sky-500',     l: 'input' },
+                      { v: s?.output_tokens ?? 0,       c: 'bg-violet-500',  l: 'output' },
+                      { v: s?.cache_create_tokens ?? 0, c: 'bg-amber-500',   l: 'cache write' },
+                    ].map(({ v, c: cls, l }) => (
+                      <div key={l} className={cls} style={{ width: `${totalTok > 0 ? (v/totalTok)*100 : 0}%` }} title={`${l}: ${fmt(v)}`} />
+                    ))}
+                  </div>
+                  <div className='flex gap-3 mt-1.5 text-[10px] text-muted-foreground'>
+                    <span><span className='text-emerald-500'>■</span> cache read</span>
+                    <span><span className='text-sky-500'>■</span> input</span>
+                    <span><span className='text-violet-500'>■</span> output</span>
+                    <span><span className='text-amber-500'>■</span> cache write</span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
-
-          {/* Token split bar */}
-          {totalTok > 0 && (
-            <Card>
-              <CardContent className='pt-3 pb-3'>
-                <div className='flex items-center justify-between text-xs text-muted-foreground mb-1.5'>
-                  <span>Token split · {fmt(totalTok)} total</span>
-                  <span>cache read {(s?.cache_hit_rate_pct ?? 0).toFixed(0)}%</span>
-                </div>
-                <div className='h-3 rounded-full overflow-hidden flex gap-px bg-zinc-900'>
-                  {[
-                    { v: s?.cache_read_tokens ?? 0,   c: 'bg-emerald-500', l: 'cache read' },
-                    { v: s?.input_tokens ?? 0,         c: 'bg-sky-500',     l: 'input' },
-                    { v: s?.output_tokens ?? 0,        c: 'bg-violet-500',  l: 'output' },
-                    { v: s?.cache_create_tokens ?? 0,  c: 'bg-amber-500',   l: 'cache write' },
-                  ].map(({ v, c, l }) => (
-                    <div key={l} className={c} style={{ width: `${totalTok > 0 ? (v/totalTok)*100 : 0}%` }} title={`${l}: ${fmt(v)}`} />
-                  ))}
-                </div>
-                <div className='flex gap-3 mt-1.5 text-[10px] text-muted-foreground'>
-                  <span><span className='text-emerald-500'>■</span> cache read</span>
-                  <span><span className='text-sky-500'>■</span> input</span>
-                  <span><span className='text-violet-500'>■</span> output</span>
-                  <span><span className='text-amber-500'>■</span> cache write</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
         </div>
       </Main>
     </>
   )
-}
-
-function Empty() {
-  return <div className='h-[160px] flex items-center justify-center text-xs text-muted-foreground'>No data yet</div>
 }

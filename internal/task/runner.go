@@ -855,11 +855,17 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// see which tasks were in-flight at the time of the crash.
 	if r.executionLog != nil {
 		startRow := execution.Row{
-			RunUID:    runUID,
-			EntityUID: t.ID,
-			Event:     execution.EventStarted,
-			StartedAt: rt.StartedAt.UnixMilli(),
-			CreatedBy: "runner",
+			RunUID:       runUID,
+			EntityUID:    t.ID,
+			Event:        execution.EventStarted,
+			Trigger:      "schedule",
+			NodeID:       r.sourceNode,
+			AgentRuntime: agent,
+			StartedAt:    rt.StartedAt.UnixMilli(),
+			WorktreePath: workDir,
+			Branch:       "", // will be filled after first commit
+			ToolCallsJSON: "{}",
+			CreatedBy:    "runner",
 		}
 		if err := r.executionLog.Insert(bgCtx, startRow); err != nil {
 			slog.Warn("execution_log: insert started event failed", "component", "runner", "task_id", t.ID, "error", err)
@@ -1107,20 +1113,77 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			}
 			terminalEvent := execution.EventCompleted
 			terminalReason := reason
+			errMsg := ""
 			if status == "failed" {
 				terminalEvent = execution.EventFailed
+				if waitErr != nil {
+					errMsg = waitErr.Error()
+				}
 			}
-			modelInfo := execution.LookupModel(rt.Model)
+
+			// Exit code
+			var exitCodeVal *int
+			if cmd.ProcessState != nil {
+				code := cmd.ProcessState.ExitCode()
+				exitCodeVal = &code
+			}
+
+			// Git stats: lines+/-, files changed, commits, SHA, branch
+			linesAdded, linesRemoved, filesChanged, commits, headSHA, branchName := RunGitStats(workDir, baseSHA)
+
+			// Parse additional metrics from stream-json output
+			compactions, errorCount, reasoningTokens, ttfbMS := ParseOutputMetrics(output)
 			testsRun, testsPassed, testsFailed := ParseTestsFromOutput(output)
+
+			modelInfo := execution.LookupModel(rt.Model)
+
+			// Host metrics: peak/avg CPU/RSS from samples collected during the run
+			var peakCPU, avgCPU, peakRSS, avgRSS float64
+			var diskUsedGB float64
+			var hostSamples []HostMetricsSample
+			if r.hostSampler != nil {
+				hostSamples, _ = r.hostSampler.Detach(t.ID)
+				for _, s := range hostSamples {
+					if s.CPUPct > peakCPU {
+						peakCPU = s.CPUPct
+					}
+					if s.RSSMB > peakRSS {
+						peakRSS = s.RSSMB
+					}
+					avgCPU += s.CPUPct
+					avgRSS += s.RSSMB
+					if s.DiskUsedGB > diskUsedGB {
+						diskUsedGB = s.DiskUsedGB
+					}
+				}
+				if n := len(hostSamples); n > 0 {
+					avgCPU /= float64(n)
+					avgRSS /= float64(n)
+				}
+			}
+
+			// Run number from task store (run_count after this run)
+			runNumber := 0
+			if task, err := r.store.Get(t.ID); err == nil && task != nil {
+				runNumber = task.RunCount
+			}
+
 			completedRow := execution.Row{
 				RunUID:            runUID,
 				EntityUID:         t.ID,
 				Event:             terminalEvent,
+				RunNumber:         runNumber,
+				Trigger:           "schedule",
+				NodeID:            r.sourceNode,
 				TerminalReason:    terminalReason,
 				StartedAt:         rt.StartedAt.UnixMilli(),
 				CompletedAt:       completedAtMS,
 				DurationMS:        durationMS,
+				TTFBMS:            ttfbMS,
+				ExitCode:          exitCodeVal,
+				Error:             errMsg,
 				Model:             rt.Model,
+				AgentRuntime:      agent,
 				Provider:          modelInfo.Provider,
 				ModelContextSize:  modelInfo.ContextWindowSize,
 				PricingVersion:    PricingVersion,
@@ -1128,13 +1191,28 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				OutputTokens:      int64(finalUsage.OutputTokens),
 				CacheReadTokens:   int64(finalUsage.CacheReadTokens),
 				CacheCreateTokens: int64(finalUsage.CacheCreationTokens),
+				ReasoningTokens:   reasoningTokens,
 				CostUSD:           costUSD,
 				Turns:             numTurns,
 				Actions:           rt.Actions,
+				Errors:            errorCount,
+				Compactions:       compactions,
 				ToolCallsJSON:     "{}",
+				LinesAdded:        linesAdded,
+				LinesRemoved:      linesRemoved,
+				FilesChanged:      filesChanged,
+				Commits:           commits,
+				CommitSHA:         headSHA,
+				Branch:            branchName,
+				WorktreePath:      workDir,
 				TestsRun:          testsRun,
 				TestsPassed:       testsPassed,
 				TestsFailed:       testsFailed,
+				PeakCPUPct:        peakCPU,
+				AvgCPUPct:         avgCPU,
+				PeakRSSMB:         peakRSS,
+				AvgRSSMB:          avgRSS,
+				DiskUsedGB:        diskUsedGB,
 				CreatedBy:         "runner",
 			}
 			execution.ComputeDerived(&completedRow)
@@ -1143,32 +1221,32 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			}
 
 			// Persist host CPU/RSS samples as individual EventSample rows.
-			if r.hostSampler != nil {
-				samples, _ := r.hostSampler.Detach(t.ID)
-				for _, smp := range samples {
-					sampleRow := execution.Row{
-						RunUID:      runUID,
-						EntityUID:   t.ID,
-						Event:       execution.EventSample,
-						CPUPct:      smp.CPUPct,
-						RSSMB:       smp.RSSMB,
-						DiskUsedGB:  smp.DiskUsedGB,
-						CostUSD:     smp.CostUSD,
-						Turns:       smp.Turns,
-						Actions:     smp.Actions,
-						ToolCallsJSON: "{}",
-						CreatedBy:   "runner",
-						CreatedAt:   smp.TS.UTC().Format(time.RFC3339Nano),
-					}
-					if err := r.executionLog.Insert(bgCtx, sampleRow); err != nil {
-						slog.Warn("execution_log: insert sample event failed", "component", "runner", "task_id", t.ID, "error", err)
-					}
+			for _, smp := range hostSamples {
+				sampleRow := execution.Row{
+					RunUID:        runUID,
+					EntityUID:     t.ID,
+					Event:         execution.EventSample,
+					Trigger:       "schedule",
+					NodeID:        r.sourceNode,
+					AgentRuntime:  agent,
+					StartedAt:     rt.StartedAt.UnixMilli(),
+					CPUPct:        smp.CPUPct,
+					RSSMB:         smp.RSSMB,
+					DiskUsedGB:    smp.DiskUsedGB,
+					CostUSD:       smp.CostUSD,
+					Turns:         smp.Turns,
+					Actions:       smp.Actions,
+					ToolCallsJSON: "{}",
+					CreatedBy:     "runner",
+					CreatedAt:     smp.TS.UTC().Format(time.RFC3339Nano),
+				}
+				if err := r.executionLog.Insert(bgCtx, sampleRow); err != nil {
+					slog.Warn("execution_log: insert sample event failed", "component", "runner", "task_id", t.ID, "error", err)
 				}
 			}
 		} else if r.hostSampler != nil {
-			// Drain the sampler even when execution_log is not wired so
-			// buffers don't grow unboundedly on older test code paths.
-			r.hostSampler.Detach(t.ID)
+			// Drain the sampler even when execution_log is not wired so buffers don't grow.
+			r.hostSampler.Detach(t.ID) //nolint:errcheck
 		}
 
 		// Post-completion execution-review gate. Successful completions must

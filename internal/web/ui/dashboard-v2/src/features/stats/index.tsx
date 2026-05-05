@@ -142,7 +142,7 @@ function ChartCard({ title, series }: {
   title: string
   series: (range: RangeDays) => React.ReactNode
 }) {
-  const [range, setRange] = useState<RangeDays>(0)
+  const [range, setRange] = useState<RangeDays>(7)
   return (
     <Card>
       <CardHeader className='pb-1 pt-3'>
@@ -663,7 +663,7 @@ function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export function StatsPage() {
-  const [range, setRange] = useState<RangeDays>(0)
+  const [range, setRange] = useState<RangeDays>(7)
   const { data, isLoading } = useStatsHistory(range)
 
   return (
