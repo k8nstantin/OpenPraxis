@@ -499,7 +499,6 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	// Legacy hierarchy route — used by the product list-pane tree expansion.
 	api.HandleFunc("/products/{id}/hierarchy", apiProductHierarchy(n)).Methods("GET")
 	api.HandleFunc("/execution/live", apiExecutionLive(n)).Methods("GET")
-	api.HandleFunc("/execution/{runUid}/output", apiExecutionOutput(n)).Methods("GET")
 	api.HandleFunc("/execution/{runUid}", apiExecutionLog(n)).Methods("GET")
 	api.HandleFunc("/delusions/by-peer", apiDelusionsByPeer(n)).Methods("GET")
 	api.HandleFunc("/delusions", apiDelusions(n)).Methods("GET")

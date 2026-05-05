@@ -89,17 +89,7 @@ type Row struct {
 	TestsFailed        int      `json:"tests_failed"`
 }
 
-// OutputChunk is one live text chunk in execution_output.
-type OutputChunk struct {
-	ID        string `json:"id"`
-	RunUID    string `json:"run_uid"`
-	Seq       int    `json:"seq"`
-	Chunk     string `json:"chunk"`
-	CreatedBy string `json:"created_by"`
-	CreatedAt string `json:"created_at"`
-}
-
-// Store owns the execution_log and execution_output tables.
+// Store owns the execution_log table.
 type Store struct{ db *sql.DB }
 
 // NewStore returns a Store backed by db. Call InitSchema once before use.
@@ -170,7 +160,7 @@ func addProductivityColumns(db *sql.DB) {
 	}
 }
 
-// InitSchema creates execution_log and execution_output (idempotent).
+// InitSchema creates execution_log (idempotent).
 func InitSchema(db *sql.DB) error {
 	if err := migrateOldSchema(db); err != nil {
 		return err
@@ -258,16 +248,6 @@ func InitSchema(db *sql.DB) error {
   ON execution_log(trigger, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_execlog_session
   ON execution_log(session_id, created_at DESC)`,
-		`CREATE TABLE IF NOT EXISTS execution_output (
-    id          TEXT PRIMARY KEY,
-    run_uid     TEXT    NOT NULL,
-    seq         INTEGER NOT NULL DEFAULT 0,
-    chunk       TEXT    NOT NULL,
-    created_by  TEXT    NOT NULL DEFAULT '',
-    created_at  TEXT    NOT NULL
-)`,
-		`CREATE INDEX IF NOT EXISTS idx_execout_run
-  ON execution_output(run_uid, seq ASC)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -333,24 +313,6 @@ func (s *Store) Insert(ctx context.Context, r Row) error {
 	return nil
 }
 
-// InsertOutput appends a live text chunk for a run.
-func (s *Store) InsertOutput(ctx context.Context, runUID, chunk string, seq int, createdBy string) error {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("execution: insert output: generate id: %w", err)
-	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO execution_output (id, run_uid, seq, chunk, created_by, created_at)
-		 VALUES (?,?,?,?,?,?)`,
-		id.String(), runUID, seq, chunk, createdBy,
-		time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return fmt.Errorf("execution: insert output: %w", err)
-	}
-	return nil
-}
-
 // ListByRun returns all rows for a run in chronological order.
 func (s *Store) ListByRun(ctx context.Context, runUID string) ([]Row, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -410,28 +372,6 @@ func (s *Store) ListByEntity(ctx context.Context, entityUID string, limit int) (
 	}
 	defer rows.Close()
 	return collectRows(rows)
-}
-
-// ListOutput returns output chunks for a run in seq order.
-func (s *Store) ListOutput(ctx context.Context, runUID string) ([]OutputChunk, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, run_uid, seq, chunk, created_by, created_at
-		 FROM execution_output WHERE run_uid = ? ORDER BY seq ASC`,
-		runUID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("execution: list output: %w", err)
-	}
-	defer rows.Close()
-	var out []OutputChunk
-	for rows.Next() {
-		var c OutputChunk
-		if err := rows.Scan(&c.ID, &c.RunUID, &c.Seq, &c.Chunk, &c.CreatedBy, &c.CreatedAt); err != nil {
-			return nil, fmt.Errorf("execution: list output: scan: %w", err)
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
 }
 
 // MigrateFromLegacy copies rows from the old execution_log format

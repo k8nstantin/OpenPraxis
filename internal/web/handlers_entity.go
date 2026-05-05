@@ -225,18 +225,6 @@ func apiEntitySearch(n *node.Node) http.HandlerFunc {
 	}
 }
 
-func apiExecutionOutput(n *node.Node) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		runUID := mux.Vars(r)["runUid"]
-		chunks, err := n.ExecutionLog.ListOutput(r.Context(), runUID)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		writeJSON(w, chunks)
-	}
-}
-
 func apiExecutionLog(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runUID := mux.Vars(r)["runUid"]

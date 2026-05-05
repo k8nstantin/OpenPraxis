@@ -217,38 +217,6 @@ func TestListByEntity_order(t *testing.T) {
 	}
 }
 
-func TestInsertOutput_and_listOutput(t *testing.T) {
-	db := openTestDB(t)
-	if err := InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
-	s := NewStore(db)
-	ctx := context.Background()
-	runUID := "out-run-1"
-	for _, tc := range []struct {
-		seq   int
-		chunk string
-	}{
-		{2, "second"},
-		{0, "first"},
-		{1, "middle"},
-	} {
-		if err := s.InsertOutput(ctx, runUID, tc.chunk, tc.seq, "test"); err != nil {
-			t.Fatalf("InsertOutput seq=%d: %v", tc.seq, err)
-		}
-	}
-	chunks, err := s.ListOutput(ctx, runUID)
-	if err != nil {
-		t.Fatalf("ListOutput: %v", err)
-	}
-	if len(chunks) != 3 {
-		t.Fatalf("expected 3 chunks, got %d", len(chunks))
-	}
-	// seq ASC: 0, 1, 2
-	if chunks[0].Chunk != "first" || chunks[1].Chunk != "middle" || chunks[2].Chunk != "second" {
-		t.Errorf("wrong order: %v %v %v", chunks[0].Chunk, chunks[1].Chunk, chunks[2].Chunk)
-	}
-}
 
 func TestLookupModel_known(t *testing.T) {
 	info := LookupModel("claude-opus-4-7")

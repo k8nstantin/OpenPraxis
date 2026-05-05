@@ -49,14 +49,6 @@ export interface ExecutionRow {
   created_at: string
 }
 
-export interface OutputChunk {
-  id: string
-  run_uid: string
-  seq: number
-  chunk: string
-  created_at: string
-}
-
 export type CommentType =
   | 'execution_review'
   | 'description_revision'

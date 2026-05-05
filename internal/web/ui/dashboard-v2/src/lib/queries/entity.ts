@@ -4,7 +4,6 @@ import type {
   Entity,
   ExecutionRow,
   HierarchyNode,
-  OutputChunk,
   ProductDependency,
 } from '@/lib/types'
 
@@ -25,7 +24,6 @@ import type {
 //   GET    /api/entities/:id/comments                        Comments tab
 //   GET    /api/entities/search?q=...&type=...               search
 //   GET    /api/execution/:runUid                            all events for a run
-//   GET    /api/execution/:runUid/output                     live text chunks (OutputChunk[])
 //
 // Legacy per-entity-type endpoints still in use (backend keeps them registered):
 //   /api/relationships/graph                                 DAG tab
@@ -58,7 +56,6 @@ export const entityKeys = {
   runs: (kind: EntityKind, id: string) =>
     [...entityKeys.all(kind), 'runs', id] as const,
   execution: (runUid: string) => ['execution', runUid] as const,
-  executionOutput: (runUid: string) => ['execution', runUid, 'output'] as const,
 }
 
 // kindPlural returns the legacy URL segment for a given entity kind.
@@ -287,26 +284,6 @@ export function useExecutionRun(runUid: string | undefined) {
       fetchJSON<ExecutionRow[]>(`/api/execution/${runUid}`),
     enabled: !!runUid,
     staleTime: 10 * 1000,
-  })
-}
-
-// Live text chunks for a run's output stream.
-export function useExecutionOutput(runUid: string | undefined) {
-  return useQuery({
-    queryKey: entityKeys.executionOutput(runUid ?? ''),
-    queryFn: () =>
-      fetchJSON<OutputChunk[]>(`/api/execution/${runUid}/output`),
-    enabled: !!runUid,
-    refetchInterval: (q) => {
-      // Stop polling if we have a completed/failed event for this run.
-      const rows = q.state.data ?? []
-      const done = rows.some(
-        (r) => r.event === 'completed' || r.event === 'failed'
-      )
-      return done ? false : 750
-    },
-    refetchIntervalInBackground: false,
-    staleTime: 0,
   })
 }
 
@@ -948,18 +925,6 @@ export function useCreateAndLinkUpstreamManifest(
   })
 }
 
-// ── Task live output ─────────────────────────────────────────────────
-//
-// The legacy `/api/tasks/{id}/output` ring-buffer endpoint was never
-// implemented in the backend. Live output is now served via:
-//
-//   GET /api/entities/{id}/runs   → ExecutionRow[] (all run events)
-//   GET /api/execution/{runUid}/output → OutputChunk[] (text chunks)
-//
-// `useTaskRuns` fetches the full run event log so the Live Output tab
-// can group events by run_uid and determine running/completed state.
-// `useTaskRunOutput` fetches the text chunks for a specific run.
-
 // All run events for this task from /api/entities/{id}/runs.
 // Returns ExecutionRow[] sorted DESC by created_at (backend order).
 export function useTaskRuns(taskId: string | undefined) {
@@ -989,6 +954,3 @@ export function useTaskRuns(taskId: string | undefined) {
   })
 }
 
-// Text chunks for a specific run — used by the Live Output tab for the
-// current in-flight run. Delegates to useExecutionOutput (same hook).
-export { useExecutionOutput as useTaskRunOutput }

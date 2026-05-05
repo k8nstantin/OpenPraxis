@@ -32,6 +32,8 @@ func DropLegacyTables(ctx context.Context, db *sql.DB) (dropped []string, err er
 		"task_manifests",
 		// Cost-related tables — cost will be redesigned.
 		"model_pricing",
+		// execution_output — superseded; output will live in execution_log.
+		"execution_output",
 	}
 	for _, t := range tables {
 		if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS "+t); err != nil {
