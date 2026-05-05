@@ -113,15 +113,25 @@ function fmt(n: number, dec = 0) {
   return n.toFixed(dec)
 }
 
-// "2026-05-04T14:00:00Z" → "Mon 14h" or just "14h"
-function hourLabel(iso: string) {
+const TZ = 'America/New_York'
+
+// Format a UTC ISO string as a short Eastern-time label for chart axes.
+function hourLabel(iso: string): string {
   const d = new Date(iso)
-  const h = d.getUTCHours().toString().padStart(2, '0')
-  // Show day prefix at midnight
-  if (d.getUTCHours() === 0) {
-    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()] + ' 0h'
-  }
-  return h + 'h'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hour: 'numeric', hour12: false, weekday: 'short',
+  }).formatToParts(d)
+  const h = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10)
+  const day = parts.find(p => p.type === 'weekday')?.value ?? ''
+  // Show day name only at midnight local time
+  return h === 0 ? `${day} 0h` : `${h}h`
+}
+
+// Format a UTC ISO string as HH:MM in Eastern time for system-stats axes.
+function timeLabel(ts: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(ts))
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────
@@ -150,6 +160,9 @@ function Empty() {
   return <div className='h-[160px] flex items-center justify-center text-xs text-muted-foreground'>No data</div>
 }
 
+// Common axis label config — show every other label so 24 buckets don't crowd
+const xLabelOpts = { fontSize: 9, interval: 1 }
+
 // ── Execution charts ───────────────────────────────────────────────────────
 
 function ActivityChart({ data }: { data: ChartsData['activity'] }) {
@@ -158,7 +171,7 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
     <EChart height={160} option={{
       grid: { left: 32, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: hours, axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'completed', type: 'bar', stack: 'runs', data: data.map(d => d.completed), itemStyle: { color: '#10b981' } },
@@ -169,15 +182,13 @@ function ActivityChart({ data }: { data: ChartsData['activity'] }) {
 }
 
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
-  // Use null for hours with no runs so ECharts draws a gap instead of dropping to 0%
-  const values = data.map(d => d.cache_hit_rate_pct > 0 ? +d.cache_hit_rate_pct.toFixed(1) : null)
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', formatter: (p: {value:number|null}[]) => p[0]?.value != null ? `${p[0].value}%` : 'no data' },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
+      tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: values, smooth: true, showSymbol: false, connectNulls: false,
+      series: [{ type: 'line', data: data.map(d => +d.cache_hit_rate_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false,
         lineStyle: { color: '#10b981', width: 2 },
         areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1,
           colorStops: [{ offset:0, color:'#10b981aa' },{ offset:1, color:'#10b98100' }] } } }],
@@ -186,17 +197,15 @@ function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
 }
 
 function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
-  const turns = data.map(d => d.avg_turns > 0 ? +d.avg_turns.toFixed(1) : null)
-  const apts  = data.map(d => d.avg_actions_per_turn > 0 ? +d.avg_actions_per_turn.toFixed(1) : null)
   return (
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
-        { name: 'turns/run',    type: 'line', data: turns, smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#a78bfa', width: 2 } },
-        { name: 'actions/turn', type: 'line', data: apts,  smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#38bdf8', width: 2 } },
+        { name: 'turns/run',    type: 'line', data: data.map(d => +d.avg_turns.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 } },
+        { name: 'actions/turn', type: 'line', data: data.map(d => +d.avg_actions_per_turn.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } },
       ],
     }} />
   )
@@ -207,7 +216,7 @@ function LinesChart({ data }: { data: ChartsData['productivity'] }) {
     <EChart height={160} option={{
       grid: { left: 40, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
         { name: 'added',   type: 'bar', data: data.map(d => d.lines_added),    itemStyle: { color: '#10b981' }, stack: 'lines' },
@@ -222,7 +231,7 @@ function CommitsChart({ data }: { data: ChartsData['productivity'] }) {
     <EChart height={160} option={{
       grid: { left: 32, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'commits', type: 'bar', data: data.map(d => d.commits),   itemStyle: { color: '#6366f1' } },
@@ -270,10 +279,6 @@ function downsample(samples: SysSample[], targetPoints = 120): SysSample[] {
   return samples.filter((_, i) => i % step === 0)
 }
 
-function timeLabel(ts: string) {
-  const d = new Date(ts)
-  return d.getUTCHours().toString().padStart(2,'0') + ':' + d.getUTCMinutes().toString().padStart(2,'0')
-}
 
 function CPUChart({ samples }: { samples: SysSample[] }) {
   const ds = downsample(samples)
@@ -281,7 +286,7 @@ function CPUChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 36, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `CPU ${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{
         name: 'CPU %', type: 'line', data: ds.map(s => +s.cpu_pct.toFixed(1)),
@@ -300,7 +305,7 @@ function MemoryChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 40, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `RAM ${((p[0]?.value ?? 0)/1024).toFixed(1)} GB` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', min: 0, max: total, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v/1024).toFixed(0)}G` } },
       series: [{
         name: 'RAM used', type: 'line', data: ds.map(s => +s.mem_used_mb.toFixed(0)),
@@ -319,7 +324,7 @@ function NetworkChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'rx', type: 'line', data: ds.map(s => +s.net_rx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 1.5 } },
@@ -336,7 +341,7 @@ function DiskIOChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 8, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: xLabelOpts },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'read',  type: 'line', data: ds.map(s => +s.disk_read_mbps.toFixed(2)),  smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 } },

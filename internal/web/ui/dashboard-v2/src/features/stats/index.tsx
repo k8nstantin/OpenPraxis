@@ -224,7 +224,7 @@ function DurationLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}s' } },
-      series: [{ type: 'line', data: runs.map(d => +d.avg_dur_sec.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
+      series: [{ type: 'line', data: runs.map(d => +d.avg_dur_sec.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
     }} />
   )
 }
@@ -270,7 +270,7 @@ function TurnsLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => d.avg_turns > 0 ? +d.avg_turns.toFixed(1) : null), smooth: true, showSymbol: false, connectNulls: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
+      series: [{ type: 'line', data: eff.map(d => +d.avg_turns.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
     }} />
   )
 }
@@ -286,7 +286,7 @@ function CacheHitLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_cache_hit_pct.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#10b98155' },{ offset:1, color:'#10b98100' }] } } }],
+      series: [{ type: 'line', data: eff.map(d => +d.avg_cache_hit_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#10b98155' },{ offset:1, color:'#10b98100' }] } } }],
     }} />
   )
 }
@@ -302,7 +302,7 @@ function ContextPctLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_context_pct.toFixed(1)), smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#f59e0b44' },{ offset:1, color:'#f59e0b00' }] } } }],
+      series: [{ type: 'line', data: eff.map(d => +d.avg_context_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#f59e0b', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#f59e0b44' },{ offset:1, color:'#f59e0b00' }] } } }],
     }} />
   )
 }
@@ -318,7 +318,7 @@ function TokensPerTurnLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_tokens_per_turn.toFixed(0)), smooth: true, showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } }],
+      series: [{ type: 'line', data: eff.map(d => +d.avg_tokens_per_turn.toFixed(0)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } }],
     }} />
   )
 }
@@ -334,7 +334,7 @@ function ActionsPerTurnLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis' },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'line', data: eff.map(d => +d.avg_actions_per_turn.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#6366f1', width: 2 } }],
+      series: [{ type: 'line', data: eff.map(d => +d.avg_actions_per_turn.toFixed(2)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#6366f1', width: 2 } }],
     }} />
   )
 }
@@ -389,7 +389,7 @@ function CacheRatioLineChart({ range }: { range: RangeDays }) {
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value?.toFixed(1)}%` },
       xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
-      series: [{ type: 'line', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0 }), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type:'linear',x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'#10b98155'},{offset:1,color:'#10b98100'}] } } }],
+      series: [{ type: 'line', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0 }), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type:'linear',x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'#10b98155'},{offset:1,color:'#10b98100'}] } } }],
     }} />
   )
 }
