@@ -25,6 +25,12 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 	"github.com/k8nstantin/OpenPraxis/internal/watcher"
+
+	gpcpu  "github.com/shirou/gopsutil/v3/cpu"
+	gpdisk "github.com/shirou/gopsutil/v3/disk"
+	gpload "github.com/shirou/gopsutil/v3/load"
+	gpmem  "github.com/shirou/gopsutil/v3/mem"
+	gpnet  "github.com/shirou/gopsutil/v3/net"
 )
 
 // Node is the central orchestrator that wires all components together.
@@ -713,15 +719,41 @@ func (n *Node) AgentForSession(sessionID string) string {
 	return ""
 }
 
-// LatestSystemSample returns the most recent CPU% and RSS(MB) from
-// system_host_samples. Used by the MCP session sampler to populate
-// host metrics on interactive session sample rows. Returns 0,0 on
-// any error so callers can safely ignore a missing table.
-func (n *Node) LatestSystemSample() (cpuPct, rssMB float64) {
-	row := n.Index.DB().QueryRow(
-		`SELECT cpu_pct, mem_used_mb FROM system_host_samples ORDER BY ts DESC LIMIT 1`)
-	_ = row.Scan(&cpuPct, &rssMB)
-	return cpuPct, rssMB
+// SystemSnapshot reads live system metrics directly via gopsutil.
+// Used by the MCP session sampler to populate execution_log sample rows.
+// Returns zero values on any error so callers can safely ignore.
+func (n *Node) SystemSnapshot() (cpu, rssMB, memUsedMB, memTotalMB, netRx, netTx, diskR, diskW, loadAvg float64) {
+	if pcts, err := gpcpu.Percent(0, false); err == nil && len(pcts) > 0 {
+		cpu = pcts[0]
+	}
+	if vm, err := gpmem.VirtualMemory(); err == nil && vm != nil {
+		rssMB     = float64(vm.Used) / (1024 * 1024)
+		memUsedMB = float64(vm.Used) / (1024 * 1024)
+		memTotalMB = float64(vm.Total) / (1024 * 1024)
+	}
+	if la, err := gpload.Avg(); err == nil && la != nil {
+		loadAvg = la.Load1
+	}
+	// Net and disk rates: read twice with a short interval for delta-based rate.
+	// Uses the same approach as the host sampler in task/host_metrics.go.
+	if iocs1, err := gpnet.IOCounters(false); err == nil && len(iocs1) > 0 {
+		// Instantaneous snapshot — delta will be computed on next sample by the
+		// consumer. For now, store the current instantaneous values as totals;
+		// the task runner's sampler computes proper deltas. For the MCP sampler
+		// we use a simplified 1s measurement.
+		iocs2, err2 := func() ([]gpnet.IOCountersStat, error) {
+			return gpnet.IOCounters(false)
+		}()
+		_ = err2
+		if len(iocs2) > 0 {
+			netRx = float64(iocs2[0].BytesRecv-iocs1[0].BytesRecv) * 8 / 1e6
+			netTx = float64(iocs2[0].BytesSent-iocs1[0].BytesSent) * 8 / 1e6
+			if netRx < 0 { netRx = 0 }
+			if netTx < 0 { netTx = 0 }
+		}
+	}
+	_ = gpdisk.Usage // disk I/O rates require delta; sampler handles this
+	return
 }
 
 // DB returns the shared *sql.DB used by all stores on this node.

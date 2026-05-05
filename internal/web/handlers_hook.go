@@ -64,7 +64,7 @@ func apiHook(n *node.Node) http.HandlerFunc {
 				if totalTok > 0 {
 					cacheHit = float64(live.CacheReadTokens) / float64(totalTok) * 100
 				}
-				cpuPct, rssMB := n.LatestSystemSample()
+				cpu, rssMB, memUsed, memTotal, netRx, netTx, _, _, load := n.SystemSnapshot()
 				sr := execution.Row{
 					ID:                uuid.Must(uuid.NewV7()).String(),
 					RunUID:            runUID,
@@ -82,9 +82,14 @@ func apiHook(n *node.Node) http.HandlerFunc {
 					CacheReadTokens:   int64(live.CacheReadTokens),
 					CacheCreateTokens: int64(live.CacheCreateTokens),
 					CacheHitRatePct:   cacheHit,
-					CPUPct:            cpuPct,
-					RSSMB:             rssMB,
-					CreatedBy:         "hook/post-tool-use",
+					CPUPct:     cpu,
+					RSSMB:      rssMB,
+					MemUsedMB:  memUsed,
+					MemTotalMB: memTotal,
+					NetRxMbps:  netRx,
+					NetTxMbps:  netTx,
+					LoadAvg1m:  load,
+					CreatedBy:  "hook/post-tool-use",
 				}
 				_ = n.ExecutionLog.Insert(context.Background(), sr)
 			}
