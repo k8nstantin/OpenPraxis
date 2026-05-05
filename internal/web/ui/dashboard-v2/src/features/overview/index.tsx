@@ -223,10 +223,14 @@ function ActivityOverviewChart({ c, prod, sys }: {
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
       xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 } },
-      yAxis: [
-        { type: 'value', name: 'turns', nameTextStyle: { fontSize: 8 }, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-        { type: 'value', name: 'lines/net', nameTextStyle: { fontSize: 8 }, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' },
-      ],
+      yAxis: (() => {
+        const leftMax = Math.max(1, ...left.flatMap(s => s.data))
+        const rightMax = Math.max(1, ...right.flatMap(s => s.data))
+        return [
+          { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1), axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+          { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
+        ]
+      })(),
       series: [
         ...left.map(s => ({
           name: s.name, type: 'line' as const, yAxisIndex: 0,
