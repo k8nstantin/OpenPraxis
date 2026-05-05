@@ -1,6 +1,6 @@
 .PHONY: build frontend dev-frontend clean run test test-ui help build-all types storybook
 
-VERSION ?= 0.5.0
+VERSION ?= 0.5.1
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS = -ldflags "-X github.com/k8nstantin/OpenPraxis/cmd.Version=$(VERSION) \

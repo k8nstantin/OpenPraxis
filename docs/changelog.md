@@ -2,6 +2,45 @@
 
 Moved out of the main README to keep the landing page focused on what OpenPraxis **is** rather than what just changed. See the ["Changelog" link in the README](../README.md#deeper-references) to land here from the top of the repo.
 
+## v0.8.0 — May 2026
+
+### ContentBlock — unified text + attachment element
+
+Single reusable component replaces the per-entity description editors. Same element across all types, just with different labels:
+
+| Entity | Label |
+|--------|-------|
+| Product | Description |
+| Manifest | Declaration |
+| Task | Instructions |
+| Skill / Idea | Description |
+
+- `BlockNoteComposer` with native drag/drop/paste file attachments (paperclip button in toolbar)
+- Version history built-in — collapsible revision list
+- Comments tab uses same composer; only latest `description_revision` highlighted (older dimmed)
+
+### System metrics consolidated into execution_log
+
+`system_host_samples` table dropped. All system metrics now live exclusively in `execution_log` sample rows:
+
+- 7 new `NOT NULL` columns: `net_rx_mbps`, `net_tx_mbps`, `disk_read_mbps`, `disk_write_mbps`, `mem_used_mb`, `mem_total_mb`, `load_avg_1m`
+- MCP session sampler and hook writer capture full OS state on every tick
+- `NOT NULL` with no default — missing data fails at the DB level, not silently
+
+### Charts
+
+- **Activity chart**: turns + actions on shared Y-axis; lines/files/net in separate System chart
+- **SystemStatsChart**: self-contained with full range selector (1d default, up to All)
+- **Y-axis pinned**: max set from data × 1.1, no rescaling between ticks
+- **All charts**: `boundaryGap: false`, smooth monotone curves, ET timezone labels
+
+### Runner
+
+- All 63 `execution_log` columns populated on every task run
+- Git stats (lines+/-, files, commits, branch, SHA) captured after each run
+- Compactions, errors, reasoning tokens parsed from stream-json output
+- Host sampler extended with network and disk I/O rates
+
 ## v0.7.0 — May 2026
 
 ### Stats page — full execution history with per-chart zoom
