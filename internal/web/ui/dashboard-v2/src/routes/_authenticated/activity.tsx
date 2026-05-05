@@ -1,19 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { formatDistanceToNow, fromUnixTime } from 'date-fns'
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { formatDistanceToNow, fromUnixTime, format } from 'date-fns'
+import { Loader2 } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { ExecutionRow } from '@/lib/types'
 
 export const Route = createFileRoute('/_authenticated/activity')({
   component: ActivityPage,
 })
 
-interface RecentRun {
+interface ActivityEvent {
   run_uid: string
   entity_uid: string
   entity_title: string
@@ -38,154 +36,107 @@ interface RecentRun {
   created_at: string
 }
 
+function fmtAgo(ts: string) {
+  try { return formatDistanceToNow(new Date(ts), { addSuffix: true }) }
+  catch { return ts }
+}
+
+function fmtTime(ts: string) {
+  try { return format(new Date(ts), 'HH:mm:ss') }
+  catch { return '' }
+}
+
 function fmtDur(ms: number) {
-  if (!ms) return '—'
+  if (!ms) return ''
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
 function fmtTok(n: number) {
-  if (!n) return '—'
+  if (!n) return ''
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
   return String(n)
 }
 
-function fmtAgo(ts: number | string) {
-  try {
-    const d = typeof ts === 'number' ? fromUnixTime(ts / 1000) : new Date(ts as string)
-    return formatDistanceToNow(d, { addSuffix: true })
-  } catch {
-    return '?'
-  }
+function EventBadge({ event }: { event: ActivityEvent['event'] }) {
+  if (event === 'started')
+    return <Badge variant='outline' className='border-blue-400 text-blue-400 w-20 justify-center text-xs'>started</Badge>
+  if (event === 'sample')
+    return <Badge variant='outline' className='border-muted-foreground text-muted-foreground w-20 justify-center text-xs'>sample</Badge>
+  if (event === 'completed')
+    return <Badge variant='outline' className='border-emerald-500 text-emerald-500 w-20 justify-center text-xs'>completed</Badge>
+  return <Badge variant='destructive' className='w-20 justify-center text-xs'>failed</Badge>
 }
 
-function StatusBadge({ run }: { run: RecentRun }) {
-  if (run.event === 'started' || run.event === 'sample') {
-    return (
-      <Badge variant='outline' className='border-blue-400 text-blue-400 gap-1 flex-shrink-0'>
-        <Loader2 className='h-3 w-3 animate-spin' />
-        running
-      </Badge>
-    )
-  }
-  if (run.event === 'failed') {
-    return <Badge variant='destructive' className='flex-shrink-0'>failed</Badge>
-  }
-  const label = run.terminal_reason && run.terminal_reason !== 'success' ? run.terminal_reason : 'done'
-  return (
-    <Badge variant='outline' className='border-emerald-500 text-emerald-500 flex-shrink-0' title={label}>
-      {label}
-    </Badge>
-  )
-}
+function EventRow({ ev }: { ev: ActivityEvent }) {
+  const totalTok = ev.input_tokens + ev.output_tokens
+  const isRunning = ev.event === 'started' || ev.event === 'sample'
 
-function LiveStats({ runUid }: { runUid: string }) {
-  const { data } = useQuery<ExecutionRow[]>({
-    queryKey: ['execution', runUid],
-    queryFn: () => fetch(`/api/execution/${runUid}`).then((r) => r.json()),
-    refetchInterval: 2000,
-    staleTime: 0,
-  })
-  const rows = data ?? []
-  const latest = rows[rows.length - 1]
-  if (!latest) return <Skeleton className='h-8 w-full mt-2' />
   return (
-    <div className='mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs'>
-      {[
-        ['turns', latest.turns],
-        ['actions', latest.actions],
-        ['ctx %', latest.context_window_pct?.toFixed(0) + '%'],
-        ['cache hit', latest.cache_hit_rate_pct?.toFixed(0) + '%'],
-      ].map(([label, val]) => (
-        <div key={String(label)} className='bg-muted/40 rounded p-2'>
-          <div className='text-muted-foreground'>{label}</div>
-          <div className='font-mono font-medium'>{val || '—'}</div>
-        </div>
-      ))}
-      <div className='col-span-2 sm:col-span-4 text-muted-foreground font-mono'>
-        {rows.length} events recorded · live
-      </div>
-    </div>
-  )
-}
+    <div className='flex items-center gap-3 py-2 border-b last:border-0 hover:bg-muted/20 px-1 text-sm'>
+      <span className='text-muted-foreground font-mono text-xs w-16 flex-shrink-0' title={ev.created_at}>
+        {fmtTime(ev.created_at)}
+      </span>
 
-function CompletedStats({ run }: { run: RecentRun }) {
-  const totalTok = run.input_tokens + run.output_tokens
-  return (
-    <div className='mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs'>
-      {[
-        ['duration', fmtDur(run.duration_ms)],
-        ['turns', run.turns],
-        ['actions', run.actions],
-        ['tokens', fmtTok(totalTok)],
-        ['cache hit', run.cache_hit_rate_pct ? run.cache_hit_rate_pct.toFixed(0) + '%' : '—'],
-        ['lines +', run.lines_added || '—'],
-        ['lines −', run.lines_removed || '—'],
-        ['commits', run.commits || '—'],
-      ].map(([label, val]) => (
-        <div key={String(label)} className='bg-muted/40 rounded p-2'>
-          <div className='text-muted-foreground'>{label}</div>
-          <div className='font-mono font-medium'>{val}</div>
-        </div>
-      ))}
-      {run.error && (
-        <div className='col-span-2 sm:col-span-4 text-rose-400 font-mono text-xs truncate'>
-          {run.error}
-        </div>
+      <EventBadge event={ev.event} />
+
+      <span className='flex-1 min-w-0 truncate font-medium' title={ev.entity_title}>
+        {ev.entity_title}
+      </span>
+
+      <span className='text-muted-foreground font-mono text-xs min-w-[4rem] text-right'>
+        {ev.turns > 0 ? `${ev.turns}t` : ''}
+        {ev.actions > 0 ? ` ${ev.actions}a` : ''}
+      </span>
+
+      {totalTok > 0 && (
+        <span className='text-muted-foreground font-mono text-xs min-w-[3.5rem] text-right'>
+          {fmtTok(totalTok)}
+        </span>
       )}
-      {run.model && (
-        <div className='col-span-2 sm:col-span-4 text-muted-foreground'>
-          {run.model.replace('claude-', '')}
-          {run.trigger ? ` · trigger: ${run.trigger}` : ''}
-        </div>
+
+      {ev.cache_hit_rate_pct > 0 && (
+        <span className='text-emerald-400 font-mono text-xs w-10 text-right'>
+          {ev.cache_hit_rate_pct.toFixed(0)}%
+        </span>
       )}
-    </div>
-  )
-}
 
-function RunRow({ run }: { run: RecentRun }) {
-  const [expanded, setExpanded] = useState(false)
-  const isRunning = run.event === 'started' || run.event === 'sample'
-  const ChevIcon = expanded ? ChevronDown : ChevronRight
-
-  return (
-    <div className='border-b last:border-0'>
-      <button
-        className='w-full text-left flex items-center gap-3 py-3 hover:bg-muted/40 transition-colors'
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <ChevIcon className='h-4 w-4 text-muted-foreground flex-shrink-0' />
-        <StatusBadge run={run} />
-        <div className='flex-1 min-w-0'>
-          <span className='text-sm font-medium truncate block'>{run.entity_title}</span>
-          <span className='text-xs text-muted-foreground'>
-            {fmtAgo(run.started_at || run.created_at)}
-            {!isRunning && run.duration_ms ? ` · ${fmtDur(run.duration_ms)}` : ''}
-            {run.turns > 0 ? ` · ${run.turns}t` : ''}
-          </span>
-        </div>
-        {run.entity_type && (
-          <Badge variant='outline' className='text-xs flex-shrink-0'>{run.entity_type}</Badge>
-        )}
-      </button>
-
-      {expanded && (
-        <div className='px-8 pb-3'>
-          {isRunning ? <LiveStats runUid={run.run_uid} /> : <CompletedStats run={run} />}
-        </div>
+      {ev.duration_ms > 0 && (
+        <span className='text-muted-foreground font-mono text-xs w-12 text-right'>
+          {fmtDur(ev.duration_ms)}
+        </span>
       )}
+
+      {ev.lines_added > 0 && (
+        <span className='font-mono text-xs'>
+          <span className='text-emerald-400'>+{ev.lines_added}</span>
+          {ev.lines_removed > 0 && <span className='text-rose-400'> −{ev.lines_removed}</span>}
+        </span>
+      )}
+
+      {isRunning && (
+        <Loader2 className='h-3 w-3 text-blue-400 animate-spin flex-shrink-0' />
+      )}
+
+      {ev.entity_type && ev.entity_type !== 'interactive' && (
+        <Badge variant='outline' className='text-xs px-1.5 h-4 flex-shrink-0'>{ev.entity_type}</Badge>
+      )}
+
+      <span className='text-muted-foreground text-xs w-20 text-right flex-shrink-0'>
+        {fmtAgo(ev.created_at)}
+      </span>
     </div>
   )
 }
 
 function ActivityPage() {
-  const { data: runs, isLoading, isError } = useQuery<RecentRun[]>({
-    queryKey: ['execution-recent'],
-    queryFn: () => fetch('/api/execution/recent?limit=100').then((r) => r.json()),
-    refetchInterval: 10_000,
-    staleTime: 5_000,
+  const { data: events, isLoading, isError } = useQuery<ActivityEvent[]>({
+    queryKey: ['activity-events'],
+    queryFn: () => fetch('/api/execution/recent?limit=200').then((r) => r.json()),
+    refetchInterval: 5_000,
+    staleTime: 3_000,
   })
 
   return (
@@ -194,15 +145,15 @@ function ActivityPage() {
       <Main>
         <div className='mb-4 flex items-center justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Activity</h1>
-          {runs && (
-            <span className='text-sm text-muted-foreground'>{runs.length} runs</span>
+          {events && (
+            <span className='text-sm text-muted-foreground'>{events.length} events</span>
           )}
         </div>
 
         {isLoading && (
-          <div className='space-y-2'>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className='h-14 w-full' />
+          <div className='space-y-1'>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <Skeleton key={i} className='h-9 w-full' />
             ))}
           </div>
         )}
@@ -211,16 +162,26 @@ function ActivityPage() {
           <div className='text-sm text-rose-400'>Failed to load activity.</div>
         )}
 
-        {runs?.length === 0 && (
-          <div className='text-muted-foreground text-sm py-12 text-center'>
-            No runs yet.
-          </div>
+        {events?.length === 0 && (
+          <div className='text-muted-foreground text-sm py-12 text-center'>No activity yet.</div>
         )}
 
-        {runs && runs.length > 0 && (
-          <div className='rounded-md border divide-y-0'>
-            {runs.map((run) => (
-              <RunRow key={run.run_uid} run={run} />
+        {events && events.length > 0 && (
+          <div className='rounded-md border'>
+            <div className='flex items-center gap-3 px-1 py-1.5 border-b bg-muted/30 text-xs text-muted-foreground font-medium'>
+              <span className='w-16 flex-shrink-0'>time</span>
+              <span className='w-20 flex-shrink-0'>event</span>
+              <span className='flex-1'>entity</span>
+              <span className='min-w-[4rem] text-right'>turns/actions</span>
+              <span className='min-w-[3.5rem] text-right'>tokens</span>
+              <span className='w-10 text-right'>cache</span>
+              <span className='w-12 text-right'>dur</span>
+              <span className='w-16'>lines</span>
+              <span className='w-16'></span>
+              <span className='w-20 text-right'>ago</span>
+            </div>
+            {events.map((ev, i) => (
+              <EventRow key={`${ev.run_uid}-${i}`} ev={ev} />
             ))}
           </div>
         )}

@@ -261,10 +261,6 @@ func apiExecutionRecent(n *node.Node) http.HandlerFunc {
 				limit = v
 			}
 		}
-		// For each entity, return the single most recent terminal event (completed/failed)
-		// or, if no terminal exists for the latest run, the most recent sample/started.
-		// We group by entity_uid to avoid flooding the feed with sampler noise from
-		// interactive sessions that write one sample row per tick with a fresh run_uid.
 		rows, err := n.DB().QueryContext(r.Context(), `
 			SELECT
 			  el.run_uid,
@@ -282,11 +278,6 @@ func apiExecutionRecent(n *node.Node) http.HandlerFunc {
 			  el.lines_added, el.lines_removed, el.commits,
 			  el.error, el.created_at
 			FROM execution_log el
-			INNER JOIN (
-			  SELECT entity_uid, MAX(id) AS max_id
-			  FROM execution_log
-			  GROUP BY entity_uid
-			) latest ON el.id = latest.max_id
 			LEFT JOIN (
 			  SELECT entity_uid, title, type FROM entities WHERE valid_to = ''
 			) e ON e.entity_uid = el.entity_uid
