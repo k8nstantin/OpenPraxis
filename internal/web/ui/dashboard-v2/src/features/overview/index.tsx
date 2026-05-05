@@ -207,7 +207,6 @@ function ActivityOverviewChart({ c, prod, sys }: {
   const series = [
     { name: 'turns',       raw: c.efficiency.map(d => d.avg_turns),            color: '#a78bfa' },
     { name: 'actions/t',   raw: c.efficiency.map(d => d.avg_actions_per_turn),  color: '#38bdf8' },
-    { name: 'cache %',     raw: c.efficiency.map(d => d.cache_hit_rate_pct),    color: '#10b981' },
     { name: 'lines +',     raw: c.efficiency.map(d => prodFor(d.hour).lines_added),    color: '#34d399' },
     { name: 'lines −',     raw: c.efficiency.map(d => prodFor(d.hour).lines_removed),  color: '#f43f5e' },
     { name: 'files',       raw: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
