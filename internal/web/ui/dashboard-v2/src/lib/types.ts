@@ -40,12 +40,44 @@ export interface ExecutionRow {
   entity_uid: string
   event: 'started' | 'sample' | 'completed' | 'failed'
   run_number: number
-  turns: number
+  trigger: string
+  terminal_reason: string
+  started_at: number
+  completed_at: number
+  duration_ms: number
+  ttfb_ms: number
+  exit_code: number | null
+  error: string
+  provider: string
+  model: string
+  agent_runtime: string
+  agent_version: string
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_create_tokens: number
+  reasoning_tokens: number
   cache_hit_rate_pct: number
+  context_window_pct: number
+  tokens_per_turn: number
+  turns: number
+  actions: number
+  errors: number
+  compactions: number
+  lines_added: number
+  lines_removed: number
+  files_changed: number
+  commits: number
+  pr_number: number | null
+  branch: string
   cpu_pct: number
   rss_mb: number
+  peak_cpu_pct: number
+  peak_rss_mb: number
+  tests_run: number
+  tests_passed: number
+  tests_failed: number
+  session_id: string
   created_at: string
 }
 

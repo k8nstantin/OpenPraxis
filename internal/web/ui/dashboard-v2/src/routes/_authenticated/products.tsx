@@ -4,7 +4,7 @@ import { EntityPage } from '@/features/entity'
 
 const productsSearch = z.object({
   id: z.string().optional(),
-  tab: z.enum(['main', 'execution', 'comments', 'dependencies', 'dag'])
+  tab: z.enum(['main', 'execution', 'runs', 'comments', 'dependencies', 'dag'])
     .optional().default('main').catch('main'),
 })
 
