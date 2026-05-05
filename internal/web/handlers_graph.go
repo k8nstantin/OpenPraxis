@@ -84,6 +84,9 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 		for _, id := range taskIDs {
 			if t, _ := n.Tasks.Get(id); t != nil {
 				nodes = append(nodes, nodeOut{ID: t.ID, Kind: relationships.KindTask, Title: t.Title, Status: t.Status})
+			} else if e, _ := n.Entities.Get(id); e != nil {
+				// Tasks created via /api/entities live in the entity store, not the legacy task store.
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindTask, Title: e.Title, Status: e.Status})
 			}
 		}
 

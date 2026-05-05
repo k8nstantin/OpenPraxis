@@ -162,18 +162,20 @@ export function useEntityChildren(
   kind: EntityKind,
   id: string | undefined
 ) {
-  const path =
-    kind === 'product'
-      ? `/api/entities?type=manifest&parent_id=${id}&limit=200`
-      : kind === 'manifest'
-        ? `/api/entities?type=task&manifest_id=${id}&limit=200`
-        : ''
   return useQuery({
     queryKey: entityKeys.children(kind, id ?? ''),
-    queryFn: () =>
-      kind === 'task'
-        ? Promise.resolve([] as unknown[])
-        : fetchJSON<Entity[] | unknown[]>(path),
+    queryFn: async () => {
+      if (!id || kind === 'task') return []
+      // Use relationships graph — direct owns children only (depth=1)
+      const childKind = kind === 'product' ? 'manifest' : 'task'
+      const res = await fetch(
+        `/api/relationships/graph?root_id=${id}&root_kind=${kind}&depth=1`
+      )
+      if (!res.ok) return []
+      const data = (await res.json()) as { nodes: { id: string; kind: string; title: string; status: string }[] }
+      // Filter to direct children of the correct type (exclude the root itself)
+      return (data.nodes ?? []).filter(n => n.id !== id && n.kind === childKind)
+    },
     enabled: !!id && kind !== 'task',
     staleTime: 15 * 1000,
   })
