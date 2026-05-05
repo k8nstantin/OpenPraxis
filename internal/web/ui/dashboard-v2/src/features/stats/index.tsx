@@ -207,7 +207,7 @@ function RunsBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'completed', type: 'bar', stack: 'r', data: runs.map(d => d.completed), itemStyle: { color: '#10b981' } },
@@ -226,7 +226,7 @@ function DurationLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}s' } },
       series: [{ type: 'line', data: runs.map(d => +d.avg_dur_sec.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
     }} />
@@ -254,7 +254,7 @@ function RetriesBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [{ type: 'bar', data: runs.map(d => +d.avg_run_number.toFixed(1)), itemStyle: { color: '#6366f1' } }],
     }} />
@@ -272,7 +272,7 @@ function TurnsLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [{ type: 'line', data: eff.map(d => +d.avg_turns.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#a78bfa44' },{ offset:1, color:'#a78bfa00' }] } } }],
     }} />
@@ -288,7 +288,7 @@ function CacheHitLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{ type: 'line', data: eff.map(d => +d.avg_cache_hit_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#10b98155' },{ offset:1, color:'#10b98100' }] } } }],
     }} />
@@ -304,7 +304,7 @@ function ContextPctLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{ type: 'line', data: eff.map(d => +d.avg_context_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#f59e0b', width: 2 }, areaStyle: { color: { type: 'linear', x:0,y:0,x2:0,y2:1, colorStops: [{ offset:0, color:'#f59e0b44' },{ offset:1, color:'#f59e0b00' }] } } }],
     }} />
@@ -320,7 +320,7 @@ function TokensPerTurnLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [{ type: 'line', data: eff.map(d => +d.avg_tokens_per_turn.toFixed(0)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#38bdf8', width: 2 } }],
     }} />
@@ -336,7 +336,7 @@ function ActionsPerTurnLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [{ type: 'line', data: eff.map(d => +d.avg_actions_per_turn.toFixed(2)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#6366f1', width: 2 } }],
     }} />
@@ -352,7 +352,7 @@ function CompactionsBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [{ type: 'bar', data: eff.map(d => d.total_compactions), itemStyle: { color: '#f59e0b' } }],
     }} />
@@ -370,7 +370,7 @@ function TokenStackedBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'k' : String(v) } },
       series: [
         { name: 'cache read',  type: 'bar', stack: 'tok', data: tok.map(d => d.cache_read_tokens),   itemStyle: { color: '#10b981' } },
@@ -391,7 +391,7 @@ function CacheRatioLineChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{ type: 'line', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0 }), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#10b981', width: 2 }, areaStyle: { color: { type:'linear',x:0,y:0,x2:0,y2:1, colorStops:[{offset:0,color:'#10b98155'},{offset:1,color:'#10b98100'}] } } }],
     }} />
@@ -407,7 +407,7 @@ function OutputTokensBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v:number) => v>=1e3?(v/1e3).toFixed(0)+'k':String(v) } },
       series: [{ type: 'bar', data: tok.map(d => d.output_tokens), itemStyle: { color: '#a78bfa' } }],
     }} />
@@ -426,7 +426,7 @@ function ReasoningTokensBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [{ type: 'bar', data: tok.map(d => d.reasoning_tokens), itemStyle: { color: '#f43f5e' } }],
     }} />
@@ -448,7 +448,7 @@ function LinesBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
         { name: 'added',   type: 'bar', data: prod.map(d => d.lines_added),    itemStyle: { color: '#10b981' }, stack: 'lines' },
@@ -471,7 +471,7 @@ function CommitsFilesBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'commits', type: 'bar', data: prod.map(d => d.commits),       itemStyle: { color: '#6366f1' } },
@@ -494,7 +494,7 @@ function TestsBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: \1, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'passed', type: 'bar', stack: 't', data: prod.map(d => d.tests_passed), itemStyle: { color: '#10b981' } },

@@ -252,8 +252,8 @@ function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
       xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 8 }, boundaryGap: false },
       yAxis: [
-        { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1),  alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-        { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
+        { type: 'value' as const, min: 0, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+        { type: 'value' as const, min: 0, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
       ],
       series: [
         ...left.map(s  => ({ name: s.name, type: 'line' as const, yAxisIndex: 0, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 1.5 } })),
