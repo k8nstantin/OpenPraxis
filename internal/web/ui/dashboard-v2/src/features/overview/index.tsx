@@ -83,15 +83,22 @@ function useGitStats() {
   })
 }
 
-function useSysStats() {
+// Range in days → hours for system stats (1d = 24h, 0 = all time ≈ 30d)
+function sysHours(days: ActivityRange): number {
+  if (days === 0) return 24 * 30
+  return days * 24
+}
+
+function useSysStats(hours = 24) {
   const now = new Date()
-  const from = new Date(now.getTime() - 60 * 60 * 1000) // last 60 min
+  const from = new Date(now.getTime() - hours * 60 * 60 * 1000)
   return useQuery({
-    queryKey: ['system-stats', 'overview'],
+    queryKey: ['system-stats', hours],
     queryFn: () => fetch(
       `/api/system-stats?from=${from.toISOString()}&to=${now.toISOString()}`
     ).then(r => r.json()).then((d: { samples: SysSample[] }) => d.samples ?? []) as Promise<SysSample[]>,
-    refetchInterval: 10_000, staleTime: 5_000,
+    refetchInterval: hours <= 1 ? 10_000 : 60_000,
+    staleTime: hours <= 1 ? 5_000 : 30_000,
   })
 }
 
@@ -513,6 +520,66 @@ function DiskIOChart({ samples }: { samples: SysSample[] }) {
   )
 }
 
+// ── System stats — self-contained card with range selector ────────────────
+
+export function SystemStatsChart({ defaultRange = 1 }: { defaultRange?: ActivityRange } = {}) {
+  const [range, setRange] = useState<ActivityRange>(defaultRange)
+  const { data: samples = [] } = useSysStats(sysHours(range))
+  const latestSys = samples.length ? samples[samples.length - 1] : null
+
+  const rangeLabel = range === 1 ? 'today' : range === 0 ? 'all time' : `${range}d`
+
+  return (
+    <Card>
+      <CardHeader className='pb-1 pt-3'>
+        <div className='flex items-center justify-between gap-2'>
+          <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>
+            System · cpu · ram · network · disk · {rangeLabel}
+          </CardTitle>
+          <div className='inline-flex shrink-0 rounded border bg-muted/20 p-px text-[9px]'>
+            {ACTIVITY_RANGES.map(r => (
+              <button key={r.days} type='button' onClick={() => setRange(r.days)}
+                className={cn('rounded px-1.5 py-0.5 transition-colors',
+                  range === r.days ? 'bg-primary/20 text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground'
+                )}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className='pb-3 space-y-1'>
+        {/* Live snapshot */}
+        {latestSys && (
+          <div className='grid grid-cols-3 gap-2 md:grid-cols-6 mb-2'>
+            {[
+              { l: 'CPU',    v: `${latestSys.cpu_pct.toFixed(1)}%`,           accent: 'text-amber-400' },
+              { l: 'RAM',    v: `${(latestSys.mem_used_mb/1024).toFixed(1)}G`, accent: 'text-sky-400' },
+              { l: 'Net RX', v: `${latestSys.net_rx_mbps.toFixed(1)} M`,       accent: 'text-emerald-400' },
+              { l: 'Net TX', v: `${latestSys.net_tx_mbps.toFixed(1)} M`,       accent: 'text-violet-400' },
+              { l: 'Disk R', v: `${latestSys.disk_read_mbps.toFixed(1)} M`,    accent: 'text-amber-400' },
+              { l: 'Disk W', v: `${latestSys.disk_write_mbps.toFixed(1)} M`,   accent: 'text-rose-400' },
+            ].map(({ l, v, accent }) => (
+              <div key={l} className='text-center'>
+                <div className='text-muted-foreground text-[10px]'>{l}</div>
+                <div className={cn('font-mono text-sm font-semibold', accent)}>{v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {samples.length > 0 ? (
+          <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+            <CPUChart samples={samples} />
+            <MemoryChart samples={samples} />
+            <NetworkChart samples={samples} />
+            <DiskIOChart samples={samples} />
+          </div>
+        ) : (
+          <div className='h-[160px] flex items-center justify-center text-xs text-muted-foreground'>Loading…</div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export function Overview() {
@@ -555,7 +622,7 @@ export function Overview() {
             <Card><CardContent className='pt-4'><Stat label='Tests'    value={String(c?.total_tests_run ?? 0)} sub={c?.total_tests_failed ? `${c.total_tests_failed} failed` : 'all passed'} accent={c?.total_tests_failed ? 'rose' : 'green'} /></CardContent></Card>
           </div>
 
-          {/* Row 2 — system snapshot */}
+          {/* Row 2 — system snapshot (live cards only — charts in SystemStatsChart below) */}
           {latestSys && (
             <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6'>
               <Card><CardContent className='pt-4'><Stat label='CPU' value={`${latestSys.cpu_pct.toFixed(1)}%`} sub={`load ${latestSys.load_1m.toFixed(2)}`} accent='amber' /></CardContent></Card>
@@ -582,31 +649,8 @@ export function Overview() {
             </Card>
           </div>
 
-          {/* Row 5 — system charts */}
-          {sys && sys.length > 0 && (
-            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-              <Card>
-                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>CPU % · last 60 min</CardTitle></CardHeader>
-                <CardContent className='pb-3'><CPUChart samples={sys} /></CardContent>
-              </Card>
-              <Card>
-                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>RAM · last 60 min</CardTitle></CardHeader>
-                <CardContent className='pb-3'><MemoryChart samples={sys} /></CardContent>
-              </Card>
-            </div>
-          )}
-          {sys && sys.length > 0 && (
-            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-              <Card>
-                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Network RX / TX · last 60 min</CardTitle></CardHeader>
-                <CardContent className='pb-3'><NetworkChart samples={sys} /></CardContent>
-              </Card>
-              <Card>
-                <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Disk read / write · last 60 min</CardTitle></CardHeader>
-                <CardContent className='pb-3'><DiskIOChart samples={sys} /></CardContent>
-              </Card>
-            </div>
-          )}
+          {/* Row 5 — system charts with range selector */}
+          <SystemStatsChart />
 
           {/* Row 6 — commits + quality split */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
