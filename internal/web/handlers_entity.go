@@ -39,10 +39,12 @@ func apiEntityList(n *node.Node) http.HandlerFunc {
 func apiEntityCreate(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Type   string   `json:"type"`
-			Title  string   `json:"title"`
-			Status string   `json:"status"`
-			Tags   []string `json:"tags"`
+			Type       string   `json:"type"`
+			Title      string   `json:"title"`
+			Status     string   `json:"status"`
+			Tags       []string `json:"tags"`
+			ProjectID  string   `json:"project_id"`   // manifest → parent product
+			ManifestID string   `json:"manifest_id"`  // task → parent manifest
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Type == "" || req.Title == "" {
 			http.Error(w, "type and title are required", 400)
@@ -52,6 +54,29 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		// Wire the owns edge from parent to the newly created entity.
+		if n.Relationships != nil {
+			if req.ProjectID != "" && req.Type == "manifest" {
+				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+					SrcKind:   relationships.KindProduct,
+					SrcID:     req.ProjectID,
+					DstKind:   relationships.KindManifest,
+					DstID:     e.EntityUID,
+					Kind:      relationships.EdgeOwns,
+					CreatedBy: "http-api",
+				})
+			}
+			if req.ManifestID != "" && req.Type == "task" {
+				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+					SrcKind:   relationships.KindManifest,
+					SrcID:     req.ManifestID,
+					DstKind:   relationships.KindTask,
+					DstID:     e.EntityUID,
+					Kind:      relationships.EdgeOwns,
+					CreatedBy: "http-api",
+				})
+			}
 		}
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, e)
