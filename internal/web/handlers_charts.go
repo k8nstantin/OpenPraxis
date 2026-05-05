@@ -37,6 +37,19 @@ type chartsData struct {
 
 	// Terminal reason breakdown
 	TerminalReasons []reasonCount `json:"terminal_reasons"`
+
+	// Hourly system averages — from system_host_samples
+	System []systemHourBucket `json:"system"`
+}
+
+type systemHourBucket struct {
+	Hour        string  `json:"hour"`
+	AvgCPUPct   float64 `json:"avg_cpu_pct"`
+	AvgMemUsedMB float64 `json:"avg_mem_used_mb"`
+	AvgNetRxMbps float64 `json:"avg_net_rx_mbps"`
+	AvgNetTxMbps float64 `json:"avg_net_tx_mbps"`
+	AvgDiskReadMBps  float64 `json:"avg_disk_read_mbps"`
+	AvgDiskWriteMBps float64 `json:"avg_disk_write_mbps"`
 }
 
 type hourBucket struct {
@@ -336,6 +349,28 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 				var rc reasonCount
 				if rows5.Scan(&rc.Reason, &rc.Count) == nil {
 					d.TerminalReasons = append(d.TerminalReasons, rc)
+				}
+			}
+		}
+
+		// ── Hourly system averages ────────────────────────────────────────
+		since24 := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+		sysRows, err := n.DB().QueryContext(r.Context(), `
+			SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) as hour,
+			       AVG(cpu_pct), AVG(mem_used_mb),
+			       AVG(net_rx_mbps), AVG(net_tx_mbps),
+			       AVG(disk_read_mbps), AVG(disk_write_mbps)
+			FROM system_host_samples
+			WHERE ts >= ?
+			GROUP BY hour ORDER BY hour ASC`, since24)
+		if err == nil {
+			defer sysRows.Close()
+			for sysRows.Next() {
+				var b systemHourBucket
+				if sysRows.Scan(&b.Hour, &b.AvgCPUPct, &b.AvgMemUsedMB,
+					&b.AvgNetRxMbps, &b.AvgNetTxMbps,
+					&b.AvgDiskReadMBps, &b.AvgDiskWriteMBps) == nil {
+					d.System = append(d.System, b)
 				}
 			}
 		}

@@ -28,6 +28,7 @@ interface ChartsData {
   repos_touched: number
   interactive_runs: number; autonomous_runs: number
   terminal_reasons: { reason: string; count: number }[]
+  system: { hour: string; avg_cpu_pct: number; avg_mem_used_mb: number; avg_net_rx_mbps: number; avg_net_tx_mbps: number; avg_disk_read_mbps: number; avg_disk_write_mbps: number }[]
 }
 
 interface GitStats {
@@ -180,6 +181,69 @@ const xLabelOpts = { fontSize: 9, interval: 0 }
 
 // ── Execution charts ───────────────────────────────────────────────────────
 
+
+// Normalize an array to 0–100 (percentage of its max).
+function normalize(arr: number[]): number[] {
+  const max = Math.max(...arr, 1)
+  return arr.map(v => +((v / max) * 100).toFixed(1))
+}
+
+// Single chart: turns, actions, cache hit %, lines+/-, net rx/tx, files, cpu — all 0–100% of peak.
+function ActivityOverviewChart({ c, prod, sys }: {
+  c: ChartsData
+  prod: ChartsData['productivity']
+  sys: ChartsData['system']
+}) {
+  const hours = c.efficiency.map(d => hourLabel(d.hour))
+
+  // Build hour→index map for system lookup (system may have different bucketing)
+  const sysMap = new Map(sys.map(s => [s.hour, s]))
+  const sysFor = (hour: string) => sysMap.get(hour) ?? { avg_cpu_pct: 0, avg_net_rx_mbps: 0, avg_net_tx_mbps: 0, avg_mem_used_mb: 0 }
+
+  // Align productivity and system to efficiency hours
+  const prodMap = new Map(prod.map(p => [p.hour, p]))
+  const prodFor = (hour: string) => prodMap.get(hour) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
+
+  const series = [
+    { name: 'turns',       raw: c.efficiency.map(d => d.avg_turns),            color: '#a78bfa' },
+    { name: 'actions/t',   raw: c.efficiency.map(d => d.avg_actions_per_turn),  color: '#38bdf8' },
+    { name: 'cache %',     raw: c.efficiency.map(d => d.cache_hit_rate_pct),    color: '#10b981' },
+    { name: 'lines +',     raw: c.efficiency.map(d => prodFor(d.hour).lines_added),    color: '#34d399' },
+    { name: 'lines −',     raw: c.efficiency.map(d => prodFor(d.hour).lines_removed),  color: '#f43f5e' },
+    { name: 'files',       raw: c.efficiency.map(d => prodFor(d.hour).files_changed),  color: '#fb923c' },
+    { name: 'cpu %',       raw: c.efficiency.map(d => sysFor(d.hour).avg_cpu_pct),      color: '#f59e0b' },
+    { name: 'net rx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_rx_mbps),  color: '#6366f1' },
+    { name: 'net tx',      raw: c.efficiency.map(d => sysFor(d.hour).avg_net_tx_mbps),  color: '#ec4899' },
+  ]
+
+  return (
+    <EChart height={200} option={{
+      grid: { left: 32, right: 16, top: 8, bottom: 40 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: {seriesName:string; value:number; dataIndex:number}[]) => {
+          const lines = params.map(p => {
+            const raw = series.find(s => s.name === p.seriesName)?.raw[p.dataIndex] ?? 0
+            return `${p.seriesName}: ${raw.toFixed(1)}`
+          })
+          return [hours[params[0]?.dataIndex ?? 0], ...lines].join('<br/>')
+        },
+      },
+      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
+      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 8, formatter: '{value}%' }, splitLine: { lineStyle: { opacity: 0.2 } } },
+      series: series.map(s => ({
+        name: s.name,
+        type: 'line',
+        data: normalize(s.raw),
+        smooth: true,
+        smoothMonotone: 'x',
+        showSymbol: false,
+        lineStyle: { color: s.color, width: 1.5 },
+      })),
+    }} />
+  )
+}
 
 function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
   return (
@@ -407,11 +471,15 @@ export function Overview() {
             </div>
           )}
 
-          {/* Row 3 — activity + cache */}
+          {/* Row 3 — activity overview + cache */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
             <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Avg turns · actions/turn · 24h</CardTitle></CardHeader>
-              <CardContent className='pb-3'>{c?.efficiency?.length ? <AvgTurnsChart data={c.efficiency} /> : <Empty />}</CardContent>
+              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · cache · lines · net · cpu · 24h</CardTitle></CardHeader>
+              <CardContent className='pb-3'>
+                {c?.efficiency?.length
+                  ? <ActivityOverviewChart c={c} prod={productivity} sys={c.system ?? []} />
+                  : <Empty />}
+              </CardContent>
             </Card>
             <Card>
               <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate % · 24h</CardTitle></CardHeader>
