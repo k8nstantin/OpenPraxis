@@ -233,21 +233,12 @@ function buildActivityRows(
 
 function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
   const labels = rows.map(r => r.label)
-  // Left axis: turns only — keeps it readable when actions >> turns
-  const left = [
-    { name: 'turns', data: rows.map(r => r.turns), color: '#a78bfa' },
+  // Single axis — turns and actions on the same scale
+  const series = [
+    { name: 'turns',   data: rows.map(r => r.turns),   color: '#a78bfa' },
+    { name: 'actions', data: rows.map(r => r.actions),  color: '#38bdf8' },
   ]
-  // Right axis: actions + lines + files + net — all share this scale
-  const right = [
-    { name: 'actions', data: rows.map(r => r.actions),       color: '#38bdf8' },
-    { name: 'lines +', data: rows.map(r => r.linesAdded),    color: '#34d399' },
-    { name: 'lines −', data: rows.map(r => r.linesRemoved),  color: '#f43f5e' },
-    { name: 'files',   data: rows.map(r => r.files),          color: '#fb923c' },
-    { name: 'net rx',  data: rows.map(r => r.netRx),          color: '#6366f1' },
-    { name: 'net tx',  data: rows.map(r => r.netTx),          color: '#ec4899' },
-  ]
-  const leftMax  = Math.max(1, ...left.flatMap(s => s.data))
-  const rightMax = Math.max(1, ...right.flatMap(s => s.data))
+  const axisMax = Math.max(1, ...series.flatMap(s => s.data))
 
   return (
     <EChart height={260} option={{
@@ -261,14 +252,8 @@ function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
       xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 8 }, boundaryGap: false },
-      yAxis: [
-        { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1), splitNumber: 5, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-        { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), splitNumber: 5, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
-      ],
-      series: [
-        ...left.map(s  => ({ name: s.name, type: 'line' as const, yAxisIndex: 0, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 1.5 } })),
-        ...right.map(s => ({ name: s.name, type: 'line' as const, yAxisIndex: 1, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 1.5 } })),
-      ],
+      yAxis: { type: 'value' as const, min: 0, max: Math.ceil(axisMax * 1.1), splitNumber: 5, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+      series: series.map(s => ({ name: s.name, type: 'line' as const, data: s.data, smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: s.color, width: 2 } })),
     }} />
   )
 }
