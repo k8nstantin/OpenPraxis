@@ -216,19 +216,18 @@ function ActivityOverviewChart({ c, prod, sys }: {
   ]
 
   return (
-    <EChart height={200} option={{
-      grid: { left: 32, right: 16, top: 8, bottom: 40 },
+    <EChart height={260} option={{
+      grid: { left: 36, right: 24, top: 12, bottom: 44 },
       tooltip: {
         trigger: 'axis',
         confine: true,
-        position: (point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: {contentSize: number[]; viewSize: number[]}) => {
-          const [x, y] = point
+        position: (point: number[], _p: unknown, _d: unknown, _r: unknown, size: {contentSize: number[]; viewSize: number[]}) => {
+          const [x] = point
           const [w, h] = size.contentSize
-          const [vw, vh] = size.viewSize
-          return [
-            Math.min(x + 12, vw - w - 4),
-            Math.max(4, Math.min(y - h / 2, vh - h - 4)),
-          ]
+          const [vw] = size.viewSize
+          // Flip to left when in right half so tooltip never bleeds right edge
+          const left = x > vw / 2 ? x - w - 20 : x + 20
+          return [Math.max(0, left), 12]
         },
         formatter: (params: {seriesName:string; value:number; dataIndex:number}[]) => {
           const lines = params.map(p => {
@@ -480,21 +479,15 @@ export function Overview() {
             </div>
           )}
 
-          {/* Row 3 — activity overview + cache */}
-          <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-            <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · lines · net · cpu · 24h</CardTitle></CardHeader>
-              <CardContent className='pb-3'>
-                {c?.efficiency?.length
-                  ? <ActivityOverviewChart c={c} prod={productivity} sys={c.system ?? []} />
-                  : <Empty />}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Cache hit rate % · 24h</CardTitle></CardHeader>
-              <CardContent className='pb-3'>{c?.efficiency?.length ? <CacheHitChart data={c.efficiency} /> : <Empty />}</CardContent>
-            </Card>
-          </div>
+          {/* Row 3 — activity overview full width */}
+          <Card>
+            <CardHeader className='pb-1 pt-3'><CardTitle className='text-xs text-muted-foreground uppercase tracking-wider'>Activity · turns · actions · lines · net · cpu · today</CardTitle></CardHeader>
+            <CardContent className='pb-3'>
+              {c?.efficiency?.length
+                ? <ActivityOverviewChart c={c} prod={productivity} sys={c.system ?? []} />
+                : <Empty />}
+            </CardContent>
+          </Card>
 
           {/* Row 4 — commits + lines */}
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>

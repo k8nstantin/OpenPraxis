@@ -202,11 +202,12 @@ const realTS = `CASE WHEN started_at>0 THEN started_at/1000 ELSE strftime('%s', 
 const hourExpr = `strftime('%Y-%m-%dT%H:00:00Z', datetime(` + realTS + `, 'unixepoch'))`
 
 // apiStatsCharts handles GET /api/stats/charts.
-// Returns 24 hourly buckets (rolling last 24h) using started_at as canonical timestamp.
-// Matches the stat card window so charts and totals are consistent.
+// Window: midnight Eastern time today → now. x-axis always starts at 0h.
 func apiStatsCharts(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sinceUnix := time.Now().UTC().Add(-24 * time.Hour).Unix()
+		nowET := time.Now().In(easternTZ)
+		midnightET := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, easternTZ)
+		sinceUnix := midnightET.Unix()
 		// WHERE clause uses realTS comparison (unix seconds)
 		whereClause := `event IN ('completed','failed') AND (` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 
@@ -375,10 +376,10 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		d.Activity     = pad24ActivityHours(d.Activity)
-		d.Productivity = pad24ProductivityHours(d.Productivity)
-		d.Efficiency   = pad24EfficiencyHours(d.Efficiency)
-		d.Tokens       = pad24TokenHours(d.Tokens)
+		d.Activity     = padTodayActivityHours(d.Activity)
+		d.Productivity = padTodayProductivityHours(d.Productivity)
+		d.Efficiency   = padTodayEfficiencyHours(d.Efficiency)
+		d.Tokens       = padTodayTokenHours(d.Tokens)
 
 		writeJSON(w, d)
 	}
