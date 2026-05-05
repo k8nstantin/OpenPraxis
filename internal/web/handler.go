@@ -67,13 +67,17 @@ func Handler(deps ServerDeps) http.Handler {
 		if path == "" {
 			path = "index.html"
 		}
+		isSPARoute := false
 		if _, err := fs.Stat(v2Content, path); err != nil {
 			// File not found: fall back to index.html for SPA deep-link support.
 			req = req.Clone(req.Context())
 			req.URL.Path = "/"
+			isSPARoute = true
 		}
-		if req.URL.Path == "/" || req.URL.Path == "/index.html" {
+		if req.URL.Path == "/" || req.URL.Path == "/index.html" || isSPARoute {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
 		}
 		fileServer.ServeHTTP(w, req)
 	})
@@ -499,6 +503,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	// Legacy hierarchy route — used by the product list-pane tree expansion.
 	api.HandleFunc("/products/{id}/hierarchy", apiProductHierarchy(n)).Methods("GET")
 	api.HandleFunc("/execution/live", apiExecutionLive(n)).Methods("GET")
+	api.HandleFunc("/execution/recent", apiExecutionRecent(n)).Methods("GET")
 	api.HandleFunc("/execution/{runUid}", apiExecutionLog(n)).Methods("GET")
 	api.HandleFunc("/delusions/by-peer", apiDelusionsByPeer(n)).Methods("GET")
 	api.HandleFunc("/delusions", apiDelusions(n)).Methods("GET")

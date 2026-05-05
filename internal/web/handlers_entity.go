@@ -225,6 +225,99 @@ func apiEntitySearch(n *node.Node) http.HandlerFunc {
 	}
 }
 
+// recentRun is the wire shape for GET /api/execution/recent.
+type recentRun struct {
+	RunUID         string  `json:"run_uid"`
+	EntityUID      string  `json:"entity_uid"`
+	EntityTitle    string  `json:"entity_title"`
+	EntityType     string  `json:"entity_type"`
+	Event          string  `json:"event"`
+	Trigger        string  `json:"trigger"`
+	Model          string  `json:"model"`
+	AgentRuntime   string  `json:"agent_runtime"`
+	TerminalReason string  `json:"terminal_reason"`
+	StartedAt      int64   `json:"started_at"`
+	DurationMS     int64   `json:"duration_ms"`
+	Turns          int     `json:"turns"`
+	Actions        int     `json:"actions"`
+	InputTokens    int64   `json:"input_tokens"`
+	OutputTokens   int64   `json:"output_tokens"`
+	CacheReadTokens int64  `json:"cache_read_tokens"`
+	CacheHitRatePct float64 `json:"cache_hit_rate_pct"`
+	LinesAdded     int     `json:"lines_added"`
+	LinesRemoved   int     `json:"lines_removed"`
+	Commits        int     `json:"commits"`
+	Error          string  `json:"error"`
+	CreatedAt      string  `json:"created_at"`
+}
+
+// apiExecutionRecent handles GET /api/execution/recent?limit=50
+// Returns the latest event row per run_uid, newest first, joined with entity title.
+func apiExecutionRecent(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		// For each entity, return the single most recent terminal event (completed/failed)
+		// or, if no terminal exists for the latest run, the most recent sample/started.
+		// We group by entity_uid to avoid flooding the feed with sampler noise from
+		// interactive sessions that write one sample row per tick with a fresh run_uid.
+		rows, err := n.DB().QueryContext(r.Context(), `
+			SELECT
+			  el.run_uid,
+			  el.entity_uid,
+			  COALESCE(e.title,
+			    CASE WHEN el.entity_uid = 'stdio' THEN 'interactive session'
+			         ELSE 'session ' || substr(el.entity_uid,1,8) END
+			  ) AS entity_title,
+			  COALESCE(e.type, 'interactive') AS entity_type,
+			  el.event, el.trigger, el.model, el.agent_runtime,
+			  el.terminal_reason, el.started_at, el.duration_ms,
+			  el.turns, el.actions,
+			  el.input_tokens, el.output_tokens, el.cache_read_tokens,
+			  el.cache_hit_rate_pct,
+			  el.lines_added, el.lines_removed, el.commits,
+			  el.error, el.created_at
+			FROM execution_log el
+			INNER JOIN (
+			  SELECT entity_uid, MAX(id) AS max_id
+			  FROM execution_log
+			  GROUP BY entity_uid
+			) latest ON el.id = latest.max_id
+			LEFT JOIN (
+			  SELECT entity_uid, title, type FROM entities WHERE valid_to = ''
+			) e ON e.entity_uid = el.entity_uid
+			ORDER BY el.created_at DESC
+			LIMIT ?`, limit)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		defer rows.Close()
+		var out []recentRun
+		for rows.Next() {
+			var rr recentRun
+			if err := rows.Scan(
+				&rr.RunUID, &rr.EntityUID, &rr.EntityTitle, &rr.EntityType,
+				&rr.Event, &rr.Trigger, &rr.Model, &rr.AgentRuntime,
+				&rr.TerminalReason, &rr.StartedAt, &rr.DurationMS,
+				&rr.Turns, &rr.Actions,
+				&rr.InputTokens, &rr.OutputTokens, &rr.CacheReadTokens,
+				&rr.CacheHitRatePct,
+				&rr.LinesAdded, &rr.LinesRemoved, &rr.Commits,
+				&rr.Error, &rr.CreatedAt,
+			); err != nil {
+				continue
+			}
+			out = append(out, rr)
+		}
+		writeJSON(w, out)
+	}
+}
+
 func apiExecutionLog(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runUID := mux.Vars(r)["runUid"]
