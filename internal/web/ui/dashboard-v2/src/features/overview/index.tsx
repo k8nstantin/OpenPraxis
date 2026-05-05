@@ -142,13 +142,14 @@ function hourLabel(iso: string): string {
   return `${etH}h`
 }
 
-// Format a UTC ISO string as HH:MM in Eastern time for system-stats axes.
+// Format a UTC ISO string as HH:MM:SS in Eastern time for system-stats axes.
 function timeLabel(ts: string): string {
   const d = new Date(ts)
   const utcH = d.getUTCHours()
   const utcM = d.getUTCMinutes()
+  const utcS = d.getUTCSeconds()
   const etH = ((utcH + etOffset()) + 24) % 24
-  return `${etH.toString().padStart(2,'0')}:${utcM.toString().padStart(2,'0')}`
+  return `${etH.toString().padStart(2,'0')}:${utcM.toString().padStart(2,'0')}:${utcS.toString().padStart(2,'0')}`
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────
@@ -432,9 +433,9 @@ function SplitChart({ interactive, autonomous }: { interactive: number; autonomo
 
 // ── System stats charts ────────────────────────────────────────────────────
 
-// Downsample to ~60 points (one per minute for 60min window) and pick
-// evenly-spaced labels so the x-axis shows readable HH:MM marks.
-function downsample(samples: SysSample[], targetPoints = 60): SysSample[] {
+// Keep full 5s resolution — ECharts canvas handles 720 points fine.
+// interval:'auto' on x-axis ensures labels don't crowd.
+function downsample(samples: SysSample[], targetPoints = 720): SysSample[] {
   if (samples.length <= targetPoints) return samples
   const step = Math.ceil(samples.length / targetPoints)
   return samples.filter((_, i) => i % step === 0)
