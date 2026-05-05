@@ -71,10 +71,11 @@ type productivityBucket struct {
 }
 
 type efficiencyBucket struct {
-	Hour            string  `json:"hour"`
-	AvgTurns        float64 `json:"avg_turns"`
+	Hour              string  `json:"hour"`
+	AvgTurns          float64 `json:"avg_turns"`
+	AvgActions        float64 `json:"avg_actions"`
 	AvgActionsPerTurn float64 `json:"avg_actions_per_turn"`
-	CacheHitRatePct float64 `json:"cache_hit_rate_pct"`
+	CacheHitRatePct   float64 `json:"cache_hit_rate_pct"`
 }
 
 type tokenBucket struct {
@@ -281,6 +282,7 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 		rows3, err := n.DB().QueryContext(r.Context(), `
 			SELECT `+hourExpr+` as hour,
 			       COALESCE(AVG(CASE WHEN turns>0 THEN turns END),0),
+			       COALESCE(AVG(CASE WHEN actions>0 THEN actions END),0),
 			       COALESCE(AVG(CASE WHEN turns>0 AND actions>0 THEN CAST(actions AS REAL)/turns END),0),
 			       COALESCE(AVG(CASE WHEN cache_hit_rate_pct>0 THEN cache_hit_rate_pct END),0)
 			FROM execution_log el
@@ -293,7 +295,7 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 			defer rows3.Close()
 			for rows3.Next() {
 				var b efficiencyBucket
-				if rows3.Scan(&b.Hour, &b.AvgTurns, &b.AvgActionsPerTurn, &b.CacheHitRatePct) == nil {
+				if rows3.Scan(&b.Hour, &b.AvgTurns, &b.AvgActions, &b.AvgActionsPerTurn, &b.CacheHitRatePct) == nil {
 					d.Efficiency = append(d.Efficiency, b)
 				}
 			}

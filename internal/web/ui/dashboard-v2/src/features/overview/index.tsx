@@ -20,7 +20,7 @@ interface OverviewStats {
 interface ChartsData {
   activity:     { hour: string; completed: number; failed: number; running: number }[]
   productivity: { hour: string; lines_added: number; lines_removed: number; files_changed: number; commits: number; tests_run: number; tests_passed: number; tests_failed: number }[]
-  efficiency:   { hour: string; avg_turns: number; avg_actions_per_turn: number; cache_hit_rate_pct: number }[]
+  efficiency:   { hour: string; avg_turns: number; avg_actions: number; avg_actions_per_turn: number; cache_hit_rate_pct: number }[]
   tokens:       { hour: string; cache_read_tokens: number; cache_create_tokens: number; input_tokens: number; output_tokens: number }[]
   total_commits: number; total_lines_added: number; total_lines_removed: number
   total_files_changed: number; total_prs_opened: number
@@ -197,8 +197,8 @@ function ActivityOverviewChart({ c, prod, sys }: {
   const prodFor = (h: string) => prodMap.get(h) ?? { lines_added: 0, lines_removed: 0, files_changed: 0 }
 
   const left = [
-    { name: 'turns',     data: c.efficiency.map(d => +d.avg_turns.toFixed(1)),           color: '#a78bfa' },
-    { name: 'actions/t', data: c.efficiency.map(d => +d.avg_actions_per_turn.toFixed(2)), color: '#38bdf8' },
+    { name: 'turns',   data: c.efficiency.map(d => +d.avg_turns.toFixed(1)),   color: '#a78bfa' },
+    { name: 'actions', data: c.efficiency.map(d => +d.avg_actions.toFixed(1)), color: '#38bdf8' },
   ]
   const right = [
     { name: 'lines +',  data: c.efficiency.map(d => prodFor(d.hour).lines_added),   color: '#34d399' },
@@ -222,7 +222,7 @@ function ActivityOverviewChart({ c, prod, sys }: {
         },
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 } },
+      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 , boundaryGap: false } },
       yAxis: (() => {
         const leftMax = Math.max(1, ...left.flatMap(s => s.data))
         const rightMax = Math.max(1, ...right.flatMap(s => s.data))
@@ -252,7 +252,7 @@ function CacheHitChart({ data }: { data: ChartsData['efficiency'] }) {
     <EChart height={160} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `${p[0]?.value}%` },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts , boundaryGap: false },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{ type: 'line', data: data.map(d => +d.cache_hit_rate_pct.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false,
         lineStyle: { color: '#10b981', width: 2 },
@@ -267,7 +267,7 @@ function AvgTurnsChart({ data }: { data: ChartsData['efficiency'] }) {
     <EChart height={160} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts , boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
         { name: 'turns/run',    type: 'line', data: data.map(d => +d.avg_turns.toFixed(1)), smooth: true, smoothMonotone: 'x', showSymbol: false, lineStyle: { color: '#a78bfa', width: 2 } },
@@ -282,7 +282,7 @@ function LinesChart({ data }: { data: ChartsData['productivity'] }) {
     <EChart height={160} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts , boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
         { name: 'added',   type: 'bar', data: data.map(d => d.lines_added),    itemStyle: { color: '#10b981' }, stack: 'lines' },
@@ -297,7 +297,7 @@ function CommitsChart({ data }: { data: ChartsData['productivity'] }) {
     <EChart height={160} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts },
+      xAxis: { type: 'category', data: data.map(d => hourLabel(d.hour)), axisLabel: xLabelOpts , boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'commits', type: 'bar', data: data.map(d => d.commits),   itemStyle: { color: '#6366f1' } },
@@ -354,7 +354,7 @@ function CPUChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `CPU ${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{
         name: 'CPU %', type: 'line', data: ds.map(s => +s.cpu_pct.toFixed(1)),
@@ -373,7 +373,7 @@ function MemoryChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `RAM ${((p[0]?.value ?? 0)/1024).toFixed(1)} GB` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
       yAxis: { type: 'value', min: 0, max: total, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v/1024).toFixed(0)}G` } },
       series: [{
         name: 'RAM used', type: 'line', data: ds.map(s => +s.mem_used_mb.toFixed(0)),
@@ -392,7 +392,7 @@ function NetworkChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'rx', type: 'line', data: ds.map(s => +s.net_rx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 1.5 } },
@@ -409,7 +409,7 @@ function DiskIOChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'read',  type: 'line', data: ds.map(s => +s.disk_read_mbps.toFixed(2)),  smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 } },

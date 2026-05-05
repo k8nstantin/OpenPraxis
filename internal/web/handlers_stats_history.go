@@ -26,8 +26,19 @@ type statsHistory struct {
 	TriggerSplit  []labelCount `json:"trigger_split"`
 	// Tool call breakdown from tool_calls_json aggregated (all time)
 	TopTools []labelCount `json:"top_tools"`
+	// Daily system averages (from system_host_samples)
+	SystemDaily []daySystemBucket `json:"system_daily"`
 	// Summary totals
 	Totals statsTotals `json:"totals"`
+}
+
+type daySystemBucket struct {
+	Day             string  `json:"day"`
+	AvgCPUPct       float64 `json:"avg_cpu_pct"`
+	AvgNetRxMbps    float64 `json:"avg_net_rx_mbps"`
+	AvgNetTxMbps    float64 `json:"avg_net_tx_mbps"`
+	AvgDiskReadMBps float64 `json:"avg_disk_read_mbps"`
+	AvgDiskWriteMBps float64 `json:"avg_disk_write_mbps"`
 }
 
 type dayRunBucket struct {
@@ -286,6 +297,28 @@ func apiStatsHistory(n *node.Node) http.HandlerFunc {
 				&h.Totals.TotalTestsRun, &h.Totals.TotalTestsPassed, &h.Totals.TotalTestsFailed,
 				&h.Totals.AvgCacheHitPct, &h.Totals.AvgTurns,
 				&h.Totals.AvgDurSec, &h.Totals.AvgContextPct)
+
+		// ── Daily system averages ─────────────────────────────────────────
+		sysWhere := "1=1"
+		if since != "" {
+			sysWhere = "date(ts) >= date('now', '-" + since + " days')"
+		}
+		sysRows, _ := db.QueryContext(r.Context(), `
+			SELECT date(ts) as day,
+			       AVG(cpu_pct), AVG(net_rx_mbps), AVG(net_tx_mbps),
+			       AVG(disk_read_mbps), AVG(disk_write_mbps)
+			FROM system_host_samples WHERE `+sysWhere+`
+			GROUP BY day ORDER BY day ASC`)
+		if sysRows != nil {
+			defer sysRows.Close()
+			for sysRows.Next() {
+				var b daySystemBucket
+				if sysRows.Scan(&b.Day, &b.AvgCPUPct, &b.AvgNetRxMbps, &b.AvgNetTxMbps,
+					&b.AvgDiskReadMBps, &b.AvgDiskWriteMBps) == nil {
+					h.SystemDaily = append(h.SystemDaily, b)
+				}
+			}
+		}
 
 		writeJSON(w, h)
 	}
