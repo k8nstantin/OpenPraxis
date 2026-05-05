@@ -222,13 +222,13 @@ function ActivityOverviewChart({ c, prod, sys }: {
         },
       },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8 } },
-      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 , boundaryGap: false } },
+      xAxis: { type: 'category', data: hours, axisLabel: { fontSize: 8 }, boundaryGap: false },
       yAxis: (() => {
         const leftMax = Math.max(1, ...left.flatMap(s => s.data))
         const rightMax = Math.max(1, ...right.flatMap(s => s.data))
         return [
-          { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1), axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
-          { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
+          { type: 'value' as const, min: 0, max: Math.ceil(leftMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { lineStyle: { opacity: 0.15 } } },
+          { type: 'value' as const, min: 0, max: Math.ceil(rightMax * 1.1), alignTicks: true, axisLabel: { fontSize: 8 }, splitLine: { show: false }, position: 'right' as const },
         ]
       })(),
       series: [
@@ -354,7 +354,7 @@ function CPUChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 36, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `CPU ${p[0]?.value?.toFixed(1)}%` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0  } },
       yAxis: { type: 'value', min: 0, max: 100, axisLabel: { fontSize: 9, formatter: '{value}%' } },
       series: [{
         name: 'CPU %', type: 'line', data: ds.map(s => +s.cpu_pct.toFixed(1)),
@@ -373,7 +373,7 @@ function MemoryChart({ samples }: { samples: SysSample[] }) {
     <EChart height={160} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', formatter: (p: {value:number}[]) => `RAM ${((p[0]?.value ?? 0)/1024).toFixed(1)} GB` },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0  } },
       yAxis: { type: 'value', min: 0, max: total, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v/1024).toFixed(0)}G` } },
       series: [{
         name: 'RAM used', type: 'line', data: ds.map(s => +s.mem_used_mb.toFixed(0)),
@@ -392,7 +392,7 @@ function NetworkChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0  } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'rx', type: 'line', data: ds.map(s => +s.net_rx_mbps.toFixed(2)), smooth: true, showSymbol: false, lineStyle: { color: '#10b981', width: 1.5 } },
@@ -409,7 +409,7 @@ function DiskIOChart({ samples }: { samples: SysSample[] }) {
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
       legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9 } },
-      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0 , boundaryGap: false } },
+      xAxis: { type: 'category', data: ds.map(s => timeLabel(s.ts)), axisLabel: { fontSize: 9, interval: 'auto', showMaxLabel: true, rotate: 0  } },
       yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: '{value}M' } },
       series: [
         { name: 'read',  type: 'line', data: ds.map(s => +s.disk_read_mbps.toFixed(2)),  smooth: true, showSymbol: false, lineStyle: { color: '#f59e0b', width: 1.5 } },
