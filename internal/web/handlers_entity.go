@@ -281,6 +281,7 @@ func apiExecutionRecent(n *node.Node) http.HandlerFunc {
 			LEFT JOIN (
 			  SELECT entity_uid, title, type FROM entities WHERE valid_to = ''
 			) e ON e.entity_uid = el.entity_uid
+			WHERE el.event IN ('started', 'completed', 'failed')
 			ORDER BY el.created_at DESC
 			LIMIT ?`, limit)
 		if err != nil {

@@ -1,7 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { formatDistanceToNow, fromUnixTime, format } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import { Loader2 } from 'lucide-react'
+import { useMemo } from 'react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { Badge } from '@/components/ui/badge'
@@ -63,16 +64,14 @@ function fmtTok(n: number) {
 function EventBadge({ event }: { event: ActivityEvent['event'] }) {
   if (event === 'started')
     return <Badge variant='outline' className='border-blue-400 text-blue-400 w-20 justify-center text-xs'>started</Badge>
-  if (event === 'sample')
-    return <Badge variant='outline' className='border-muted-foreground text-muted-foreground w-20 justify-center text-xs'>sample</Badge>
   if (event === 'completed')
     return <Badge variant='outline' className='border-emerald-500 text-emerald-500 w-20 justify-center text-xs'>completed</Badge>
   return <Badge variant='destructive' className='w-20 justify-center text-xs'>failed</Badge>
 }
 
-function EventRow({ ev }: { ev: ActivityEvent }) {
+function EventRow({ ev, activeRunUids }: { ev: ActivityEvent; activeRunUids: Set<string> }) {
   const totalTok = ev.input_tokens + ev.output_tokens
-  const isRunning = ev.event === 'started' || ev.event === 'sample'
+  const isRunning = ev.event === 'started' && activeRunUids.has(ev.run_uid)
 
   return (
     <div className='flex items-center gap-3 py-2 border-b last:border-0 hover:bg-muted/20 px-1 text-sm'>
@@ -167,25 +166,44 @@ function ActivityPage() {
         )}
 
         {events && events.length > 0 && (
-          <div className='rounded-md border'>
-            <div className='flex items-center gap-3 px-1 py-1.5 border-b bg-muted/30 text-xs text-muted-foreground font-medium'>
-              <span className='w-16 flex-shrink-0'>time</span>
-              <span className='w-20 flex-shrink-0'>event</span>
-              <span className='flex-1'>entity</span>
-              <span className='min-w-[4rem] text-right'>turns/actions</span>
-              <span className='min-w-[3.5rem] text-right'>tokens</span>
-              <span className='w-10 text-right'>cache</span>
-              <span className='w-12 text-right'>dur</span>
-              <span className='w-16'>lines</span>
-              <span className='w-16'></span>
-              <span className='w-20 text-right'>ago</span>
-            </div>
-            {events.map((ev, i) => (
-              <EventRow key={`${ev.run_uid}-${i}`} ev={ev} />
-            ))}
-          </div>
+          <ActiveFeed events={events} />
         )}
       </Main>
     </>
+  )
+}
+
+function ActiveFeed({ events }: { events: ActivityEvent[] }) {
+  // A run is active if it has a started row but no terminal (completed/failed) in this window.
+  const activeRunUids = useMemo(() => {
+    const terminal = new Set(
+      events.filter((e) => e.event === 'completed' || e.event === 'failed').map((e) => e.run_uid)
+    )
+    return new Set(
+      events
+        .filter((e) => e.event === 'started' && !terminal.has(e.run_uid))
+        .map((e) => e.run_uid)
+    )
+  }, [events])
+  const deduped = events
+
+  return (
+    <div className='rounded-md border'>
+      <div className='flex items-center gap-3 px-1 py-1.5 border-b bg-muted/30 text-xs text-muted-foreground font-medium'>
+        <span className='w-16 flex-shrink-0'>time</span>
+        <span className='w-20 flex-shrink-0'>event</span>
+        <span className='flex-1'>entity</span>
+        <span className='min-w-[4rem] text-right'>turns/actions</span>
+        <span className='min-w-[3.5rem] text-right'>tokens</span>
+        <span className='w-10 text-right'>cache</span>
+        <span className='w-12 text-right'>dur</span>
+        <span className='w-16'>lines</span>
+        <span className='w-16'></span>
+        <span className='w-20 text-right'>ago</span>
+      </div>
+      {events.map((ev, i) => (
+        <EventRow key={`${ev.run_uid}-${ev.created_at}-${i}`} ev={ev} activeRunUids={activeRunUids} />
+      ))}
+    </div>
   )
 }
