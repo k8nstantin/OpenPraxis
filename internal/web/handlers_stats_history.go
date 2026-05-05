@@ -157,8 +157,8 @@ func apiStatsHistory(n *node.Node) http.HandlerFunc {
 		// ── Daily efficiency ───────────────────────────────────────────────
 		rows2, err := db.QueryContext(r.Context(), `
 			SELECT date(datetime(CASE WHEN started_at>0 THEN started_at/1000 ELSE strftime('%s', created_at) END, 'unixepoch')) as day,
-			       COALESCE(AVG(CASE WHEN turns>0 THEN turns END),0),
-			       COALESCE(AVG(CASE WHEN actions>0 THEN actions END),0),
+			       COALESCE(SUM(turns),0),
+			       COALESCE(SUM(actions),0),
 			       COALESCE(AVG(CASE WHEN turns>0 AND actions>0 THEN CAST(actions AS REAL)/turns END),0),
 			       COALESCE(AVG(CASE WHEN context_window_pct>0 THEN context_window_pct END),0),
 			       COALESCE(AVG(CASE WHEN tokens_per_turn>0 THEN tokens_per_turn END),0),

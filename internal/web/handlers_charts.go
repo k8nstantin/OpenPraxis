@@ -281,8 +281,8 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 		effWhere := `(` + realTS + `) >= ` + strconv.FormatInt(sinceUnix, 10)
 		rows3, err := n.DB().QueryContext(r.Context(), `
 			SELECT `+hourExpr+` as hour,
-			       COALESCE(AVG(CASE WHEN turns>0 THEN turns END),0),
-			       COALESCE(AVG(CASE WHEN actions>0 THEN actions END),0),
+			       COALESCE(SUM(turns),0),
+			       COALESCE(SUM(actions),0),
 			       COALESCE(AVG(CASE WHEN turns>0 AND actions>0 THEN CAST(actions AS REAL)/turns END),0),
 			       COALESCE(AVG(CASE WHEN cache_hit_rate_pct>0 THEN cache_hit_rate_pct END),0)
 			FROM execution_log el
