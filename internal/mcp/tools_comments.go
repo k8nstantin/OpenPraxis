@@ -22,10 +22,10 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 	targetType := argStr(a, "target_type")
 	targetID := argStr(a, "target_id")
 	author := argStr(a, "author")
-	cType := argStr(a, "type")
-	if cType == "" {
-		cType = "comment" // default when agent omits type
-	}
+	// Normalize legacy type names → prompt or comment.
+	// Agents trained on old type taxonomy may send execution_review,
+	// description_revision, user_note, etc. Map them transparently.
+	ct := comments.NormalizeType(argStr(a, "type"))
 	body := argStr(a, "body")
 
 	if s.node.Comments == nil {
@@ -33,7 +33,6 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 	}
 
 	target := comments.TargetType(targetType)
-	ct := comments.CommentType(cType)
 	if err := comments.ValidateAdd(target, targetID, author, ct, body); err != nil {
 		return errResult("validate: %v", err), nil
 	}

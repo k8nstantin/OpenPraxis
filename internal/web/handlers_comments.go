@@ -315,7 +315,7 @@ func addComment(store *comments.Store, target comments.TargetType, resolve Targe
 		if !readBodyCapped(w, r, &req) {
 			return
 		}
-		cType := comments.CommentType(req.Type)
+		cType := comments.NormalizeType(req.Type)
 		if err := comments.ValidateAdd(target, id, req.Author, cType, req.Body); err != nil {
 			code, status := commentErrorStatus(err)
 			writeCommentError(w, code, err.Error(), status)
