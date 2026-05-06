@@ -15,7 +15,7 @@ import (
 )
 
 // CommentPoster is the minimal subset of *comments.Store the watcher calls to
-// auto-post watcher_finding comments on gate decisions. Declared as an
+// auto-post comment comments on gate decisions. Declared as an
 // interface so tests can inject a broken implementation and verify the audit
 // path does not fail on comment-write errors.
 type CommentPoster interface {
@@ -47,7 +47,7 @@ func New(store *Store, repoDir, buildCmd, sourceNode string) *Watcher {
 }
 
 // SetCommentPoster wires a comments store so gate-failure decisions auto-post
-// watcher_finding comments on the audited task. A nil poster disables the
+// comment comments on the audited task. A nil poster disables the
 // feature (existing behavior).
 func (w *Watcher) SetCommentPoster(p CommentPoster) { w.comments = p }
 
@@ -125,7 +125,7 @@ func (w *Watcher) AuditTask(taskID, taskTitle, manifestID, manifestTitle, manife
 		slog.Error("failed to store audit", "component", "watcher", "error", err)
 	}
 
-	// Post watcher_finding comments on gate failures. All-pass posts nothing
+	// Post comment comments on gate failures. All-pass posts nothing
 	// (the green status badge on the task card already communicates). Comment
 	// write errors are logged and swallowed — an audit never fails because a
 	// comment failed to write.
@@ -134,7 +134,7 @@ func (w *Watcher) AuditTask(taskID, taskTitle, manifestID, manifestTitle, manife
 	return audit
 }
 
-// postFindings writes one watcher_finding comment per failed gate. Safe to
+// postFindings writes one comment comment per failed gate. Safe to
 // call with a nil comment poster (feature disabled).
 func (w *Watcher) postFindings(taskID string, audit *Audit) {
 	if w.comments == nil || taskID == "" {

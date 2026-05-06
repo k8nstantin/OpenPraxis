@@ -28,9 +28,9 @@ func (r BackfillReport) Total() int {
 	return r.ProductsSeeded + r.ManifestsSeeded + r.TasksSeeded + r.IdeasSeeded
 }
 
-// BackfillDescriptionRevisions seeds one description_revision comment per
+// BackfillDescriptionRevisions seeds one prompt comment per
 // existing Product, Manifest, and Task whose body text is non-empty and that
-// does not already carry a description_revision row. When apply is false the
+// does not already carry a prompt row. When apply is false the
 // function only counts what it would insert (dry run). Re-running after a
 // successful apply is a no-op because of the NOT EXISTS guard.
 //
@@ -202,7 +202,7 @@ func scanBackfillRows(rows *sql.Rows) ([]backfillRow, error) {
 }
 
 // seedRevision returns (inserted, err). inserted=false means the entity
-// already carries a description_revision row and was skipped.
+// already carries a prompt row and was skipped.
 func seedRevision(ctx context.Context, db *sql.DB, apply bool,
 	targetType, targetID, author, body, updatedStr string) (bool, error) {
 

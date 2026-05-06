@@ -75,9 +75,9 @@ type Runner struct {
 	warnOnce sync.Map
 
 	// execReview is the optional post-completion checker for
-	// execution_review comments. When wired, tasks that finish with
+	// comment comments. When wired, tasks that finish with
 	// status=completed/reason=success are inspected — if no agent-authored
-	// execution_review comment exists on the task, an amnesia flag is
+	// comment comment exists on the task, an amnesia flag is
 	// recorded so the gap is visible on the dashboard. Leaving it nil
 	// disables the check (existing behavior).
 	execReview ExecutionReviewChecker
@@ -109,7 +109,7 @@ type Runner struct {
 	// table.
 	executionLog *execution.Store
 
-	// commentsStore is used to fetch the latest description_revision
+	// commentsStore is used to fetch the latest prompt
 	// comment for a task when building the prompt. Nil → falls back to
 	// task.Description from the tasks row.
 	commentsStore *comments.Store
@@ -131,7 +131,7 @@ func (r *Runner) SetEntityStore(es *entity.Store) { r.entityStore = es }
 func (r *Runner) SetExecutionLog(el *execution.Store) { r.executionLog = el }
 
 // SetCommentsStore wires the comments store onto the runner so the prompt
-// builder can fetch the latest description_revision for a task. When nil,
+// builder can fetch the latest prompt for a task. When nil,
 // the runner uses task.Description from the tasks row directly.
 func (r *Runner) SetCommentsStore(cs *comments.Store) { r.commentsStore = cs }
 
@@ -141,21 +141,21 @@ func (r *Runner) SetCommentsStore(cs *comments.Store) { r.commentsStore = cs }
 func (r *Runner) SetTemplateResolver(t *templates.Resolver) { r.tmpl = t }
 
 // ExecutionReviewChecker answers whether a task has at least one
-// execution_review comment authored by the agent. Wired via
+// comment comment authored by the agent. Wired via
 // SetExecutionReviewChecker; node.go adapts internal/comments.Store to
 // this shape so the task package stays free of a comments import.
 type ExecutionReviewChecker interface {
 	HasAgentExecutionReview(ctx context.Context, taskID string) (bool, error)
 }
 
-// SetExecutionReviewChecker wires the post-completion execution_review
+// SetExecutionReviewChecker wires the post-completion comment
 // gate. Nil disables it.
 func (r *Runner) SetExecutionReviewChecker(c ExecutionReviewChecker) {
 	r.execReview = c
 }
 
 // SetSourceNode records the node UUID used when the runner writes amnesia
-// flags from its own code path (e.g. missing execution_review).
+// flags from its own code path (e.g. missing comment).
 func (r *Runner) SetSourceNode(id string) { r.sourceNode = id }
 
 // enforceExecutionReview runs the M4-T10 post-completion gate. Only fires
@@ -176,7 +176,7 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, r
 		slog.Warn("execution review lookup failed",
 			"component", "runner", "task_id", taskID, "error", checkErr)
 	case !has:
-		slog.Warn("task completed but no execution_review comment — agent forgot the closing call",
+		slog.Warn("task completed but no comment comment — agent forgot the closing call",
 			"component", "runner", "task_id", taskID)
 		if r.actions != nil {
 			if amnErr := r.actions.RecordAmnesia(
@@ -186,12 +186,12 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, r
 				taskID,        // taskID
 				"exec-review", // ruleID (synthetic)
 				"exec-review", // ruleMarker
-				"Every completed task must post an execution_review comment via comment_add before finishing",
+				"Every completed task must post an comment comment via comment_add before finishing",
 				"",  // toolName
 				"",  // toolInput
 				1.0, // score (max — the call was definitely missing)
 				"rule",
-				"missing_execution_review",
+				"missing_comment",
 			); amnErr != nil {
 				slog.Warn("record exec-review amnesia failed",
 					"component", "runner", "task_id", taskID, "error", amnErr)
@@ -427,7 +427,7 @@ func defaultAllowedTools() []string {
 		"mcp__openpraxis__settings_resolve",
 		"mcp__openpraxis__settings_catalog",
 		// comment_add is referenced in the runner's mandatory closing
-		// prompt — every task must be able to post its execution_review.
+		// prompt — every task must be able to post its comment.
 		"mcp__openpraxis__comment_add",
 	}
 }
@@ -1191,7 +1191,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		}
 
 		// Post-completion execution-review gate. Successful completions must
-		// carry at least one agent-authored execution_review comment on the
+		// carry at least one agent-authored comment comment on the
 		// task. When missing, log and record an amnesia flag so the gap
 		// surfaces on the dashboard. Non-blocking — the watcher still has
 		// final say on the completion status.

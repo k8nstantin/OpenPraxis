@@ -13,7 +13,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 )
 
-// DV/M3 — HTTP sugar endpoints over description_revision comments.
+// DV/M3 — HTTP sugar endpoints over prompt comments.
 // Three endpoints per entity type (product / manifest / task); 9 total:
 //
 //   GET  /api/{scope}/{id}/description/history
@@ -23,7 +23,7 @@ import (
 // scope ∈ {products, manifests, tasks}. id is the full 36-char UUID
 // of the entity (post marker rip-out — prefixes return 404).
 
-// revisionView is the JSON shape for a single description_revision entry,
+// revisionView is the JSON shape for a single prompt entry,
 // with both unix + ISO timestamps so clients don't have to format.
 type revisionView struct {
 	ID           string `json:"id"`
@@ -156,7 +156,7 @@ func descriptionErrStatus(err error) int {
 	switch {
 	case strings.Contains(msg, "not found"),
 		strings.Contains(msg, "does not belong"),
-		strings.Contains(msg, "is not a description_revision"):
+		strings.Contains(msg, "is not a prompt"):
 		return http.StatusNotFound
 	}
 	return http.StatusInternalServerError
