@@ -175,7 +175,7 @@ func New(cfg *config.Config) (*Node, error) {
 	commentsStore.SetAttachments(attachmentsStore)
 
 	settingsStore := settings.NewStore(index.DB())
-	taskSettingsAdapter := &entityTaskSettingsAdapter{rels: nil}
+	taskSettingsAdapter := &entityTaskSettingsAdapter{entities: entityStore, rels: nil}
 	manifestSettingsAdapter := &entityManifestSettingsAdapter{
 		entities: entityStore,
 		rels:     nil, // wired after relationships store is constructed below
@@ -349,6 +349,17 @@ func (a *entityManifestSettingsAdapter) GetManifestForSettings(ctx context.Conte
 	if a == nil || a.rels == nil {
 		return settings.ManifestRec{ID: manifestID}, nil
 	}
+	// When the dispatcher fires a product entity, entityTaskSettingsAdapter
+	// returns ManifestID = productID (synthetic). Detect this: if the entity
+	// is a product, return ProductID = manifestID so the resolver checks
+	// product scope for the correct ID.
+	if a.entities != nil {
+		e, _ := a.entities.Get(manifestID)
+		if e != nil && e.Type == "product" {
+			return settings.ManifestRec{ID: manifestID, ProductID: manifestID}, nil
+		}
+	}
+	// Normal manifest: walk incoming owns edges to find the owning product.
 	edges, err := a.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns)
 	if err != nil {
 		return settings.ManifestRec{}, fmt.Errorf("manifest settings adapter: list incoming: %w", err)
@@ -364,26 +375,52 @@ func (a *entityManifestSettingsAdapter) GetManifestForSettings(ctx context.Conte
 }
 
 // entityTaskSettingsAdapter implements settings.TaskLookup using the
-// relationships edge store. Replaces task.SettingsAdapter after the
-// legacy tasks table was removed.
+// entity + relationships stores. Handles all three entity kinds so the
+// settings resolver always reaches the correct scope tier:
+//
+//   product  → ManifestID = entityID (synthetic) so GetManifestForSettings
+//              is called with the product ID, which then returns ProductID =
+//              entityID — resolver checks product scope directly.
+//   manifest → ManifestID = entityID so resolver checks manifest scope,
+//              then GetManifestForSettings walks up to find the product.
+//   task     → ManifestID = owning manifest via relationships owns edge.
 type entityTaskSettingsAdapter struct {
-	rels *relationships.Store
+	entities *entity.Store
+	rels     *relationships.Store
 }
 
-func (a *entityTaskSettingsAdapter) GetTaskForSettings(ctx context.Context, taskID string) (settings.TaskRec, error) {
+func (a *entityTaskSettingsAdapter) GetTaskForSettings(ctx context.Context, entityID string) (settings.TaskRec, error) {
 	if a == nil || a.rels == nil {
-		return settings.TaskRec{ID: taskID}, nil
+		return settings.TaskRec{ID: entityID}, nil
 	}
-	edges, err := a.rels.ListIncoming(ctx, taskID, relationships.EdgeOwns)
+	// Check entity type to route the scope walk correctly.
+	if a.entities != nil {
+		e, _ := a.entities.Get(entityID)
+		if e != nil {
+			switch e.Type {
+			case "product":
+				// Entity IS the product — synthetic ManifestID = productID so
+				// GetManifestForSettings receives the product ID and returns
+				// ProductID = productID, landing the resolver at product scope.
+				return settings.TaskRec{ID: entityID, ManifestID: entityID}, nil
+			case "manifest":
+				// Entity IS the manifest — set ManifestID directly so the
+				// resolver checks manifest scope then walks up to product.
+				return settings.TaskRec{ID: entityID, ManifestID: entityID}, nil
+			}
+		}
+	}
+	// Default: entity is a task — find owning manifest via relationships.
+	edges, err := a.rels.ListIncoming(ctx, entityID, relationships.EdgeOwns)
 	if err != nil {
-		return settings.TaskRec{ID: taskID}, nil
+		return settings.TaskRec{ID: entityID}, nil
 	}
 	for _, e := range edges {
 		if e.SrcKind == relationships.KindManifest {
-			return settings.TaskRec{ID: taskID, ManifestID: e.SrcID}, nil
+			return settings.TaskRec{ID: entityID, ManifestID: e.SrcID}, nil
 		}
 	}
-	return settings.TaskRec{ID: taskID}, nil
+	return settings.TaskRec{ID: entityID}, nil
 }
 
 // InitRunner creates and sets the task Runner using the Node's own stores.
