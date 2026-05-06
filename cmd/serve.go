@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -189,94 +190,45 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
-		// entityDesc returns the prompt body for an entity,
-		// falling back to the entity title when no revision comment exists.
-		entityDesc := func(ctx context.Context, entityID, fallback string) string {
-			ct := comments.TypeDescriptionRevision
-			revs, _ := n.Comments.List(ctx, comments.TargetEntity, entityID, 1, &ct)
-			if len(revs) > 0 && revs[0].Body != "" {
+		// executionSkillID is the UUID of the "OpenPraxis Execution Protocol"
+		// skill entity. The dispatcher loads its prompt at startup and uses it
+		// as the universal agent invocation template for every scheduled entity.
+		const executionSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
+
+		// loadSkillPrompt fetches the latest prompt-type comment from the
+		// execution skill. Falls back to a minimal inline prompt if the skill
+		// entity or its prompt is missing.
+		loadSkillPrompt := func(ctx context.Context) string {
+			ct := comments.TypePrompt
+			revs, err := n.Comments.List(ctx, comments.TargetEntity, executionSkillID, 1, &ct)
+			if err == nil && len(revs) > 0 && revs[0].Body != "" {
 				return revs[0].Body
 			}
-			return fallback
+			slog.Warn("execution skill prompt not found — using inline fallback", "skill_id", executionSkillID)
+			return "You are an experienced software engineer executing a scheduled OpenPraxis entity.\n\n" +
+				"Entity UUID: {ENTITY_UUID}\n\n" +
+				"Read the entity prompt and comments via the API, assemble full DAG context, execute, report back."
 		}
+
+		skillPrompt := loadSkillPrompt(context.Background())
+		slog.Info("execution skill loaded", "skill_id", executionSkillID[:12], "prompt_len", len(skillPrompt))
 
 		// visceralRules loads all visceral rules into a numbered string.
 		visceralRules := func() string {
 			rules, _ := n.Index.ListByType("visceral", 100)
-			var s string
+			var sb strings.Builder
 			for i, r := range rules {
-				s += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
+				sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2))
 			}
-			return s
+			return sb.String()
 		}
 
-		// parentContext walks UP the DAG from entityID to collect manifest
-		// and product context. For a task it walks task→manifest→product;
-		// for a manifest it walks manifest→product; for a product it stops.
-		// Returns formatted context sections ready for prompt inclusion.
-		type parentCtx struct {
-			manifestID, manifestTitle, manifestDesc string
-			productID, productTitle, productDesc    string
-		}
-		walkUp := func(ctx context.Context, entityID, entityType string) parentCtx {
-			if n.Relationships == nil {
-				return parentCtx{}
-			}
-			var pc parentCtx
-			lookupID := entityID
-
-			// For a task: find owning manifest first.
-			if entityType == "task" {
-				if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
-					for _, edge := range edges {
-						if edge.SrcKind == "manifest" {
-							pc.manifestID = edge.SrcID
-							break
-						}
-					}
-				}
-				if pc.manifestID != "" {
-					if me, _ := n.Entities.Get(pc.manifestID); me != nil {
-						pc.manifestTitle = me.Title
-						pc.manifestDesc = entityDesc(ctx, pc.manifestID, me.Title)
-					}
-					lookupID = pc.manifestID
-				}
-			}
-
-			// For a task (after finding manifest) or manifest: find owning product.
-			if entityType == "task" || entityType == "manifest" {
-				if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
-					for _, edge := range edges {
-						if edge.SrcKind == "product" {
-							pc.productID = edge.SrcID
-							break
-						}
-					}
-				}
-				if pc.productID != "" {
-					if pe, _ := n.Entities.Get(pc.productID); pe != nil {
-						pc.productTitle = pe.Title
-						pc.productDesc = entityDesc(ctx, pc.productID, pe.Title)
-					}
-				}
-			}
-			return pc
-		}
-
-		// dispatch is the universal handler for any scheduled entity kind.
-		// Every prompt includes the full 3-tier context regardless of entry
-		// point: product (big picture) + manifest (refinement) + task
-		// (instructions). Context above the entry point is pre-fetched by
-		// walking UP the DAG via relationships. Context below is handed to
-		// the agent to traverse via MCP tools at runtime.
+		// dispatch is the universal handler for every scheduled entity kind.
+		// It injects the entity UUID into the execution skill prompt and fires
+		// one agent. The agent owns full DAG traversal — it reads prompts and
+		// comments at every level via the HTTP API and assembles its own context.
 		dispatch := func(ctx context.Context, entityID string, scheduleID int64) error {
 			// System-level concurrency guard: only one agent at a time.
-			// Products, manifests, and tasks all share the same codebase —
-			// concurrent agents conflict on branches and PRs.
-			// Check both the in-memory runner (current session) AND the
-			// execution_log (survives server restarts — agents can outlive
-			// the server process that spawned them).
 			if runner.RunningCount() > 0 {
 				running := runner.ListRunning()
 				titles := make([]string, 0, len(running))
@@ -286,8 +238,6 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("agent already running (%v) — refusing to start %s concurrently", titles, entityID)
 			}
 			// Check execution_log for in-flight runs from previous sessions.
-			// For each, verify the agent process is still alive via its PID.
-			// Dead processes are auto-closed; live ones block the dispatch.
 			if n.ExecutionLog != nil {
 				inFlight, err := n.ExecutionLog.ListInFlight(ctx)
 				if err != nil {
@@ -306,7 +256,6 @@ var serveCmd = &cobra.Command{
 						return fmt.Errorf("agent PID %d still running (run %s) — refusing to start %s concurrently",
 							ifr.AgentPID, ifr.RunUID[:12], entityID)
 					}
-					// Process is dead — close the orphaned run and continue.
 					slog.Info("concurrency guard: closing zombie run", "run_uid", ifr.RunUID[:12], "pid", ifr.AgentPID)
 					_ = n.ExecutionLog.MarkFailed(ctx, ifr.RunUID, ifr.EntityUID, "process-not-found")
 				}
@@ -317,85 +266,17 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("entity not found: %s", entityID)
 			}
 
-			desc := entityDesc(ctx, entityID, e.Title)
-			pc := walkUp(ctx, entityID, e.Type)
+			// Substitute entity UUID into the skill prompt. The agent reads all
+			// context itself via the HTTP API — no pre-fetching in Go.
+			prompt := strings.ReplaceAll(skillPrompt, "{ENTITY_UUID}", entityID)
 
-			// Build the context header — whatever sits above the entry point.
-			var contextSection string
-			if pc.productTitle != "" {
-				contextSection += fmt.Sprintf("## Product Context (Big Picture)\n**%s** [%s]\n\n%s\n\n",
-					pc.productTitle, pc.productID, pc.productDesc)
-			}
-			if pc.manifestTitle != "" {
-				contextSection += fmt.Sprintf("## Manifest Context (Refinement)\n**%s** [%s]\n\n%s\n\n",
-					pc.manifestTitle, pc.manifestID, pc.manifestDesc)
-			}
-
-			// For a product, walk DOWN to pre-fetch all manifest descriptions
-			// so the agent has full context without extra MCP roundtrips.
-			var manifestsSection string
-			if e.Type == "product" && n.Relationships != nil {
-				manifEdges, _ := n.Relationships.ListOutgoing(ctx, entityID, "owns")
-				for _, me := range manifEdges {
-					if me.DstKind != "manifest" {
-						continue
-					}
-					mEnt, err2 := n.Entities.Get(me.DstID)
-					if err2 != nil || mEnt == nil || mEnt.Status == "archived" || mEnt.Status == "closed" {
-						continue
-					}
-					mDesc := entityDesc(ctx, me.DstID, mEnt.Title)
-					manifestsSection += fmt.Sprintf("### Manifest: %s [%s]\n%s\n\n", mEnt.Title, me.DstID, mDesc)
-				}
-			}
-
-			var prompt string
-			switch e.Type {
-			case "product":
-				manifestCtx := ""
-				if manifestsSection != "" {
-					manifestCtx = "## Manifest Context (Refinement)\n" + manifestsSection
-				}
-				prompt = fmt.Sprintf(
-					"## Product Context (Big Picture)\n**%s** [%s]\n\n%s\n\n"+
-						"%s"+ // manifest context if present
-						"## Your Job\n"+
-						"Use the product and manifest context above to guide your work.\n"+
-						"Use OpenPraxis MCP tools to travel the DAG:\n"+
-						"1. For each manifest listed above find its active tasks via relationships\n"+
-						"2. Execute each task with the full product + manifest context in mind\n"+
-						"3. Honour depends_on ordering between tasks\n"+
-						"4. Post results/findings back to this product via comment_add\n\n"+
-						"## Visceral Rules\n%s",
-					e.Title, entityID, desc, manifestCtx, visceralRules(),
-				)
-			case "manifest":
-				prompt = fmt.Sprintf(
-					"%s"+ // product context if present
-						"## Manifest Context (Refinement)\n**%s** [%s]\n\n%s\n\n"+
-						"## Your Job\n"+
-						"Use OpenPraxis MCP tools to travel the DAG:\n"+
-						"1. Find all active tasks under this manifest via relationships\n"+
-						"2. Execute each task with the product + manifest context above in mind\n"+
-						"3. Honour depends_on ordering between tasks\n"+
-						"4. Post results back via comment_add\n\n"+
-						"## Visceral Rules\n%s",
-					contextSection, e.Title, entityID, desc, visceralRules(),
-				)
-			default: // task
-				prompt = fmt.Sprintf(
-					"%s"+ // product + manifest context if present
-						"## Task Instructions\n**%s** [%s]\n\n%s\n\n"+
-						"Execute the task instructions above. The product and manifest context\n"+
-						"sections define the big picture and constraints — follow them.\n\n"+
-						"## Visceral Rules\n%s",
-					contextSection, e.Title, entityID, desc, visceralRules(),
-				)
+			// Append visceral rules so the agent receives them even without MCP.
+			if vr := visceralRules(); vr != "" {
+				prompt += "\n\n---\n\n## Visceral Rules\n" + vr
 			}
 
 			slog.Info("schedule: dispatching entity",
-				"entity_uid", entityID, "type", e.Type, "title", e.Title,
-				"manifest_id", pc.manifestID, "product_id", pc.productID)
+				"entity_uid", entityID, "type", e.Type, "title", e.Title)
 
 			t := &task.Task{
 				ID:     entityID,
