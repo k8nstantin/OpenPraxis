@@ -246,8 +246,8 @@ export function useEntityDescriptionHistory(
   return useQuery({
     queryKey: entityKeys.descriptionHistory(kind, id ?? ''),
     queryFn: async () => {
-      // Description revisions are stored as comments with type=description_revision.
-      const res = await fetch(`/api/entities/${id}/comments?type=description_revision&limit=100`)
+      // Description revisions are stored as comments with type=prompt.
+      const res = await fetch(`/api/entities/${id}/comments?type=prompt&limit=100`)
       if (!res.ok) throw new Error(`description history → ${res.status}`)
       const data = (await res.json()) as { comments: DescriptionRevision[] } | DescriptionRevision[]
       const rows = Array.isArray(data) ? data : (data.comments ?? [])
@@ -431,7 +431,7 @@ async function postDepRevision(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       author: 'operator',
-      type: 'agent_note',
+      type: 'comment',
       body: '<dependency_revision>\n' + body + '\n</dependency_revision>',
     }),
   })
@@ -762,7 +762,7 @@ export function useRestoreEntityDependencySnapshot(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           author: 'operator',
-          type: 'agent_note',
+          type: 'comment',
           body: restoreBody,
         }),
       })

@@ -58,13 +58,8 @@ export interface OutputChunk {
 }
 
 export type CommentType =
-  | 'execution_review'
-  | 'description_revision'
-  | 'agent_note'
-  | 'user_note'
-  | 'watcher_finding'
-  | 'decision'
-  | 'link'
+  | 'prompt'
+  | 'comment'
   | string
 
 export interface Comment {

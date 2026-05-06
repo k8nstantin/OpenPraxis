@@ -12,11 +12,11 @@ import { ContentBlock } from '@/components/content-block'
 
 // Label shown in ContentBlock per entity type
 const CONTENT_LABEL: Record<string, string> = {
-  product:  'Description',
-  manifest: 'Declaration',
-  task:     'Instructions',
-  skill:    'Description',
-  idea:     'Description',
+  product:  'Prompt',
+  manifest: 'Prompt',
+  task:     'Prompt',
+  skill:    'Prompt',
+  idea:     'Prompt',
 }
 
 // Main tab — stats grid + repo card + description editor + revision
@@ -169,11 +169,11 @@ export function MainTab({
         </Card>
       ) : null}
 
-      {/* ContentBlock: Description / Declaration / Instructions */}
+      {/* ContentBlock: Prompt */}
       <ContentBlock
         entityId={entityId}
         kind={kind}
-        label={CONTENT_LABEL[kind] ?? 'Description'}
+        label={CONTENT_LABEL[kind] ?? 'Prompt'}
         placeholder={`Write ${(CONTENT_LABEL[kind] ?? 'description').toLowerCase()} here… Markdown supported, drag/paste files to attach`}
       />
 
