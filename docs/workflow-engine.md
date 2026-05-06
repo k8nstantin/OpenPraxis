@@ -1,6 +1,6 @@
 # OpenPraxis — Workflow Engine for Autonomous Coding Agents
 
-Status: canonical design doc · Last updated 2026-04-19 · Authored from session 2026-04-19 · Closes #101
+Status: canonical design doc · Last updated 2026-05-06 · v0.6 architecture update
 
 This doc exists to stop the architectural drift. Over time OpenPraxis grew from "a memory layer for coding agents" into a full DAG-based workflow engine specialized for autonomous coding agents. That's now the truth. Every future PR that touches the primitives listed here should check itself against this doc before merging.
 
@@ -10,12 +10,82 @@ This doc exists to stop the architectural drift. Over time OpenPraxis grew from 
 
 - **Tasks execute agent subprocess spawns** (Claude Code, Cursor, Codex), not code functions.
 - **Runs isolated per-task in git worktrees** off fresh `origin/main` so concurrent tasks don't collide.
-- **Tracks cost + turns + lines per run** with self-calibrating per-model pricing.
+- **Tracks turns + lines per run** via the append-only `execution_log` (cost tracking redesigned in v0.6).
 - **Has a first-class review/rejection loop** — rerunning tasks with feedback is a primitive, not an afterthought.
 - **Carries a visceral-rules enforcement layer + independent watcher audit** — non-negotiable compliance checks agents cannot override.
 - **Laptop-first**: one Go binary, SQLite, no external dependencies beyond Ollama for embeddings. Runs on a dev machine.
+- **Universal DAG dispatcher (v0.6)**: any entity type (product/manifest/task/skill) can be scheduled. Agent receives entity UUID, reads the DAG itself via the HTTP API, assembles context, and executes.
 
 It is NOT a general-purpose workflow engine. It is NOT a build system. It is NOT just an MCP server.
+
+## v0.6 Architecture changes
+
+### Universal DAG dispatcher
+
+Prior to v0.6, only `task`-type entities could be scheduled. The v0.6 dispatcher generalizes this: **any entity** (product/manifest/task/skill/idea) can have a `schedules` row, and the dispatcher fires an agent session scoped to that entity.
+
+The dispatch flow:
+
+```
+schedules table → cron tick → pick due entity
+    → agent receives entity UUID + execution skill
+    → agent calls GET /api/entities/:id + /api/relationships?dst_id=:id&kind=owns
+    → agent walks DAG from entity up to root (task → manifest → product)
+    → assembles context: product prompt → manifest prompt → entity prompt
+    → executes with full hierarchical context
+```
+
+The agent itself is responsible for reading the DAG — it is not pre-assembled by the runner. This keeps the runner dumb and the agent context-aware.
+
+### Execution Skill
+
+The **Execution Skill** (`019dfecc`) is an entity in OpenPraxis that stores the canonical agent operating procedure as a `prompt` comment. At boot, the runner reads this skill and injects it into every agent invocation as the manifest spec.
+
+The execution skill teaches agents:
+1. How to read the DAG (entity UUID → walk parents → collect prompts + comments)
+2. How to post `**Agent's Decision:**` comments as they work
+3. How to post the final report as a `prompt` comment on the target entity
+4. How to use the closing protocol (`execution_review` comment)
+
+Storing the protocol in OpenPraxis itself means it's versioned (SCD-2), auditable, and updateable without code changes.
+
+### prompt/comment type system
+
+v0.6 collapses the previous 9-type comment taxonomy to 2 primary types:
+
+| Type | Purpose |
+|------|---------|
+| `prompt` | **Active instructions** — the latest `prompt` comment on an entity is what the next agent run executes. Append-only; history is preserved. |
+| `comment` | **Context** — findings, decisions, blockers, prior attempts. Fed to the next run as situational awareness. |
+
+Legacy types (`agent_note`, `user_note`, `decision`, `link`, etc.) are transparently remapped to `comment` at both the MCP and HTTP boundaries (PR #344).
+
+Special subtypes retained: `execution_review`, `review_approval`, `review_rejection`, `watcher_finding`.
+
+### Unified entity model
+
+All entity types — `product`, `manifest`, `task`, `skill`, `idea` — now live in a single `entities` table (SCD-2). Every change creates a new row; time travel is native. The `relationships` table is the single source for all edges.
+
+```
+entities (SCD-2)
+  ├── type: product | manifest | task | skill | idea
+  └── Every change → new row (valid_from / valid_to)
+
+relationships
+  ├── kind: owns | depends_on | links_to
+  └── Connects any entity to any other entity
+
+execution_log (append-only)
+  ├── event: started | sample | completed | failed
+  └── Full metrics: turns, tokens, CPU, RSS, lines, commits
+
+schedules (SCD-2)
+  └── Drives when any entity fires
+```
+
+### Concurrency guard
+
+One agent at a time system-wide. PID-based zombie detection: dead processes are auto-closed; live ones block dispatch. This prevents overlapping runs from the same schedule.
 
 ## The three-tier DAG (canonical)
 
@@ -36,9 +106,9 @@ Relevant files:
 - `internal/manifest/dependencies.go` (#76)
 - `internal/task/repository.go` `SetDependency` (#87)
 
-## Task state machine (the 8 states)
+## Entity state machine
 
-Canonical set, locked in #73 and extended in #93:
+Entities have a `status` field. For task-type entities, the canonical states (locked in #73, extended in #93) are:
 
 | Status | Meaning |
 |---|---|
@@ -47,15 +117,15 @@ Canonical set, locked in #73 and extended in #93:
 | `scheduled` | Armed; scheduler picks up at `next_run_at`. |
 | `running` | Agent subprocess live. |
 | `paused` | SIGSTOP'd, resumable. |
-| `completed` | Agent exited + watcher audit passed or warning-only. |
+| `completed` | Agent exited successfully. |
 | `failed` | Agent errored, hit cost cap, timed out, or watcher downgraded from completed. Terminal. |
 | `cancelled` | Operator cancelled. Terminal. |
 
-Transitions live in `internal/task/status.go` as `validTransitions`. `Store.UpdateStatus` enforces. Illegal transitions are refused with a structured error naming the rejected pair + legal next states.
+v0.6: status is stored in the `entities` table (SCD-2). Every status transition creates a new entity row. `store.UpdateEntityStatus` enforces valid transitions.
 
 Notable exceptions to "terminal is terminal":
 - `completed → failed` (watcher audit downgrade — the original exception)
-- `completed → scheduled` (review-rejection re-run per #93, gated by `Store.RejectCompletedTask`)
+- `completed → scheduled` (review-rejection re-run per #93)
 
 ## The activation model
 

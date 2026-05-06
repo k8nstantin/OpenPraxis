@@ -41,7 +41,7 @@ flowchart TB
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
 <p align="center">
-  <img src="docs/images/overview-v2.png" alt="OpenPraxis dashboard — cumulative cost, cache hit ratio, actions-per-hour, top tools" width="100%" />
+  <img src="docs/screenshots/v0.6/overview.png" alt="OpenPraxis dashboard — overview: stat cards, ECharts from execution_log, live activity" width="100%" />
 </p>
 
 ### Features
@@ -163,7 +163,7 @@ Developers write the spec. Leadership sets the budget, caps, and rules. OpenPrax
 **The hierarchy isn't just a data model — it's a picture.** Every product renders as an interactive Directed Acyclic Graph. You see the whole build plan at once: what's done, what's running, what's blocked, what's next, where the money went, and exactly which task implements which line of which spec.
 
 <p align="center">
-  <img src="docs/images/product-dag-openpraxis-v2.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below, status-colored, interactive" width="100%" />
+  <img src="docs/screenshots/v0.6/product-detail.png" alt="Product DAG — product at top, manifests as blue-edged nodes, task chains below, status-colored, interactive" width="100%" />
 </p>
 
 - **Purple product node** at the top — the initiative.
@@ -245,7 +245,7 @@ The result is cost and quality control by construction — you set a daily budge
 ### Dashboard — cumulative cost, cache efficiency, and live activity
 
 <p align="center">
-  <img src="docs/images/overview-v2.png" alt="OpenPraxis dashboard — cumulative cost $658, 98% cache hit ratio, actions-per-hour histogram, top tools breakdown" width="100%" />
+  <img src="docs/screenshots/v0.6/overview.png" alt="OpenPraxis dashboard — 8 stat cards, ECharts from execution_log: runs/hour, cache hit rate, turns/run, lines added/removed" width="100%" />
 </p>
 
 One glance tells you the entire cost and efficiency story of your fleet:
@@ -260,7 +260,7 @@ One glance tells you the entire cost and efficiency story of your fleet:
 ### Live tool output — watch the agent work, turn by turn
 
 <p align="center">
-  <img src="docs/images/tasks-live-output-v2.png" alt="Task detail — execution control dials, dependency graph, run history, and live output streaming" width="100%" />
+  <img src="docs/screenshots/v0.6/tasks.png" alt="Task detail — execution control dials, dependency graph, run history, and live output streaming" width="100%" />
 </p>
 
 Open any task and see everything in one panel:
@@ -272,16 +272,16 @@ Open any task and see everything in one panel:
 - **Pause (SIGSTOP) / Stop / Emergency Stop All** — freeze or kill from the task header; no waiting for the agent.
 - **Comments thread** — typed comments (`agent_note`, `review_approval`, `watcher_finding`, etc.) on the same page as the run output.
 
-### Products → Manifests → Tasks — every cost and every turn rolls up
+### Products → Manifests → Tasks — every execution rolls up
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/products-detail-v2.png" alt="Product detail showing three linked manifests with aggregate cost, tasks, turns, and status" /></td>
-    <td width="50%"><img src="docs/images/manifests-detail-v2.png" alt="Manifest detail with four executed tasks inline, each showing status, cost, turns, and runs" /></td>
+    <td width="50%"><img src="docs/screenshots/v0.6/products.png" alt="Products list showing all products with status, execution counts, and latest run" /></td>
+    <td width="50%"><img src="docs/screenshots/v0.6/manifests.png" alt="Manifests list with linked tasks, status, and latest execution" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Products</b> group manifests under one initiative. Header shows <b>Manifests / Tasks / Turns / Cost</b> aggregated across every child — spend per initiative, not guesswork.</sub></td>
-    <td align="center"><sub><b>Manifests</b> are markdown specs. Every executed task is linked inline with its status, cost, turns, run count, and branch — trace any line in the spec to the task that implemented it.</sub></td>
+    <td align="center"><sub><b>Products</b> group manifests under one initiative. Unified entity model (v0.6): all types in one <code>entities</code> table with SCD-2 history.</sub></td>
+    <td align="center"><sub><b>Manifests</b> are specs driving task execution. Every entity type now uses the same prompt/comment model — the latest <code>prompt</code> comment is the active spec.</sub></td>
   </tr>
 </table>
 
@@ -290,7 +290,7 @@ Hierarchy: **Product → Manifest → Task → Run → Action**. Costs and turns
 ### Visualize the plan — interactive DAG, status-colored
 
 <p align="center">
-  <img src="docs/images/product-dag-openpraxis-v2.png" alt="Product DAG — product at top, manifests as nodes, task chains below with status colors, ECharts force layout" width="100%" />
+  <img src="docs/screenshots/v0.6/product-detail.png" alt="Product DAG — product at top, manifests as nodes, task chains below with status colors" width="100%" />
 </p>
 
 Every product renders as an interactive directed acyclic graph:
@@ -301,10 +301,10 @@ Every product renders as an interactive directed acyclic graph:
 - **Status colors** — green done, gray pending, red failed, amber in flight.
 - **Zoom, pan, click to drill.** Click any node to open its detail panel inline.
 
-### Every action, every session, every cost unit — searchable forever
+### Every action, every session — searchable forever
 
 <p align="center">
-  <img src="docs/images/conversations-detail-v2.png" alt="Activity feed — live action stream with agent, tool, cost, and turn data across all running and recent sessions" width="100%" />
+  <img src="docs/screenshots/v0.6/actions.png" alt="Actions log — every tool call keyword-searchable with snippet highlights, infinite scroll" width="100%" />
 </p>
 
 Every agent session is captured as a conversation:
@@ -317,7 +317,7 @@ Every agent session is captured as a conversation:
 ### Independent observer — three gates whose findings post as comments
 
 <p align="center">
-  <img src="docs/images/watcher-audit-history-v2.png" alt="Audit tab — per-task watcher verdicts with git, build, and manifest gate results" width="100%" />
+  <img src="docs/screenshots/v0.6/schedules.png" alt="Schedules — active and history views for scheduled entity runs" width="100%" />
 </p>
 
 The watcher is a **separate process** outside every agent session. After a task finishes, it runs three gates:
@@ -336,14 +336,12 @@ The review task pattern: pair every main task with a `depends_on`-linked review 
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/images/exec-controls-product-v2.png" alt="Product detail — execution control dials at product scope showing max_turns, temperature, reasoning_effort, and budget knobs" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-manifest-v2.png" alt="Manifest detail — same execution control dials at manifest scope, overriding or inheriting from the product" /></td>
-    <td width="33%"><img src="docs/images/exec-controls-task-v2.png" alt="Task detail — execution control dials at task scope, the narrowest override point in the inheritance chain" /></td>
+    <td width="50%"><img src="docs/screenshots/v0.6/settings.png" alt="Settings — profile, agent integrations, chat provider config" /></td>
+    <td width="50%"><img src="docs/screenshots/v0.6/tasks.png" alt="Task detail — execution control dials at task scope, the narrowest override point in the inheritance chain" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Product</b> — set the wide default once</sub></td>
-    <td align="center"><sub><b>Manifest</b> — override for a feature area</sub></td>
-    <td align="center"><sub><b>Task</b> — override for a single run</sub></td>
+    <td align="center"><sub><b>Settings</b> — global config with provider integrations</sub></td>
+    <td align="center"><sub><b>Task</b> — execution knobs with inheritance from manifest → product → system</sub></td>
   </tr>
 </table>
 
@@ -402,9 +400,10 @@ You have an idea
               +-----+-----------+--------+
               |         OpenPraxis         |
               |                          |
-              |  Products  > Manifests   |
-              |  Manifests > Tasks       |
-              |  Tasks     > Execution   |
+              |  entities (SCD-2)        |  ← all types: product/manifest/task/skill/idea
+              |  execution_log           |  ← append-only event-sourced runs
+              |  relationships           |  ← all edges: owns/depends_on/links_to
+              |  schedules (SCD-2)       |  ← universal DAG dispatcher
               |  Watcher   > Audit       |
               |  Memory    > Persistence |
               |  Rules     > Compliance  |
@@ -414,7 +413,7 @@ You have an idea
               +-----+----------+---------+
                     |          |
               SQLite+vec    Dashboard
-              (memories.db) (localhost:8765)
+              (memories.db) (localhost:9966)
                     |
               Peer Sync (mDNS + Automerge)
                     |
@@ -422,9 +421,9 @@ You have an idea
 ```
 
 OpenPraxis is a single Go binary that runs as:
-1. **MCP server** (stdio) — spawned by coding agents as a subprocess, exposing 40+ tools
+1. **MCP server** (stdio) — spawned by coding agents as a subprocess, exposing 55 tools
 2. **HTTP server** — dashboard UI, REST API, WebSocket events, hook handler
-3. **Task runner** — spawns autonomous agent sessions from scheduled tasks
+3. **DAG dispatcher** — universal scheduler: any entity (product/manifest/task/skill) can be scheduled; agent receives entity UUID, reads the DAG via HTTP API, executes
 4. **Watcher** — independent server-side auditor that agents cannot override
 5. **Peer node** — mDNS discovery + Automerge CRDT sync with other OpenPraxis instances
 
@@ -462,19 +461,24 @@ Server-side execution observer. Runs **outside** the agent session — the agent
 
 **Observer-only (PR #149).** Each gate posts a `watcher_finding` comment on the task capturing the result. The watcher **never mutates task state** and **never blocks downstream `ActivateDependents`**. The paired review task (if any) is the sole decision point for `review_approval` / `review_rejection`. This decouples code-check gates from ops-task lifecycles that legitimately produce zero commits.
 
-### Reviews and Comments
-Every entity (product, manifest, task) carries a comment thread. Comment types are typed and discoverable via MCP:
+### Comments
+Every entity (product, manifest, task, skill, idea) carries an append-only comment thread. Two core types (v0.6+):
 
 | Type | Purpose |
 |------|---------|
-| `agent_note` | Progress / observation during a run |
-| `execution_review` | Main-task post-run retrospective |
+| `prompt` | Active instructions for this entity — the latest `prompt` comment is what the next agent run executes |
+| `comment` | Context, findings, decisions — feeds next run's situational awareness |
+
+Special subtypes used by the system:
+
+| Type | Purpose |
+|------|---------|
+| `execution_review` | Agent post-run retrospective (required by runner) |
 | `review_approval` | Final verdict from a paired review task — success |
 | `review_rejection` | Final verdict from a paired review task — failure |
 | `watcher_finding` | Observer-posted gate result (watcher only) |
-| `user_note`, `decision`, `link` | Human-authored notes |
 
-Review agents post `agent_note` for progress and `review_approval` / `review_rejection` for verdicts — they never author `watcher_finding` (reserved for the observer).
+Legacy types (`agent_note`, `user_note`, `decision`, `link`) are transparently remapped to `comment` at both MCP and HTTP boundaries (v0.6 PR #344).
 
 ### Ideas
 Capture product ideas, feature requests, bugs, and improvements with priority levels (low/medium/high/critical) and tags. Ideas link to manifests — trace which idea became which spec, and track from concept to execution.
@@ -561,7 +565,7 @@ ollama pull nomic-embed-text
 
 ```bash
 make build          # Build binary (includes macOS codesign)
-./openpraxis serve    # Start dashboard + MCP + sync (port 8765)
+./openpraxis serve    # Start dashboard + MCP + sync (port 9966)
 ```
 
 ### Connect to Claude Code
@@ -583,9 +587,9 @@ Claude Code will spawn OpenPraxis as a subprocess. On first session, the agent r
 
 ### Dashboard
 
-Open `http://localhost:8765`.
+Open `http://localhost:9966`.
 
-## Stats (2026-05-04)
+## Stats (2026-05-06)
 
 | Metric | Count |
 |--------|-------|
@@ -595,48 +599,40 @@ Open `http://localhost:8765`.
 | MCP tools | 55 |
 | HTTP routes | ~150 (REST, WebSocket, hook endpoint, MCP over streamable HTTP) |
 | Dashboard tabs | 12 (Operations: Overview, Actions Log, Products, Manifests, Tasks, Inbox, Recall · Governance: Productivity, Audit, Activity · Configuration: Settings) |
-| Persistent tables | 23 primary + vec-search virtual tables |
+| Persistent tables | 20 primary + vec-search virtual tables (13 legacy tables dropped in v0.6) |
 | Go test files | ~70, incl. contract tests for the product hierarchy DAG shapes (PR #160) |
 
 ## Database
 
 SQLite with WAL mode (`_journal_mode=WAL&_busy_timeout=5000`, visceral rule #10). Single file at `~/.openpraxis/data/memories.db`.
 
-**Core:** `memories`, `conversations` (+ `session_turns`), `manifests`, `tasks` (+ `task_runs`, `task_runtime_state`), `products`, `ideas`, `actions`, `sessions`, `chat_sessions`, `comments`, `markers`
+**Core (v0.6+ unified):** `entities` (SCD-2, all types: product/manifest/task/idea/skill), `execution_log` (append-only event-sourced runs), `relationships` (all edges: owns/depends_on/links_to), `comments`, `schedules` (SCD-2)
 
-**Dependencies:** `product_dependencies`, `manifest_dependencies`, `task_dependency`
+**Support:** `memories`, `conversations` (+ `session_turns`), `actions`, `sessions`, `markers`, `settings`
 
 **Compliance:** `amnesia`, `delusions`, `visceral_confirmations`, `watcher_audits`, `rule_patterns`
 
-**Costing:** `model_pricing` (calibrated per-run from actual cost)
-
-**Settings:** `settings` (task/manifest/product/system scopes, single table, resolver walks the chain)
-
 **Vector search:** `vec_memories`, `vec_conversations` (sqlite-vec extension, 768-dim cosine similarity)
 
-**Join tables:** `task_manifests`, `idea_manifest_links`
+*Note: 13 legacy tables dropped in v0.6: `products`, `manifests`, `ideas`, `task_runs`, `task_run_host_samples`, `task_dependency`, `product_dependencies`, `manifest_dependencies`, `idea_manifest_links`, `task_manifests`, `task_runtime_state`, `execution_log_samples`, `model_pricing`.*
 
 ## Project Structure
 
 ```
-cmd/                        CLI commands (cobra): serve, mcp, version, chatbridge
+cmd/                        CLI commands (cobra): serve, mcp, version
 internal/
   action/                   Action recording + visceral/delusion compliance
-  chat/                     Multi-provider AI chat (Anthropic, Google, OpenAI, Ollama)
   config/                   YAML config loader + platform detection
   conversation/             Conversation storage + vector search
   embedding/                Ollama embedding client (nomic-embed-text, 768-dim)
-  idea/                     Ideas store with manifest linking
-  manifest/                 Manifest CRUD + dependency chains + delusion detection
-  marker/                   Flag/notification system between peers
-  mcp/                      MCP server (stdio + streamable HTTP), 40+ tool handlers
+  idea/                     Ideas store
+  mcp/                      MCP server (stdio + streamable HTTP), 55 tool handlers
   memory/                   Memory store + tiered responses (l0/l1/l2) + vector search
   node/                     Node orchestrator — wires all stores together
   peer/                     mDNS peer discovery + Automerge CRDT sync
-  product/                  Product hierarchy (product > manifest > task)
-  setup/                    Agent detection + auto-configuration
-  task/                     Task runner, scheduler, repository, metrics, runtime state
-  watcher/                  Independent task execution auditor (3 gates)
+  schedule/                 SCD-2 schedules table + cron-driven DAG dispatcher
+  setup/                    Agent detection + auto-configuration (Claude Code, Cursor, etc.)
+  task/                     Task runner + prompt builder (unified entity model)
   web/                      HTTP handlers, WebSocket hub, embedded dashboard
     ui/dashboard-v2/        React dashboard (Vite + React 19 + Tailwind v4 + TanStack Router + shadcn/ui)
 mobile/                     React Native (Expo) companion app
@@ -655,7 +651,7 @@ OpenPraxis registers Claude Code hooks in `~/.claude/settings.json`:
 | Stop | Session ends | Checks compliance, flags amnesia, saves conversation |
 | SessionEnd | Session cleanup | Saves conversation from transcript |
 
-All hooks hit `http://127.0.0.1:8765/api/hook`.
+All hooks hit `http://127.0.0.1:9966/api/hook`.
 
 ## Peer Sync
 
@@ -679,11 +675,11 @@ node:
   avatar: "\U0001F989"
 server:
   host: 127.0.0.1
-  port: 8765
+  port: 9966
   open_browser: true
 sync:
   host: 0.0.0.0
-  port: 8766
+  port: 6699
 embedding:
   ollama_url: http://localhost:11434
   model: nomic-embed-text
