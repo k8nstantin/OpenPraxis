@@ -449,6 +449,26 @@ func (s *Store) ListByEntity(ctx context.Context, entityUID string, limit int) (
 	return collectRows(rows)
 }
 
+// CountInFlight returns the number of run_uids that have a "started" event
+// but no "completed" or "failed" event. Survives server restarts — the
+// dispatcher uses this to enforce the one-agent-at-a-time invariant even
+// when agent subprocesses outlive a server restart.
+func (s *Store) CountInFlight(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT run_uid)
+		FROM execution_log
+		WHERE event = 'started'
+		  AND run_uid NOT IN (
+		      SELECT run_uid FROM execution_log
+		      WHERE event IN ('completed', 'failed')
+		  )`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("execution: count in-flight: %w", err)
+	}
+	return n, nil
+}
+
 // ListOutput returns output chunks for a run in seq order.
 func (s *Store) ListOutput(ctx context.Context, runUID string) ([]OutputChunk, error) {
 	rows, err := s.db.QueryContext(ctx,

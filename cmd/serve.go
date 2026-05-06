@@ -274,6 +274,9 @@ var serveCmd = &cobra.Command{
 			// System-level concurrency guard: only one agent at a time.
 			// Products, manifests, and tasks all share the same codebase —
 			// concurrent agents conflict on branches and PRs.
+			// Check both the in-memory runner (current session) AND the
+			// execution_log (survives server restarts — agents can outlive
+			// the server process that spawned them).
 			if runner.RunningCount() > 0 {
 				running := runner.ListRunning()
 				titles := make([]string, 0, len(running))
@@ -281,6 +284,14 @@ var serveCmd = &cobra.Command{
 					titles = append(titles, rt.Title)
 				}
 				return fmt.Errorf("agent already running (%v) — refusing to start %s concurrently", titles, entityID)
+			}
+			if n.ExecutionLog != nil {
+				inFlight, err := n.ExecutionLog.CountInFlight(ctx)
+				if err != nil {
+					slog.Warn("concurrency guard: could not count in-flight runs", "error", err)
+				} else if inFlight > 0 {
+					return fmt.Errorf("execution_log shows %d in-flight run(s) from a previous session — refusing to start %s concurrently", inFlight, entityID)
+				}
 			}
 
 			e, err := n.Entities.Get(entityID)
