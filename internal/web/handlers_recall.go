@@ -25,10 +25,12 @@ func apiRecall(n *node.Node) http.HandlerFunc {
 			items = append(items, recallItem{ID: m.ID, Type: "memory", Title: m.L0})
 		}
 
-		// Deleted tasks
-		tasks, _ := n.Tasks.ListDeleted(50)
-		for _, t := range tasks {
-			items = append(items, recallItem{ID: t.ID, Type: "task", Title: t.Title})
+		// Archived tasks from entities
+		if n.Entities != nil {
+			archived, _ := n.Entities.List("task", "archived", 50)
+			for _, e := range archived {
+				items = append(items, recallItem{ID: e.EntityUID, Type: "task", Title: e.Title})
+			}
 		}
 
 		writeJSON(w, items)
@@ -44,7 +46,12 @@ func apiRestore(n *node.Node) http.HandlerFunc {
 		case "memory":
 			err = n.Index.Restore(id)
 		case "task":
-			err = n.Tasks.Restore(id)
+			if n.Entities != nil {
+				_, err = n.Entities.Get(id)
+				if err == nil {
+					err = n.Entities.Update(id, "", "active", nil, "recall", "restored from archived")
+				}
+			}
 		default:
 			http.Error(w, "unknown type: "+itemType, 400)
 			return

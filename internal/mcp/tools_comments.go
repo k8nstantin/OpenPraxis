@@ -59,17 +59,17 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 func (s *Server) resolveCommentTarget(target comments.TargetType, raw string) (string, error) {
 	switch target {
 	case comments.TargetTask:
-		if s.node.Tasks == nil {
+		if s.node.Entities == nil {
 			return raw, nil
 		}
-		t, err := s.node.Tasks.Get(raw)
+		e, err := s.node.Entities.Get(raw)
 		if err != nil {
 			return "", fmt.Errorf("resolve target task %q: %w", raw, err)
 		}
-		if t == nil {
+		if e == nil {
 			return "", fmt.Errorf("target task not found: %s", raw)
 		}
-		return t.ID, nil
+		return e.EntityUID, nil
 	case comments.TargetManifest, comments.TargetProduct:
 		if s.node.Entities == nil {
 			return raw, nil

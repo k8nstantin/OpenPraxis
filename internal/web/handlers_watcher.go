@@ -70,18 +70,20 @@ func apiWatcherForTask(n *node.Node) http.HandlerFunc {
 func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		taskID := mux.Vars(r)["id"]
-		t, err := n.Tasks.Get(taskID)
+		t, err := n.Entities.Get(taskID)
 		if err != nil || t == nil {
 			http.Error(w, "task not found", 404)
 			return
 		}
 
-		// Resolve manifest
+		// Resolve manifest via relationships
 		var manifestTitle, manifestContent string
-		if t.ManifestID != "" {
-			if e, _ := n.Entities.Get(t.ManifestID); e != nil {
-				manifestTitle = e.Title
-				manifestContent = e.Title // entity store carries title only; full content lives in legacy store
+		if n.Relationships != nil {
+			if edges, _ := n.Relationships.ListIncoming(r.Context(), t.EntityUID, "owns"); len(edges) > 0 {
+				if e, _ := n.Entities.Get(edges[0].SrcID); e != nil && e.Type == "manifest" {
+					manifestTitle = e.Title
+					manifestContent = e.Title
+				}
 			}
 		}
 
@@ -89,11 +91,12 @@ func apiWatcherTrigger(n *node.Node) http.HandlerFunc {
 		actions, _ := n.Actions.ListByTask(taskID, 1000)
 		actionCount := len(actions)
 
-		// Get cost
+		// Cost from execution_log
 		var costUSD float64
-		runs, _ := n.Tasks.ListRuns(taskID, 1)
-		if len(runs) > 0 {
-			costUSD = runs[0].CostUSD
+		if n.ExecutionLog != nil {
+			if rows, err := n.ExecutionLog.ListByEntity(r.Context(), taskID, 1); err == nil && len(rows) > 0 {
+				costUSD = rows[0].CostUSD
+			}
 		}
 
 		// Subsystem torn out per operator request 2026-04-30.

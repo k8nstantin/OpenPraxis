@@ -87,16 +87,6 @@ func resolveScheduleEntity(n *node.Node, kind, id string) (string, error) {
 			return e.EntityUID, nil
 		}
 	}
-	// Legacy fallback for entities that predate the entity store migration.
-	switch kind {
-	case schedule.KindTask:
-		if n.Tasks != nil {
-			t, err := n.Tasks.Get(id)
-			if err == nil && t != nil {
-				return t.ID, nil
-			}
-		}
-	}
 	return id, nil
 }
 

@@ -226,17 +226,17 @@ func nodeTargetResolver(n *node.Node) TargetResolver {
 	return func(target comments.TargetType, raw string) (string, error) {
 		switch target {
 		case comments.TargetTask:
-			if n.Tasks == nil {
+			if n.Entities == nil {
 				return raw, nil
 			}
-			t, err := n.Tasks.Get(raw)
+			e, err := n.Entities.Get(raw)
 			if err != nil {
 				return "", fmt.Errorf("resolve target task %q: %w", raw, err)
 			}
-			if t == nil {
+			if e == nil {
 				return "", fmt.Errorf("target task not found: %s", raw)
 			}
-			return t.ID, nil
+			return e.EntityUID, nil
 		case comments.TargetManifest, comments.TargetProduct, comments.TargetIdea:
 			if n.Entities == nil {
 				return raw, nil

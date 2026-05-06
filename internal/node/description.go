@@ -73,20 +73,10 @@ func (n *Node) RecordDescriptionChange(
 // the full UUID so callers (and the revision insert) operate on canonical
 // ids instead of short markers. Returns ("", "", nil) for missing rows.
 //
-// After the legacy store purge, products / manifests / ideas / entities all
-// resolve through the unified entity store. Tasks still have their own store.
+// All entity types (task, product, manifest, idea, skill) resolve through the unified entity store.
 func (n *Node) currentDescription(target comments.TargetType, idOrMarker string) (body, fullID string, err error) {
 	switch target {
-	case comments.TargetTask:
-		if n.Tasks == nil {
-			return "", "", nil
-		}
-		t, err := n.Tasks.Get(idOrMarker)
-		if err != nil || t == nil {
-			return "", "", err
-		}
-		return t.Description, t.ID, nil
-	case comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
+	case comments.TargetTask, comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
 		if n.Entities == nil {
 			return "", "", nil
 		}
@@ -253,13 +243,7 @@ func (n *Node) RestoreDescription(
 // the whole PATCH payload.
 func (n *Node) writeEntityDescription(target comments.TargetType, fullID, body string) error {
 	switch target {
-	case comments.TargetTask:
-		if n.Tasks == nil {
-			return fmt.Errorf("tasks store not wired")
-		}
-		_, err := n.Tasks.Update(fullID, nil, &body)
-		return err
-	case comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
+	case comments.TargetTask, comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
 		if n.Entities == nil {
 			return fmt.Errorf("entities store not wired")
 		}
