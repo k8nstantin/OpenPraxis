@@ -16,7 +16,7 @@ func (s *Server) registerIdeaTools() {
 		mcplib.NewTool("idea_add",
 			mcplib.WithDescription("Save a product idea, feature request, or improvement. Ideas are shared across sessions."),
 			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Idea title")),
-			mcplib.WithString("description", mcplib.Description("Detailed description (stored as initial description_revision)")),
+			mcplib.WithString("description", mcplib.Description("Detailed description (stored as initial prompt)")),
 			mcplib.WithString("priority", mcplib.Description("low, medium, high, critical. Default: medium")),
 			mcplib.WithString("project_id", mcplib.Description("Project ID to assign idea to (optional)")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
@@ -69,10 +69,10 @@ func (s *Server) handleIdeaAdd(ctx context.Context, req mcplib.CallToolRequest) 
 		return errResult("save idea: %v", err), nil
 	}
 
-	// Record description as a description_revision comment if provided.
+	// Record description as a prompt comment if provided.
 	if desc != "" {
 		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetIdea, e.EntityUID, desc, ""); err != nil {
-			// Non-fatal — the idea row was saved; description_revision can be
+			// Non-fatal — the idea row was saved; prompt can be
 			// added manually if the comment insert fails.
 			_ = err
 		}
@@ -144,7 +144,7 @@ func (s *Server) handleIdeaUpdate(ctx context.Context, req mcplib.CallToolReques
 	}
 
 	desc := argStr(a, "description")
-	// DV consistency — append-only description_revision before the
+	// DV consistency — append-only prompt before the
 	// denormalised UPDATE, same pattern as product / manifest / task.
 	if desc != "" {
 		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetIdea, existing.EntityUID, desc, ""); err != nil {

@@ -10,7 +10,7 @@ import (
 
 // RecordDescriptionChange compares the proposed new body to the entity's
 // current denormalised description / content / instructions and, if they
-// differ, inserts a description_revision comment on the entity so the full
+// differ, inserts a prompt comment on the entity so the full
 // edit history is preserved append-only. Returns the new comment ID, or
 // empty string when the body is unchanged and no revision was recorded.
 //
@@ -89,7 +89,7 @@ func (n *Node) currentDescription(target comments.TargetType, idOrMarker string)
 	return "", "", nil
 }
 
-// RevisionEntry is a single description_revision presented to API / MCP
+// RevisionEntry is a single prompt presented to API / MCP
 // callers. Version is 1-based with 1 being the oldest revision — i.e. the
 // backfilled seed row or the first user edit after schema rollout.
 type RevisionEntry struct {
@@ -100,7 +100,7 @@ type RevisionEntry struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
-// DescriptionHistory returns the description_revision comments for the given
+// DescriptionHistory returns the prompt comments for the given
 // entity, newest first, with a 1-based Version field derived from insertion
 // order (oldest = 1). The targetID argument may be a short marker or the full
 // UUID; the returned rows always carry full comment IDs.
@@ -141,7 +141,7 @@ func (n *Node) DescriptionHistory(
 	return out, nil
 }
 
-// GetDescriptionRevision fetches a single description_revision by id and
+// GetDescriptionRevision fetches a single prompt by id and
 // enforces that it actually belongs to the given (target, targetID) pair
 // so operators can't read a revision from a sibling entity by guessing the
 // comment id.
@@ -165,7 +165,7 @@ func (n *Node) GetDescriptionRevision(
 		return nil, err
 	}
 	if c.Type != comments.TypeDescriptionRevision {
-		return nil, fmt.Errorf("comment %s is not a description_revision", commentID)
+		return nil, fmt.Errorf("comment %s is not a prompt", commentID)
 	}
 	if c.TargetType != target || c.TargetID != fullID {
 		return nil, fmt.Errorf("revision %s does not belong to %s %s", commentID, target, fullID)
@@ -193,9 +193,9 @@ func (n *Node) GetDescriptionRevision(
 	}, nil
 }
 
-// RestoreDescription re-applies a prior description_revision as the current
+// RestoreDescription re-applies a prior prompt as the current
 // body. The mechanism is deliberately additive: we record a *new*
-// description_revision whose body equals the historical revision's body, then
+// prompt whose body equals the historical revision's body, then
 // denormalise that body back onto the entity column via the appropriate
 // store.Update. The original revision row is untouched so the full trail
 // remains intact — an operator can see "restored from X" as the latest row.

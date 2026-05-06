@@ -189,7 +189,7 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
-		// entityDesc returns the description_revision body for an entity,
+		// entityDesc returns the prompt body for an entity,
 		// falling back to the entity title when no revision comment exists.
 		entityDesc := func(ctx context.Context, entityID, fallback string) string {
 			ct := comments.TypeDescriptionRevision

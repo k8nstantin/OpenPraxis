@@ -61,7 +61,7 @@ MANDATORY — before your final commit+push, call the MCP tool:
     mcp__openpraxis__comment_add
       target_type = "task"
       target_id   = "{{.Task.ID}}"
-      type        = "execution_review"
+      type        = "comment"
       author      = "agent"
       body        = <markdown summary>
 
@@ -164,7 +164,7 @@ Before your final commit+push, call the MCP tool:
     mcp__openpraxis__comment_add
       target_type = "task"
       target_id   = "{{.Task.ID}}"
-      type        = "execution_review"
+      type        = "comment"
       author      = "agent"
       body        = <markdown summary>
 

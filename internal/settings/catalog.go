@@ -89,7 +89,7 @@ func Catalog() []KnobDef {
 			// MCP tools the runner's prompt template instructs agents to call.
 			// Must stay in sync with internal/task/runner.go:defaultAllowedTools.
 			// Missing any of these silently denies the agent — it can't post its
-			// closing execution_review, load visceral rules, or read settings.
+			// closing comment, load visceral rules, or read settings.
 			"mcp__openpraxis__memory_store",
 			"mcp__openpraxis__memory_search",
 			"mcp__openpraxis__memory_recall",

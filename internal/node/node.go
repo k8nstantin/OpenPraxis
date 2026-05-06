@@ -432,7 +432,7 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// cmd/serve.go passes an explicit dir via a follow-up SetRepoDir if it
 	// runs from outside the repo root.
 	n.runner = task.NewRunner(n.Actions, n.SettingsResolver, "", onEvent)
-	// Wire the post-completion execution_review gate (M4-T10). Non-fatal
+	// Wire the post-completion comment gate (M4-T10). Non-fatal
 	// if Comments is nil — the runner treats nil as "feature off".
 	if n.Comments != nil {
 		n.runner.SetExecutionReviewChecker(&executionReviewCheckerAdapter{s: n.Comments})
@@ -1086,7 +1086,7 @@ func (n *Node) ValidateArchiveManifest(manifestID string) error {
 
 // executionReviewCheckerAdapter satisfies task.ExecutionReviewChecker by
 // asking the comments store whether the given task carries at least one
-// execution_review comment authored by "agent". Used by the runner's
+// comment comment authored by "agent". Used by the runner's
 // post-completion amnesia gate (M4-T10).
 type executionReviewCheckerAdapter struct{ s *comments.Store }
 

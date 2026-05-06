@@ -29,7 +29,7 @@ type Memory struct {
 }
 
 // Valid memory types.
-var ValidTypes = []string{"insight", "decision", "pattern", "bug", "context", "reference", "visceral"}
+var ValidTypes = []string{"insight", "comment", "pattern", "bug", "context", "reference", "visceral"}
 
 // Valid scopes.
 var ValidScopes = []string{"personal", "project", "team", "global"}

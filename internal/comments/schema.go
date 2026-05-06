@@ -44,6 +44,11 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("migrate target_type add entity: %w", err)
 	}
 
+	// Collapse legacy comment types → 'prompt' or 'comment'.
+	if err := migrateCollapseTypes(db); err != nil {
+		return fmt.Errorf("migrate collapse comment types: %w", err)
+	}
+
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target_type, target_id, created_at DESC)`)
 	if err != nil {
 		return fmt.Errorf("create comments target index: %w", err)
@@ -143,4 +148,17 @@ func migrateTargetTypeAddEntity(db *sql.DB) error {
 		return fmt.Errorf("rename: %w", err)
 	}
 	return tx.Commit()
+}
+
+// migrateCollapseTypes rewrites legacy type values to the two canonical
+// types: 'prompt' (was 'description_revision') and 'comment' (everything
+// else). Idempotent — rows already at 'prompt' or 'comment' are untouched.
+func migrateCollapseTypes(db *sql.DB) error {
+	if _, err := db.Exec(`UPDATE comments SET type = 'prompt'  WHERE type = 'description_revision'`); err != nil {
+		return fmt.Errorf("migrate type prompt: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE comments SET type = 'comment' WHERE type NOT IN ('prompt', 'comment')`); err != nil {
+		return fmt.Errorf("migrate type comment: %w", err)
+	}
+	return nil
 }

@@ -22,10 +22,10 @@ var adminCmd = &cobra.Command{
 
 var adminBackfillDescriptionRevisionsCmd = &cobra.Command{
 	Use:   "backfill-description-revisions",
-	Short: "Seed v1 description_revision comments for existing entities",
-	Long: `Seeds one description_revision comment for every existing product,
+	Short: "Seed v1 prompt comments for existing entities",
+	Long: `Seeds one prompt comment for every existing product,
 manifest, and task whose description/content text is non-empty and that
-does not already carry a description_revision row.
+does not already carry a prompt row.
 
 Default is a dry run that reports counts; pass --apply to write rows.
 Safe to re-run — the INSERT is guarded so a second invocation writes zero.`,
@@ -61,7 +61,7 @@ Safe to re-run — the INSERT is guarded so a second invocation writes zero.`,
 		if adminApply {
 			label = "seeded"
 		}
-		fmt.Printf("description_revision backfill (%s)\n", modeLabel(adminApply))
+		fmt.Printf("prompt backfill (%s)\n", modeLabel(adminApply))
 		fmt.Printf("  products:  %s %d, skipped %d (already had a revision)\n", label, rep.ProductsSeeded, rep.ProductsSkipped)
 		fmt.Printf("  manifests: %s %d, skipped %d\n", label, rep.ManifestsSeeded, rep.ManifestsSkipped)
 		fmt.Printf("  tasks:     %s %d, skipped %d\n", label, rep.TasksSeeded, rep.TasksSkipped)

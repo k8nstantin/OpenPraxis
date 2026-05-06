@@ -10,7 +10,7 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 )
 
-// DV/M4 — MCP tools over description_revision history. Thin stdio
+// DV/M4 — MCP tools over prompt history. Thin stdio
 // equivalents of the HTTP endpoints in DV/M3; both surfaces share the
 // same Node helpers (DescriptionHistory / GetDescriptionRevision /
 // RestoreDescription) so behaviour stays in lockstep.
@@ -28,20 +28,20 @@ func (s *Server) registerDescriptionTools() {
 
 	s.mcp.AddTool(
 		mcplib.NewTool("description_get_revision",
-			mcplib.WithDescription("Fetch a single description_revision comment by id. Enforces that the revision belongs to the given target — you cannot read a revision from a sibling entity by guessing its id."),
+			mcplib.WithDescription("Fetch a single prompt comment by id. Enforces that the revision belongs to the given target — you cannot read a revision from a sibling entity by guessing its id."),
 			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, or task")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("Entity full UUID")),
-			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The description_revision comment UUID")),
+			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The prompt comment UUID")),
 		),
 		s.handleDescriptionGetRevision,
 	)
 
 	s.mcp.AddTool(
 		mcplib.NewTool("description_restore",
-			mcplib.WithDescription("Restore a prior description revision. Revisions are append-only; restore creates a new description_revision whose body equals the historical revision's body and denormalises that body back onto the entity. The original revision row is untouched."),
+			mcplib.WithDescription("Restore a prior description revision. Revisions are append-only; restore creates a new prompt whose body equals the historical revision's body and denormalises that body back onto the entity. The original revision row is untouched."),
 			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, or task")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("Entity full UUID")),
-			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The historical description_revision comment UUID to restore")),
+			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The historical prompt comment UUID to restore")),
 			mcplib.WithString("author", mcplib.Description("Optional author name for the new revision. Defaults to this peer's UUID.")),
 		),
 		s.handleDescriptionRestore,
