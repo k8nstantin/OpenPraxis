@@ -1,6 +1,7 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -357,16 +358,20 @@ func apiStatsCharts(n *node.Node) http.HandlerFunc {
 		}
 
 		// ── Hourly system averages ────────────────────────────────────────
+		// Source: execution_log sample rows (system_host_samples was dropped
+		// in commit 79a8ca5). Match handlers_stats.go's source-of-truth choice.
 		since24 := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
 		sysRows, err := n.DB().QueryContext(r.Context(), `
-			SELECT strftime('%Y-%m-%dT%H:00:00Z', ts) as hour,
+			SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) as hour,
 			       AVG(cpu_pct), AVG(mem_used_mb),
 			       AVG(net_rx_mbps), AVG(net_tx_mbps),
 			       AVG(disk_read_mbps), AVG(disk_write_mbps)
-			FROM system_host_samples
-			WHERE ts >= ?
+			FROM execution_log
+			WHERE event = 'sample' AND created_at >= ?
 			GROUP BY hour ORDER BY hour ASC`, since24)
-		if err == nil {
+		if err != nil {
+			slog.Warn("charts: hourly system averages query failed", "error", err)
+		} else {
 			defer sysRows.Close()
 			for sysRows.Next() {
 				var b systemHourBucket

@@ -93,7 +93,9 @@ func apiHook(n *node.Node) http.HandlerFunc {
 					LoadAvg1m:     load,
 					CreatedBy:     "hook/post-tool-use",
 				}
-				_ = n.ExecutionLog.Insert(context.Background(), sr)
+				if err := n.ExecutionLog.Insert(context.Background(), sr); err != nil {
+					slog.Warn("execution_log: hook sample insert failed", "session_id", event.SessionID, "error", err)
+				}
 			}
 		}
 

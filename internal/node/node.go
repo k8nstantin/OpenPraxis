@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,11 +27,12 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 
-	gpcpu  "github.com/shirou/gopsutil/v3/cpu"
-	gpdisk "github.com/shirou/gopsutil/v3/disk"
-	gpload "github.com/shirou/gopsutil/v3/load"
-	gpmem  "github.com/shirou/gopsutil/v3/mem"
-	gpnet  "github.com/shirou/gopsutil/v3/net"
+	gpcpu     "github.com/shirou/gopsutil/v3/cpu"
+	gpdisk    "github.com/shirou/gopsutil/v3/disk"
+	gpload    "github.com/shirou/gopsutil/v3/load"
+	gpmem     "github.com/shirou/gopsutil/v3/mem"
+	gpnet     "github.com/shirou/gopsutil/v3/net"
+	gpprocess "github.com/shirou/gopsutil/v3/process"
 )
 
 // Node is the central orchestrator that wires all components together.
@@ -463,10 +465,9 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	return n.runner
 }
 
-// HostSamplerTick returns the resolved host-sampler tick duration so
-// cmd/serve.go can construct the SystemSampler with the same cadence
-// as the per-run sampler. Reads `host_sampler_tick_seconds` at system
-// scope; falls back to catalog default on lookup failure.
+// HostSamplerTick returns the resolved host-sampler tick duration.
+// Reads `host_sampler_tick_seconds` at system scope; falls back to
+// catalog default on lookup failure.
 func (n *Node) HostSamplerTick() time.Duration {
 	return resolveHostSamplerTick(n.SettingsStore)
 }
@@ -773,9 +774,14 @@ func (n *Node) SystemSnapshot() (cpu, rssMB, memUsedMB, memTotalMB, netRx, netTx
 		cpu = pcts[0]
 	}
 	if vm, err := gpmem.VirtualMemory(); err == nil && vm != nil {
-		rssMB      = float64(vm.Used) / (1024 * 1024)
 		memUsedMB  = float64(vm.Used) / (1024 * 1024)
 		memTotalMB = float64(vm.Total) / (1024 * 1024)
+	}
+	// rss_mb is the openpraxis serve process RSS, distinct from system memory.
+	if proc, err := gpprocess.NewProcess(int32(os.Getpid())); err == nil {
+		if mi, err := proc.MemoryInfo(); err == nil && mi != nil {
+			rssMB = float64(mi.RSS) / (1024 * 1024)
+		}
 	}
 	if la, err := gpload.Avg(); err == nil && la != nil {
 		loadAvg = la.Load1
@@ -797,8 +803,9 @@ func (n *Node) SystemSnapshot() (cpu, rssMB, memUsedMB, memTotalMB, netRx, netTx
 		if !n.sysBaseline.at.IsZero() {
 			dt := now.Sub(n.sysBaseline.at).Seconds()
 			if dt > 0 {
-				netRx = float64(rx-n.sysBaseline.netRx) / dt / (1024 * 1024)
-				netTx = float64(tx-n.sysBaseline.netTx) / dt / (1024 * 1024)
+				// Mbps to match readSystemMetrics in host_metrics.go.
+				netRx = float64(rx-n.sysBaseline.netRx) * 8 / 1e6 / dt
+				netTx = float64(tx-n.sysBaseline.netTx) * 8 / 1e6 / dt
 				if netRx < 0 { netRx = 0 }
 				if netTx < 0 { netTx = 0 }
 			}
