@@ -41,8 +41,9 @@ const COMPOSE_TYPES = [
 function fmtTime(v: string | number | undefined): string {
   if (!v) return ''
   try {
-    return new Date(typeof v === 'number' ? v : v)
-      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    // created_at is stored as unix seconds — multiply by 1000 for JS Date
+    const ms = typeof v === 'number' ? v * 1000 : Date.parse(v)
+    return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch { return String(v) }
 }
 
