@@ -789,17 +789,18 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// see which tasks were in-flight at the time of the crash.
 	if r.executionLog != nil {
 		startRow := execution.Row{
-			RunUID:       runUID,
-			EntityUID:    t.ID,
-			Event:        execution.EventStarted,
-			Trigger:      "schedule",
-			NodeID:       r.sourceNode,
-			AgentRuntime: agent,
-			StartedAt:    rt.StartedAt.UnixMilli(),
-			WorktreePath: workDir,
-			Branch:       "", // will be filled after first commit
+			RunUID:        runUID,
+			EntityUID:     t.ID,
+			Event:         execution.EventStarted,
+			Trigger:       "schedule",
+			NodeID:        r.sourceNode,
+			AgentRuntime:  agent,
+			StartedAt:     rt.StartedAt.UnixMilli(),
+			WorktreePath:  workDir,
+			Branch:        "", // will be filled after first commit
 			ToolCallsJSON: "{}",
-			CreatedBy:    "runner",
+			CreatedBy:     "runner",
+			AgentPID:      cmd.Process.Pid,
 		}
 		if err := r.executionLog.Insert(bgCtx, startRow); err != nil {
 			slog.Warn("execution_log: insert started event failed", "component", "runner", "task_id", t.ID, "error", err)
