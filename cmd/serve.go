@@ -210,13 +210,66 @@ var serveCmd = &cobra.Command{
 			return s
 		}
 
+		// parentContext walks UP the DAG from entityID to collect manifest
+		// and product context. For a task it walks task→manifest→product;
+		// for a manifest it walks manifest→product; for a product it stops.
+		// Returns formatted context sections ready for prompt inclusion.
+		type parentCtx struct {
+			manifestID, manifestTitle, manifestDesc string
+			productID, productTitle, productDesc    string
+		}
+		walkUp := func(ctx context.Context, entityID, entityType string) parentCtx {
+			if n.Relationships == nil {
+				return parentCtx{}
+			}
+			var pc parentCtx
+			lookupID := entityID
+
+			// For a task: find owning manifest first.
+			if entityType == "task" {
+				if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
+					for _, edge := range edges {
+						if edge.SrcKind == "manifest" {
+							pc.manifestID = edge.SrcID
+							break
+						}
+					}
+				}
+				if pc.manifestID != "" {
+					if me, _ := n.Entities.Get(pc.manifestID); me != nil {
+						pc.manifestTitle = me.Title
+						pc.manifestDesc = entityDesc(ctx, pc.manifestID, me.Title)
+					}
+					lookupID = pc.manifestID
+				}
+			}
+
+			// For a task (after finding manifest) or manifest: find owning product.
+			if entityType == "task" || entityType == "manifest" {
+				if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
+					for _, edge := range edges {
+						if edge.SrcKind == "product" {
+							pc.productID = edge.SrcID
+							break
+						}
+					}
+				}
+				if pc.productID != "" {
+					if pe, _ := n.Entities.Get(pc.productID); pe != nil {
+						pc.productTitle = pe.Title
+						pc.productDesc = entityDesc(ctx, pc.productID, pe.Title)
+					}
+				}
+			}
+			return pc
+		}
+
 		// dispatch is the universal handler for any scheduled entity kind.
-		// The agent receives the entity UUID + type + description and is
-		// responsible for travelling the DAG: a product agent reads its
-		// manifests and tasks; a manifest agent reads its tasks; a task
-		// agent follows its instructions directly. The relationships,
-		// entities, and execution_log stores are the single source of truth
-		// — the agent uses OpenPraxis MCP tools to traverse them at runtime.
+		// Every prompt includes the full 3-tier context regardless of entry
+		// point: product (big picture) + manifest (refinement) + task
+		// (instructions). Context above the entry point is pre-fetched by
+		// walking UP the DAG via relationships. Context below is handed to
+		// the agent to traverse via MCP tools at runtime.
 		dispatch := func(ctx context.Context, entityID string, scheduleID int64) error {
 			e, err := n.Entities.Get(entityID)
 			if err != nil || e == nil {
@@ -224,49 +277,61 @@ var serveCmd = &cobra.Command{
 			}
 
 			desc := entityDesc(ctx, entityID, e.Title)
+			pc := walkUp(ctx, entityID, e.Type)
+
+			// Build the context header — whatever sits above the entry point.
+			var contextSection string
+			if pc.productTitle != "" {
+				contextSection += fmt.Sprintf("## Product Context (Big Picture)\n**%s** [%s]\n\n%s\n\n",
+					pc.productTitle, pc.productID, pc.productDesc)
+			}
+			if pc.manifestTitle != "" {
+				contextSection += fmt.Sprintf("## Manifest Context (Refinement)\n**%s** [%s]\n\n%s\n\n",
+					pc.manifestTitle, pc.manifestID, pc.manifestDesc)
+			}
 
 			var prompt string
 			switch e.Type {
 			case "product":
 				prompt = fmt.Sprintf(
-					"You have been scheduled to execute OpenPraxis product.\n\n"+
-						"Entity UUID: %s\nEntity Type: product\nTitle: %s\n\n"+
-						"## Product Definition\n%s\n\n"+
+					"## Product Context (Big Picture)\n**%s** [%s]\n\n%s\n\n"+
 						"## Your Job\n"+
 						"Use OpenPraxis MCP tools to travel the DAG:\n"+
-						"1. Use manifest_list (or product_get) to find all active manifests under this product\n"+
+						"1. Find all active manifests under this product via relationships\n"+
 						"2. For each manifest read its definition — this is your refinement context\n"+
-						"3. For each task under each manifest read and execute it with full product + manifest + task context\n"+
-						"4. Honour depends_on ordering between tasks (check relationships)\n"+
+						"3. For each task under each manifest read its instructions and execute with full context\n"+
+						"4. Honour depends_on ordering between tasks\n"+
 						"5. Post results/findings back to this product via comment_add\n\n"+
 						"## Visceral Rules\n%s",
-					entityID, e.Title, desc, visceralRules(),
+					e.Title, entityID, desc, visceralRules(),
 				)
 			case "manifest":
 				prompt = fmt.Sprintf(
-					"You have been scheduled to execute OpenPraxis manifest.\n\n"+
-						"Entity UUID: %s\nEntity Type: manifest\nTitle: %s\n\n"+
-						"## Manifest Definition\n%s\n\n"+
+					"%s"+ // product context if present
+						"## Manifest Context (Refinement)\n**%s** [%s]\n\n%s\n\n"+
 						"## Your Job\n"+
 						"Use OpenPraxis MCP tools to travel the DAG:\n"+
-						"1. Find all active tasks under this manifest (check relationships)\n"+
-						"2. Execute each task with this manifest as your refinement context\n"+
+						"1. Find all active tasks under this manifest via relationships\n"+
+						"2. Execute each task with the product + manifest context above in mind\n"+
 						"3. Honour depends_on ordering between tasks\n"+
-						"4. Post results back to this manifest via comment_add\n\n"+
+						"4. Post results back via comment_add\n\n"+
 						"## Visceral Rules\n%s",
-					entityID, e.Title, desc, visceralRules(),
+					contextSection, e.Title, entityID, desc, visceralRules(),
 				)
-			default: // task (or any leaf entity)
+			default: // task
 				prompt = fmt.Sprintf(
-					"You have been scheduled to execute OpenPraxis task.\n\n"+
-						"Entity UUID: %s\nEntity Type: %s\nTitle: %s\n\n"+
-						"## Task Instructions\n%s\n\n"+
+					"%s"+ // product + manifest context if present
+						"## Task Instructions\n**%s** [%s]\n\n%s\n\n"+
+						"Execute the task instructions above. The product and manifest context\n"+
+						"sections define the big picture and constraints — follow them.\n\n"+
 						"## Visceral Rules\n%s",
-					entityID, e.Type, e.Title, desc, visceralRules(),
+					contextSection, e.Title, entityID, desc, visceralRules(),
 				)
 			}
 
-			slog.Info("schedule: dispatching entity", "entity_uid", entityID, "type", e.Type, "title", e.Title)
+			slog.Info("schedule: dispatching entity",
+				"entity_uid", entityID, "type", e.Type, "title", e.Title,
+				"manifest_id", pc.manifestID, "product_id", pc.productID)
 
 			t := &task.Task{
 				ID:     entityID,
