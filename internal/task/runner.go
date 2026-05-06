@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/k8nstantin/OpenPraxis/internal/action"
-	"github.com/k8nstantin/OpenPraxis/internal/activity"
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
@@ -109,7 +108,6 @@ type Runner struct {
 	// completed run is also recorded here alongside the legacy task_runs
 	// table.
 	executionLog *execution.Store
-	activityLog  *activity.Store
 
 	// commentsStore is used to fetch the latest prompt
 	// comment for a task when building the prompt. Nil → falls back to
@@ -131,9 +129,6 @@ func (r *Runner) SetEntityStore(es *entity.Store) { r.entityStore = es }
 // When set, each completed run is appended to execution_log alongside the
 // legacy task_runs table.
 func (r *Runner) SetExecutionLog(el *execution.Store) { r.executionLog = el }
-
-// SetActivityLog wires the append-only activity log onto the runner.
-func (r *Runner) SetActivityLog(al *activity.Store) { r.activityLog = al }
 
 // SetCommentsStore wires the comments store onto the runner so the prompt
 // builder can fetch the latest prompt for a task. When nil,
@@ -812,18 +807,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		}
 	}
 
-	if r.activityLog != nil {
-		_, _ = r.activityLog.Insert(bgCtx, activity.Row{
-			EntityUID:  t.ID,
-			Event:      activity.EventRunStarted,
-			Actor:      "agent",
-			Summary:    "Run started: " + t.Title,
-			RunUID:     runUID,
-			Trigger:    "schedule",
-			NodeID:     r.sourceNode,
-		})
-	}
-
 	if r.onEvent != nil {
 		r.onEvent("task_started", map[string]string{
 			"task_id": t.ID, "title": t.Title, "manifest": manifestTitle,
@@ -1249,39 +1232,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// marks "completed" can be downgraded to "failed" by the 5s-later
 		// watcher check, but any dependents activated in the interim would
 		// already be scheduled/running.
-
-		// Write to activity_log — run_completed or run_failed.
-		if r.activityLog != nil {
-			actEvent := activity.EventRunCompleted
-			if status == "failed" {
-				actEvent = activity.EventRunFailed
-			}
-			// Aggregate usage from usageByMessage (same as the host sampler).
-			var totalIn, totalOut int64
-			r.mu.RLock()
-			for _, u := range rt.usageByMessage {
-				totalIn += int64(u.InputTokens)
-				totalOut += int64(u.OutputTokens)
-			}
-			turns := len(rt.usageByMessage)
-			r.mu.RUnlock()
-
-			_, _ = r.activityLog.Insert(bgCtx, activity.Row{
-				EntityUID:    t.ID,
-				Event:        actEvent,
-				Actor:        "agent",
-				Summary:      fmt.Sprintf("Run %s: %s (reason=%s)", status, t.Title, reason),
-				RunUID:       runUID,
-				Trigger:      "schedule",
-				NodeID:       r.sourceNode,
-				DurationMS:   time.Since(rt.StartedAt).Milliseconds(),
-				Turns:        turns,
-				Actions:      rt.Actions,
-				InputTokens:  totalIn,
-				OutputTokens: totalOut,
-				Error:        reason,
-			})
-		}
 
 		if r.onEvent != nil {
 			r.onEvent("task_completed", map[string]string{

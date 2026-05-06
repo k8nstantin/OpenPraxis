@@ -16,7 +16,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/delusion"
 	"github.com/k8nstantin/OpenPraxis/internal/embedding"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
-	"github.com/k8nstantin/OpenPraxis/internal/activity"
 	executionlog "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/marker"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
@@ -74,9 +73,6 @@ type Node struct {
 	// ExecutionLog is the unified run-history store (EL/M1). Replaces
 	// task_runs + task_run_host_samples in EL/M5.
 	ExecutionLog *executionlog.Store
-	// ActivityLog is the append-only, tamper-proof activity log. Cross-references
-	// execution_log via run_uid and actions via session_id.
-	ActivityLog *activity.Store
 	runner       *task.Runner
 	hostSampler  *task.HostSampler
 	Embedder     *embedding.Engine
@@ -261,10 +257,6 @@ func New(cfg *config.Config) (*Node, error) {
 	}
 	executionStore := executionlog.NewStore(index.DB())
 
-	if err := activity.InitSchema(index.DB()); err != nil {
-		return nil, fmt.Errorf("init activity_log schema: %w", err)
-	}
-	activityStore := activity.NewStore(index.DB())
 
 	n := &Node{
 		Config:           cfg,
@@ -285,7 +277,6 @@ func New(cfg *config.Config) (*Node, error) {
 		Relationships:    relationshipsStore,
 		Schedules:        scheduleStore,
 		ExecutionLog:     executionStore,
-		ActivityLog:      activityStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}
@@ -459,9 +450,6 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// task_runs + task_run_host_samples tables.
 	if n.ExecutionLog != nil {
 		n.runner.SetExecutionLog(n.ExecutionLog)
-	}
-	if n.ActivityLog != nil {
-		n.runner.SetActivityLog(n.ActivityLog)
 	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
 	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
