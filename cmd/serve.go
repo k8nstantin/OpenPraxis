@@ -302,20 +302,43 @@ var serveCmd = &cobra.Command{
 					pc.manifestTitle, pc.manifestID, pc.manifestDesc)
 			}
 
+			// For a product, walk DOWN to pre-fetch all manifest descriptions
+			// so the agent has full context without extra MCP roundtrips.
+			var manifestsSection string
+			if e.Type == "product" && n.Relationships != nil {
+				manifEdges, _ := n.Relationships.ListOutgoing(ctx, entityID, "owns")
+				for _, me := range manifEdges {
+					if me.DstKind != "manifest" {
+						continue
+					}
+					mEnt, err2 := n.Entities.Get(me.DstID)
+					if err2 != nil || mEnt == nil || mEnt.Status == "archived" || mEnt.Status == "closed" {
+						continue
+					}
+					mDesc := entityDesc(ctx, me.DstID, mEnt.Title)
+					manifestsSection += fmt.Sprintf("### Manifest: %s [%s]\n%s\n\n", mEnt.Title, me.DstID, mDesc)
+				}
+			}
+
 			var prompt string
 			switch e.Type {
 			case "product":
+				manifestCtx := ""
+				if manifestsSection != "" {
+					manifestCtx = "## Manifest Context (Refinement)\n" + manifestsSection
+				}
 				prompt = fmt.Sprintf(
 					"## Product Context (Big Picture)\n**%s** [%s]\n\n%s\n\n"+
+						"%s"+ // manifest context if present
 						"## Your Job\n"+
+						"Use the product and manifest context above to guide your work.\n"+
 						"Use OpenPraxis MCP tools to travel the DAG:\n"+
-						"1. Find all active manifests under this product via relationships\n"+
-						"2. For each manifest read its definition — this is your refinement context\n"+
-						"3. For each task under each manifest read its instructions and execute with full context\n"+
-						"4. Honour depends_on ordering between tasks\n"+
-						"5. Post results/findings back to this product via comment_add\n\n"+
+						"1. For each manifest listed above find its active tasks via relationships\n"+
+						"2. Execute each task with the full product + manifest context in mind\n"+
+						"3. Honour depends_on ordering between tasks\n"+
+						"4. Post results/findings back to this product via comment_add\n\n"+
 						"## Visceral Rules\n%s",
-					e.Title, entityID, desc, visceralRules(),
+					e.Title, entityID, desc, manifestCtx, visceralRules(),
 				)
 			case "manifest":
 				prompt = fmt.Sprintf(
