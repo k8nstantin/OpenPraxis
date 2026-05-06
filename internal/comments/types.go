@@ -24,6 +24,22 @@ const (
 	TypeDescriptionRevision = TypePrompt
 )
 
+// NormalizeType maps legacy type names to the canonical two-type taxonomy.
+// Agents trained on old types (execution_review, description_revision, etc.)
+// are remapped transparently so no call ever fails on a stale type name.
+func NormalizeType(raw string) CommentType {
+	switch raw {
+	case "", "user_note", "agent_note", "watcher_finding",
+		"execution_review", "decision", "link",
+		"review_rejection", "review_approval":
+		return TypeComment
+	case "description_revision":
+		return TypePrompt
+	default:
+		return CommentType(raw)
+	}
+}
+
 func AllCommentTypes() []CommentType {
 	return []CommentType{TypePrompt, TypeComment}
 }
