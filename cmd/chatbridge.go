@@ -82,27 +82,26 @@ func (b *nodeBridge) GetManifest(id string) (*chat.ManifestDetail, error) {
 }
 
 func (b *nodeBridge) ListTasks(status string, limit int) ([]chat.TaskSummary, error) {
-	tasks, err := b.n.Tasks.List(status, limit)
+	entities, err := b.n.Entities.List("task", status, limit)
 	if err != nil {
 		return nil, err
 	}
 	var out []chat.TaskSummary
-	for _, t := range tasks {
+	for _, e := range entities {
 		out = append(out, chat.TaskSummary{
-			ID: t.ID, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
+			ID: e.EntityUID, Title: e.Title, Status: e.Status,
 		})
 	}
 	return out, nil
 }
 
 func (b *nodeBridge) GetTask(id string) (*chat.TaskDetail, error) {
-	t, err := b.n.Tasks.Get(id)
-	if err != nil || t == nil {
+	e, err := b.n.Entities.Get(id)
+	if err != nil || e == nil {
 		return nil, err
 	}
 	return &chat.TaskDetail{
-		ID: t.ID, Title: t.Title, Status: t.Status, Schedule: t.Schedule,
-		Agent: t.Agent, ManifestID: t.ManifestID, Description: t.Description,
+		ID: e.EntityUID, Title: e.Title, Status: e.Status,
 	}, nil
 }
 

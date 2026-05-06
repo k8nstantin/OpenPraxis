@@ -219,10 +219,12 @@ var serveCmd = &cobra.Command{
 
 				slog.Info("schedule fired entity", "entity_uid", entityID, "type", e.Type, "title", e.Title)
 
-				// Execute against the legacy task runner using entity_uid.
-				t, _ := n.Tasks.Get(entityID)
-				if t == nil {
-					return fmt.Errorf("task record not found for entity: %s", entityID)
+				// Build a Task directly from the entity — no legacy tasks table lookup.
+				t := &task.Task{
+					ID:     entityID,
+					Title:  e.Title,
+					Status: "scheduled",
+					Agent:  "claude-code",
 				}
 				return runner.Execute(t, e.Title, content, visceralText)
 			},
@@ -233,12 +235,6 @@ var serveCmd = &cobra.Command{
 		}
 
 		runner.StartActionWatcher(2 * time.Second)
-
-		// System host metrics sampler — writes CPU/RSS/disk to
-		// system_host_samples for the Stats tab System Capacity panel.
-		systemSampler := task.NewSystemSampler(n.Tasks.DB(), n.HostSamplerTick())
-		systemSampler.Start(ctx)
-		defer systemSampler.Stop()
 
 		// --- Startup state summary ---
 		fmt.Println("\n  === OpenPraxis State ===")
