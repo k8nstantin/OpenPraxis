@@ -29,21 +29,13 @@ import { BlockNoteReadView } from '@/components/blocknote-read-view'
 import { claimAttachment } from '@/lib/queries/attachments'
 
 const TYPE_LABEL: Record<string, string> = {
-  execution_review:     'Execution Review',
-  description_revision: 'Description',
-  agent_note:           'Agent Note',
-  user_note:            'Note',
-  watcher_finding:      'Watcher Finding',
-  decision:             'Decision',
-  link:                 'Link',
+  prompt:  'Prompt',
+  comment: 'Comment',
 }
 
 const COMPOSE_TYPES = [
-  'user_note',
-  'execution_review',
-  'agent_note',
-  'decision',
-  'description_revision',
+  'comment',
+  'prompt',
 ] as const
 
 function fmtTime(v: string | number | undefined): string {
@@ -61,7 +53,7 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
   const update = useUpdateEntity(kind, entityId)
 
   const [filter, setFilter] = useState('all')
-  const [composeType, setComposeType] = useState<keyof typeof TYPE_LABEL>('user_note')
+  const [composeType, setComposeType] = useState<keyof typeof TYPE_LABEL>('comment')
   const [composing, setComposing] = useState(false)
   const [posting, setPosting] = useState(false)
   const composerRef = useRef<BlockNoteComposerHandle>(null)
@@ -71,9 +63,9 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
     return comments.data.filter(c => !(c.body ?? '').includes('<dependency_revision>'))
   }, [comments.data])
 
-  // Only the most recent description_revision gets the emerald highlight
+  // Only the most recent prompt gets the emerald highlight
   const latestDescId = useMemo(() => {
-    const revs = real.filter(c => c.type === 'description_revision')
+    const revs = real.filter(c => c.type === 'prompt')
     return revs[0]?.id ?? null
   }, [real])
 
@@ -114,7 +106,7 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
       }
 
       // Description-as-comment: also PATCH the entity description field
-      if (composeType === 'description_revision' && body) {
+      if (composeType === 'prompt' && body) {
         update.mutate({ description: body } as Parameters<typeof update.mutate>[0])
       }
 
@@ -162,7 +154,7 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
               onSave={post}
               onCancel={close}
               placeholder={
-                composeType === 'description_revision'
+                composeType === 'prompt'
                   ? 'Write description… drop files, paste images, type / for blocks (Cmd-Enter to post)'
                   : 'Add a comment… drop files, paste images, type / for blocks (Cmd-Enter to post)'
               }
@@ -184,8 +176,8 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
               <Button type='button' variant='ghost' size='sm' onClick={close} disabled={posting}>Cancel</Button>
               <Button type='button' size='sm' onClick={post} disabled={posting}>
                 {posting
-                  ? composeType === 'description_revision' ? 'Saving…' : 'Posting…'
-                  : composeType === 'description_revision' ? 'Post as Description' : 'Post'}
+                  ? composeType === 'prompt' ? 'Saving…' : 'Posting…'
+                  : composeType === 'prompt' ? 'Post as Prompt' : 'Post'}
               </Button>
             </div>
           </CardContent>
@@ -211,15 +203,15 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                   key={c.id}
                   className={cn(
                     'space-y-2 p-3 text-sm',
-                    c.type === 'description_revision' && c.id === latestDescId && 'border-l-2 border-emerald-400/60 bg-emerald-400/5',
-                    c.type === 'description_revision' && c.id !== latestDescId && 'opacity-50',
+                    c.type === 'prompt' && c.id === latestDescId && 'border-l-2 border-emerald-400/60 bg-emerald-400/5',
+                    c.type === 'prompt' && c.id !== latestDescId && 'opacity-50',
                   )}
                 >
                   <div className='flex items-center justify-between gap-2'>
                     <div className='flex items-center gap-2'>
                       <code className='font-mono text-[11px]'>{c.author.slice(0, 16)}</code>
                       <Badge
-                        variant={c.type === 'description_revision' ? 'secondary' : 'outline'}
+                        variant={c.type === 'prompt' ? 'secondary' : 'outline'}
                         className='text-[10px]'
                       >
                         {TYPE_LABEL[c.type] ?? c.type}

@@ -10,15 +10,6 @@ import { Badge } from '@/components/ui/badge'
 import { Gauge } from '@/components/gauge'
 import { ContentBlock } from '@/components/content-block'
 
-// Label shown in ContentBlock per entity type
-const CONTENT_LABEL: Record<string, string> = {
-  product:  'Description',
-  manifest: 'Declaration',
-  task:     'Instructions',
-  skill:    'Description',
-  idea:     'Description',
-}
-
 // Main tab — stats grid + repo card + description editor + revision
 // history. Same Markup ↔ Rendered toggle on description view; Cmd-Enter
 // saves; Escape cancels. PUT /api/entities/:id drops a new SCD-2
@@ -169,12 +160,12 @@ export function MainTab({
         </Card>
       ) : null}
 
-      {/* ContentBlock: Description / Declaration / Instructions */}
+      {/* ContentBlock: Prompt */}
       <ContentBlock
         entityId={entityId}
         kind={kind}
-        label={CONTENT_LABEL[kind] ?? 'Description'}
-        placeholder={`Write ${(CONTENT_LABEL[kind] ?? 'description').toLowerCase()} here… Markdown supported, drag/paste files to attach`}
+        label='Prompt'
+        placeholder='Write prompt here… Markdown supported, drag/paste files to attach'
       />
 
     </div>

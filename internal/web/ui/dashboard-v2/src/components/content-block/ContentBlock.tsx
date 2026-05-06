@@ -4,10 +4,10 @@
  * Uses BlockNoteComposer which has native drag/drop/paste attachment support
  * via the uploadFile callback — no custom editor needed.
  *
- * Products     → label="Description"
- * Manifests    → label="Declaration"
- * Tasks        → label="Instructions"
- * Skills/Ideas → label="Description"
+ * All entity types → label="Prompt"
+ * All entity types → label="Prompt"
+ 
+ 
  */
 import { useRef, useState } from 'react'
 import { Pencil, ChevronDown, ChevronUp } from 'lucide-react'
@@ -35,7 +35,7 @@ interface ContentBlockProps {
   placeholder?: string
 }
 
-export function ContentBlock({ entityId, kind, label = 'Description', placeholder }: ContentBlockProps) {
+export function ContentBlock({ entityId, kind, label = 'Prompt', placeholder }: ContentBlockProps) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -46,7 +46,7 @@ export function ContentBlock({ entityId, kind, label = 'Description', placeholde
   const createComment = useCreateEntityComment(kind, entityId)
   const updateEntity = useUpdateEntity(kind, entityId)
 
-  const revisions = (comments ?? []).filter(c => c.type === 'description_revision')
+  const revisions = (comments ?? []).filter(c => c.type === 'prompt')
   const latest = revisions[0]
 
   const startEdit = () => setEditing(true)
@@ -62,7 +62,7 @@ export function ContentBlock({ entityId, kind, label = 'Description', placeholde
 
       const created = await createComment.mutateAsync({
         author: 'operator',
-        type: 'description_revision',
+        type: 'prompt',
         body: body || '(attachment only)',
       }) as { id?: string } | undefined
 
