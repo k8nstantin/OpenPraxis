@@ -190,28 +190,60 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
-		// executionSkillID is the UUID of the "OpenPraxis Execution Protocol"
-		// skill entity. The dispatcher loads its prompt at startup and uses it
-		// as the universal agent invocation template for every scheduled entity.
-		const executionSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
+		// defaultSkillID is the fallback execution protocol used when an entity
+		// has no skill assigned via the DAG.
+		const defaultSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
 
-		// loadSkillPrompt fetches the latest prompt-type comment from the
-		// execution skill. Falls back to a minimal inline prompt if the skill
-		// entity or its prompt is missing.
-		loadSkillPrompt := func(ctx context.Context) string {
-			ct := comments.TypePrompt
-			revs, err := n.Comments.List(ctx, comments.TargetEntity, executionSkillID, 1, &ct)
-			if err == nil && len(revs) > 0 && revs[0].Body != "" {
-				return revs[0].Body
+		// skillPromptFor walks UP the DAG from entityID to find the nearest
+		// skill entity (skill → owns → product → owns → manifest → owns → task).
+		// Returns the skill's latest prompt comment body.
+		// Falls back to the default skill (defaultSkillID) if none found in the DAG,
+		// and to an inline minimal prompt if even the default has no prompt.
+		skillPromptFor := func(ctx context.Context, entityID string) (string, string) {
+			if n.Relationships == nil {
+				return defaultSkillID, ""
 			}
-			slog.Warn("execution skill prompt not found — using inline fallback", "skill_id", executionSkillID)
-			return "You are an experienced software engineer executing a scheduled OpenPraxis entity.\n\n" +
+
+			// Walk UP through the ownership chain looking for a skill entity.
+			// Limit to 4 hops: task → manifest → product → skill.
+			current := entityID
+			for hop := 0; hop < 4; hop++ {
+				edges, _ := n.Relationships.ListIncoming(ctx, current, "owns")
+				for _, edge := range edges {
+					if edge.SrcKind == "skill" {
+						// Found a skill — load its prompt.
+						ct := comments.TypePrompt
+						revs, err := n.Comments.List(ctx, comments.TargetEntity, edge.SrcID, 1, &ct)
+						if err == nil && len(revs) > 0 && revs[0].Body != "" {
+							slog.Info("skill resolved from DAG", "entity_uid", entityID[:12], "skill_id", edge.SrcID[:12])
+							return edge.SrcID, revs[0].Body
+						}
+					}
+					// Keep walking up — move to the parent entity.
+					if edge.SrcKind != "skill" {
+						current = edge.SrcID
+					}
+				}
+				if len(edges) == 0 {
+					break
+				}
+			}
+
+			// No skill found in DAG — use the default execution protocol.
+			ct := comments.TypePrompt
+			revs, err := n.Comments.List(ctx, comments.TargetEntity, defaultSkillID, 1, &ct)
+			if err == nil && len(revs) > 0 && revs[0].Body != "" {
+				return defaultSkillID, revs[0].Body
+			}
+
+			slog.Warn("no skill found in DAG and default has no prompt — using inline fallback",
+				"entity_uid", entityID[:12])
+			return defaultSkillID, "You are an experienced software engineer executing a scheduled OpenPraxis entity.\n\n" +
 				"Entity UUID: {ENTITY_UUID}\n\n" +
 				"Read the entity prompt and comments via the API, assemble full DAG context, execute, report back."
 		}
 
-		skillPrompt := loadSkillPrompt(context.Background())
-		slog.Info("execution skill loaded", "skill_id", executionSkillID[:12], "prompt_len", len(skillPrompt))
+		slog.Info("skill routing: dynamic DAG lookup active", "default_skill", defaultSkillID[:12])
 
 		// visceralRules loads all visceral rules into a numbered string.
 		visceralRules := func() string {
@@ -266,9 +298,10 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("entity not found: %s", entityID)
 			}
 
-			// Substitute entity UUID into the skill prompt. The agent reads all
-			// context itself via the HTTP API — no pre-fetching in Go.
-			prompt := strings.ReplaceAll(skillPrompt, "{ENTITY_UUID}", entityID)
+			// Resolve skill: walk UP the DAG to find the nearest assigned skill,
+			// fall back to the default execution protocol.
+			skillID, skillBody := skillPromptFor(ctx, entityID)
+			prompt := strings.ReplaceAll(skillBody, "{ENTITY_UUID}", entityID)
 
 			// Append visceral rules so the agent receives them even without MCP.
 			if vr := visceralRules(); vr != "" {
@@ -276,7 +309,8 @@ var serveCmd = &cobra.Command{
 			}
 
 			slog.Info("schedule: dispatching entity",
-				"entity_uid", entityID, "type", e.Type, "title", e.Title)
+				"entity_uid", entityID, "type", e.Type, "title", e.Title,
+				"skill_id", skillID[:12])
 
 			t := &task.Task{
 				ID:     entityID,
@@ -293,6 +327,7 @@ var serveCmd = &cobra.Command{
 			"task":     dispatch,
 			"manifest": dispatch,
 			"product":  dispatch,
+			"skill":    dispatch, // skill is the root of the DAG — agent traverses down
 		})
 		n.ScheduleRunner = scheduleRunner
 		if err := scheduleRunner.Start(ctx); err != nil {

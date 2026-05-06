@@ -63,7 +63,7 @@ var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty"
 // ONE place (the slice) auto-extends both the validator AND keeps the
 // constants iterable for callers that want to enumerate. Was: two
 // hard-coded == chains that drifted whenever a constant was added.
-var allEntityKinds = []string{KindProduct, KindManifest, KindTask}
+var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea}
 var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn, EdgeReviews, EdgeLinksTo}
 
 // validKind returns true if k is one of the enumerated entity kinds.
@@ -109,6 +109,8 @@ const (
 	KindProduct  = "product"
 	KindManifest = "manifest"
 	KindTask     = "task"
+	KindSkill    = "skill"
+	KindIdea     = "idea"
 )
 
 // Standard edge kinds. Same model as entity kinds — Go-side validation
