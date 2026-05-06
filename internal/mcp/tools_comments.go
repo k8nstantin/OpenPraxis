@@ -23,6 +23,9 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 	targetID := argStr(a, "target_id")
 	author := argStr(a, "author")
 	cType := argStr(a, "type")
+	if cType == "" {
+		cType = "comment" // default when agent omits type
+	}
 	body := argStr(a, "body")
 
 	if s.node.Comments == nil {

@@ -402,7 +402,7 @@ func (s *Server) registerTools() {
 			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("'product', 'manifest', or 'task'")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("ID of the entity to comment on")),
 			mcplib.WithString("author", mcplib.Required(), mcplib.Description("Author name — e.g. 'agent', 'gemini-cli', 'claude-code', 'operator'")),
-			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Comment type: 'prompt' or 'comment'")),
+			mcplib.WithString("type", mcplib.Description("Comment type: 'prompt' or 'comment'. Defaults to 'comment' when omitted.")),
 			mcplib.WithString("body", mcplib.Required(), mcplib.Description("Markdown comment body")),
 		),
 		s.handleCommentAdd,
