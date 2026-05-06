@@ -94,6 +94,7 @@ type Row struct {
 	TestsRun           int      `json:"tests_run"`
 	TestsPassed        int      `json:"tests_passed"`
 	TestsFailed        int      `json:"tests_failed"`
+	AgentPID           int      `json:"agent_pid"` // OS PID of the spawned agent process; 0 if unknown
 }
 
 // OutputChunk is one live text chunk in execution_output.
@@ -190,6 +191,7 @@ func addProductivityColumns(db *sql.DB) {
 		`ALTER TABLE execution_log ADD COLUMN tests_run     INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE execution_log ADD COLUMN tests_passed  INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE execution_log ADD COLUMN tests_failed  INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE execution_log ADD COLUMN agent_pid     INTEGER NOT NULL DEFAULT 0`,
 	} {
 		db.Exec(col)
 	}
@@ -275,7 +277,8 @@ func InitSchema(db *sql.DB) error {
     session_id          TEXT    NOT NULL DEFAULT '',
     tests_run           INTEGER NOT NULL DEFAULT 0,
     tests_passed        INTEGER NOT NULL DEFAULT 0,
-    tests_failed        INTEGER NOT NULL DEFAULT 0
+    tests_failed        INTEGER NOT NULL DEFAULT 0,
+    agent_pid           INTEGER NOT NULL DEFAULT 0
 )`,
 		`CREATE INDEX IF NOT EXISTS idx_execlog_run
   ON execution_log(run_uid, created_at ASC)`,
@@ -342,9 +345,10 @@ func (s *Store) Insert(ctx context.Context, r Row) error {
 		net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
 		mem_used_mb, mem_total_mb, load_avg_1m,
 		created_by, created_at, session_id,
-		tests_run, tests_passed, tests_failed
+		tests_run, tests_passed, tests_failed,
+		agent_pid
 	) VALUES (
-		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 	)`,
 		r.ID, r.RunUID, r.EntityUID, r.Event, r.RunNumber, r.Trigger, r.NodeID,
 		r.TerminalReason, r.StartedAt, r.CompletedAt, r.CancelledAt, r.CancelledBy,
@@ -363,6 +367,7 @@ func (s *Store) Insert(ctx context.Context, r Row) error {
 		r.MemUsedMB, r.MemTotalMB, r.LoadAvg1m,
 		r.CreatedBy, r.CreatedAt, r.SessionID,
 		r.TestsRun, r.TestsPassed, r.TestsFailed,
+		r.AgentPID,
 	)
 	if err != nil {
 		return fmt.Errorf("execution: insert: %w", err)
@@ -447,6 +452,58 @@ func (s *Store) ListByEntity(ctx context.Context, entityUID string, limit int) (
 	}
 	defer rows.Close()
 	return collectRows(rows)
+}
+
+// InFlightRun holds the minimal fields needed for zombie-process detection.
+type InFlightRun struct {
+	RunUID    string
+	EntityUID string
+	AgentPID  int
+}
+
+// ListInFlight returns all runs that have a "started" event but no
+// "completed" or "failed" event. Survives server restarts — the dispatcher
+// uses this to verify whether agent processes are still alive before
+// blocking a new dispatch.
+func (s *Store) ListInFlight(ctx context.Context) ([]InFlightRun, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT run_uid, entity_uid, agent_pid
+		FROM execution_log
+		WHERE event = 'started'
+		  AND run_uid NOT IN (
+		      SELECT run_uid FROM execution_log
+		      WHERE event IN ('completed', 'failed')
+		  )`)
+	if err != nil {
+		return nil, fmt.Errorf("execution: list in-flight: %w", err)
+	}
+	defer rows.Close()
+	var out []InFlightRun
+	for rows.Next() {
+		var r InFlightRun
+		if err := rows.Scan(&r.RunUID, &r.EntityUID, &r.AgentPID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkFailed inserts a terminal "failed" event for a run_uid that has no
+// terminal event yet. Used to close zombie runs whose agent process is dead.
+func (s *Store) MarkFailed(ctx context.Context, runUID, entityUID, reason string) error {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO execution_log
+		  (id, run_uid, entity_uid, event, terminal_reason, trigger, created_at)
+		VALUES (?, ?, ?, 'failed', ?, 'system', ?)`,
+		id.String(), runUID, entityUID, reason,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
 }
 
 // ListOutput returns output chunks for a run in seq order.
@@ -661,7 +718,9 @@ const rowColumns = `id, run_uid, entity_uid, event, run_number, trigger, node_id
 	peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
 	net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
 	mem_used_mb, mem_total_mb, load_avg_1m,
-	created_by, created_at`
+	created_by, created_at, session_id,
+	tests_run, tests_passed, tests_failed,
+	agent_pid`
 
 func scanRow(rows *sql.Rows) (Row, error) {
 	var r Row
@@ -681,7 +740,9 @@ func scanRow(rows *sql.Rows) (Row, error) {
 		&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB, &r.AvgRSSMB,
 		&r.NetRxMbps, &r.NetTxMbps, &r.DiskReadMBps, &r.DiskWriteMBps,
 		&r.MemUsedMB, &r.MemTotalMB, &r.LoadAvg1m,
-		&r.CreatedBy, &r.CreatedAt,
+		&r.CreatedBy, &r.CreatedAt, &r.SessionID,
+		&r.TestsRun, &r.TestsPassed, &r.TestsFailed,
+		&r.AgentPID,
 	); err != nil {
 		return Row{}, err
 	}

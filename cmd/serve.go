@@ -274,6 +274,9 @@ var serveCmd = &cobra.Command{
 			// System-level concurrency guard: only one agent at a time.
 			// Products, manifests, and tasks all share the same codebase —
 			// concurrent agents conflict on branches and PRs.
+			// Check both the in-memory runner (current session) AND the
+			// execution_log (survives server restarts — agents can outlive
+			// the server process that spawned them).
 			if runner.RunningCount() > 0 {
 				running := runner.ListRunning()
 				titles := make([]string, 0, len(running))
@@ -281,6 +284,32 @@ var serveCmd = &cobra.Command{
 					titles = append(titles, rt.Title)
 				}
 				return fmt.Errorf("agent already running (%v) — refusing to start %s concurrently", titles, entityID)
+			}
+			// Check execution_log for in-flight runs from previous sessions.
+			// For each, verify the agent process is still alive via its PID.
+			// Dead processes are auto-closed; live ones block the dispatch.
+			if n.ExecutionLog != nil {
+				inFlight, err := n.ExecutionLog.ListInFlight(ctx)
+				if err != nil {
+					slog.Warn("concurrency guard: could not list in-flight runs", "error", err)
+				}
+				for _, ifr := range inFlight {
+					alive := false
+					if ifr.AgentPID > 0 {
+						if proc, err := os.FindProcess(ifr.AgentPID); err == nil {
+							if err := proc.Signal(syscall.Signal(0)); err == nil {
+								alive = true
+							}
+						}
+					}
+					if alive {
+						return fmt.Errorf("agent PID %d still running (run %s) — refusing to start %s concurrently",
+							ifr.AgentPID, ifr.RunUID[:12], entityID)
+					}
+					// Process is dead — close the orphaned run and continue.
+					slog.Info("concurrency guard: closing zombie run", "run_uid", ifr.RunUID[:12], "pid", ifr.AgentPID)
+					_ = n.ExecutionLog.MarkFailed(ctx, ifr.RunUID, ifr.EntityUID, "process-not-found")
+				}
 			}
 
 			e, err := n.Entities.Get(entityID)
