@@ -299,15 +299,17 @@ func apiStatsHistory(n *node.Node) http.HandlerFunc {
 				&h.Totals.AvgDurSec, &h.Totals.AvgContextPct)
 
 		// ── Daily system averages ─────────────────────────────────────────
-		sysWhere := "1=1"
+		// Source: execution_log sample rows (system_host_samples was dropped
+		// in commit 79a8ca5).
+		sysWhere := "event = 'sample'"
 		if since != "" {
-			sysWhere = "date(ts) >= date('now', '-" + since + " days')"
+			sysWhere += " AND date(created_at) >= date('now', '-" + since + " days')"
 		}
 		sysRows, _ := db.QueryContext(r.Context(), `
-			SELECT date(ts) as day,
+			SELECT date(created_at) as day,
 			       AVG(cpu_pct), AVG(net_rx_mbps), AVG(net_tx_mbps),
 			       AVG(disk_read_mbps), AVG(disk_write_mbps)
-			FROM system_host_samples WHERE `+sysWhere+`
+			FROM execution_log WHERE `+sysWhere+`
 			GROUP BY day ORDER BY day ASC`)
 		if sysRows != nil {
 			defer sysRows.Close()

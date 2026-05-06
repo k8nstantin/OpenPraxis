@@ -33,17 +33,14 @@ func apiRunStats(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Verify entity exists — check entity store first (new entities),
-		// fall back to task store (legacy tasks not yet migrated).
-		if n.Entities != nil {
-			e, _ := n.Entities.Get(entityID)
-			if e == nil && n.Entities != nil {
-				t, _ := n.Entities.Get(entityID)
-				if t == nil {
-					writeError(w, "entity not found: "+entityID, 404)
-					return
-				}
-			}
+		// Verify entity exists.
+		if n.Entities == nil {
+			writeError(w, "entity store not ready", 503)
+			return
+		}
+		if e, _ := n.Entities.Get(entityID); e == nil {
+			writeError(w, "entity not found: "+entityID, 404)
+			return
 		}
 
 		// Validate as_of when provided (accepted for API compat; not used for
@@ -135,12 +132,17 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 
 		// Source: execution_log sample rows — single source of truth.
 		// Reads rows written by the runner's host sampler.
+		//
+		// execution_log only carries load_avg_1m, mem_used_mb, mem_total_mb
+		// and disk_used_gb today. load_5m/load_15m/swap_used_mb/disk_total_gb
+		// are returned as 0 rather than fabricating duplicate-of-load_1m
+		// values; clients should show "—" rather than chart a flat line.
 		db := n.DB()
 		rows, err := db.Query(`
 			SELECT created_at,
-			       cpu_pct, load_avg_1m, load_avg_1m, load_avg_1m,
-			       mem_used_mb, mem_total_mb, 0,
-			       disk_used_gb, 0,
+			       cpu_pct, load_avg_1m,
+			       mem_used_mb, mem_total_mb,
+			       disk_used_gb,
 			       net_rx_mbps, net_tx_mbps,
 			       disk_read_mbps, disk_write_mbps
 			FROM execution_log
@@ -160,9 +162,9 @@ func apiSystemStats(n *node.Node) http.HandlerFunc {
 			var s sysHostSample
 			var tsStr string
 			if err := rows.Scan(&tsStr, &s.CPUPct,
-				&s.Load1m, &s.Load5m, &s.Load15m,
-				&s.MemUsedMB, &s.MemTotalMB, &s.SwapUsedMB,
-				&s.DiskUsedGB, &s.DiskTotalGB,
+				&s.Load1m,
+				&s.MemUsedMB, &s.MemTotalMB,
+				&s.DiskUsedGB,
 				&s.NetRxMbps, &s.NetTxMbps,
 				&s.DiskReadMBps, &s.DiskWriteMBps); err != nil {
 				continue
