@@ -271,6 +271,18 @@ var serveCmd = &cobra.Command{
 		// walking UP the DAG via relationships. Context below is handed to
 		// the agent to traverse via MCP tools at runtime.
 		dispatch := func(ctx context.Context, entityID string, scheduleID int64) error {
+			// System-level concurrency guard: only one agent at a time.
+			// Products, manifests, and tasks all share the same codebase —
+			// concurrent agents conflict on branches and PRs.
+			if runner.RunningCount() > 0 {
+				running := runner.ListRunning()
+				titles := make([]string, 0, len(running))
+				for _, rt := range running {
+					titles = append(titles, rt.Title)
+				}
+				return fmt.Errorf("agent already running (%v) — refusing to start %s concurrently", titles, entityID)
+			}
+
 			e, err := n.Entities.Get(entityID)
 			if err != nil || e == nil {
 				return fmt.Errorf("entity not found: %s", entityID)
