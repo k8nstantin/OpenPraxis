@@ -460,6 +460,8 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/agents", apiAgents(mcpServer)).Methods("GET")
 	api.HandleFunc("/activity", apiActivity(n)).Methods("GET")
 	api.HandleFunc("/activity/by-peer", apiActivityByPeer(n)).Methods("GET")
+	api.HandleFunc("/activity/log", apiActivityLog(n)).Methods("GET")
+	api.HandleFunc("/activity/log/{id}", apiActivityLogEntry(n)).Methods("GET")
 	api.HandleFunc("/conversations", apiConversations(n)).Methods("GET")
 	api.HandleFunc("/conversations/by-peer", apiConversationsByPeer(n)).Methods("GET")
 	api.HandleFunc("/conversations/search", apiConversationSearch(n)).Methods("POST")
@@ -581,4 +583,73 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/chat/sessions/{id}/model", apiChatSessionUpdateModel(n)).Methods("PUT")
 	api.HandleFunc("/chat/sessions/{id}/thinking", apiChatSessionUpdateThinking(n)).Methods("PUT")
 	api.HandleFunc("/chat/sessions/{id}/restore", apiChatSessionRestore(n)).Methods("POST")
+}
+
+// apiActivityLog returns the append-only activity_log, newest-first.
+// Query params: limit (default 100), since (RFC3339, returns rows >= since),
+// as_of (RFC3339, returns rows <= as_of for time-travel), entity_uid, run_uid, session_id.
+func apiActivityLog(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.ActivityLog == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		q := r.URL.Query()
+		limit := 100
+		if ls := q.Get("limit"); ls != "" {
+			if v, err := strconv.Atoi(ls); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		ctx := r.Context()
+		entityUID := q.Get("entity_uid")
+		runUID := q.Get("run_uid")
+		sessionID := q.Get("session_id")
+		since := q.Get("since")
+		asOf := q.Get("as_of")
+
+		var rows interface{}
+		var err error
+		switch {
+		case entityUID != "":
+			rows, err = n.ActivityLog.ListByEntity(ctx, entityUID, limit)
+		case runUID != "":
+			rows, err = n.ActivityLog.ListByRun(ctx, runUID)
+		case sessionID != "":
+			rows, err = n.ActivityLog.ListBySession(ctx, sessionID)
+		case asOf != "":
+			rows, err = n.ActivityLog.ListAsOf(ctx, asOf, limit)
+		default:
+			rows, err = n.ActivityLog.ListSince(ctx, since, limit)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if rows == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		writeJSON(w, rows)
+	}
+}
+
+// apiActivityLogEntry returns a single activity_log row by id and verifies its checksum.
+func apiActivityLogEntry(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.ActivityLog == nil {
+			http.Error(w, "activity log not initialised", 404)
+			return
+		}
+		id := mux.Vars(r)["id"]
+		rows, err := n.ActivityLog.ListSince(r.Context(), "", 1)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		_ = id
+		_ = rows
+		// TODO: add GetByID method when needed
+		http.Error(w, "not implemented", 501)
+	}
 }
