@@ -37,8 +37,8 @@ func apiRunStats(n *node.Node) http.HandlerFunc {
 		// fall back to task store (legacy tasks not yet migrated).
 		if n.Entities != nil {
 			e, _ := n.Entities.Get(entityID)
-			if e == nil && n.Tasks != nil {
-				t, _ := n.Tasks.Get(entityID)
+			if e == nil && n.Entities != nil {
+				t, _ := n.Entities.Get(entityID)
 				if t == nil {
 					writeError(w, "entity not found: "+entityID, 404)
 					return

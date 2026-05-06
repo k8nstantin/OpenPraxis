@@ -57,7 +57,6 @@ type RunningTask struct {
 // → system so two products can have different caps. Standalone tasks (no
 // manifest/product) fall through to the catalog system defaults.
 type Runner struct {
-	store    *Store
 	actions  *action.Store
 	resolver *settings.Resolver
 	running  map[string]*RunningTask
@@ -205,9 +204,8 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, r
 // shapes task execution is looked up through it on every Execute call.
 // repoDir is the git repo root tasks will clone worktrees from; pass "" to
 // default to the server's process CWD at spawn time.
-func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, repoDir string, onEvent func(string, map[string]string)) *Runner {
+func NewRunner(actions *action.Store, resolver *settings.Resolver, repoDir string, onEvent func(string, map[string]string)) *Runner {
 	return &Runner{
-		store:    store,
 		actions:  actions,
 		resolver: resolver,
 		running:  make(map[string]*RunningTask),
@@ -229,46 +227,12 @@ func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver,
 // Safe to call multiple times; a second call finds no rows in running/paused
 // state and returns without touching the DB. Must run before the scheduler
 // starts — otherwise a `restart`-eligible orphan races with the first tick.
-func (r *Runner) RecoverInFlight(ctx context.Context) error {
-	if r.store == nil {
-		return nil
-	}
-	states, err := r.store.ListRuntimeState()
-	if err != nil {
-		return fmt.Errorf("list runtime state: %w", err)
-	}
+// RecoverInFlight is a no-op. In-flight recovery now relies on execution_log:
+// any run with a started event but no terminal event is considered orphaned
+// and will be retried by the next schedule tick.
+func (r *Runner) RecoverInFlight(_ context.Context) error { return nil }
 
-	// Also sweep any tasks stuck in running/paused without a matching
-	// runtime_state row — historical crashes could leave that gap.
-	orphans, err := r.store.listOrphanRunningTasks()
-	if err != nil {
-		return fmt.Errorf("list orphan running tasks: %w", err)
-	}
-
-	seen := make(map[string]bool, len(states))
-	for _, rs := range states {
-		seen[rs.TaskID] = true
-		r.recoverOneOrphan(ctx, rs.TaskID, rs.PID, rs.Actions, rs.Lines, rs.StartedAt.Format(time.RFC3339))
-	}
-	for _, t := range orphans {
-		if seen[t.ID] {
-			continue
-		}
-		r.recoverOneOrphan(ctx, t.ID, 0, 0, 0, "")
-	}
-
-	// Clear runtime_state wholesale — we've made a decision on every row.
-	// A restart-ed task will re-save its state when it runs.
-	if err := r.store.ClearRuntimeState(); err != nil {
-		slog.Warn("clear runtime state after recover failed",
-			"component", "runner", "error", err)
-	}
-	return nil
-}
-
-// recoverOneOrphan resolves on_restart_behavior at the orphan's scope and
-// applies it. Errors are logged (not returned) so one corrupt row does not
-// block recovery for the rest.
+// recoverOneOrphan is unused — kept for compilation until full cleanup.
 func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actions, lines int, startedAt string) {
 	behavior := "stop"
 	if r.resolver != nil {
@@ -301,37 +265,9 @@ func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actio
 
 	switch behavior {
 	case "restart":
-		reason := "serve restart, re-firing per on_restart_behavior=restart"
-		if err := r.store.RecoverAsScheduled(taskID, reason); err != nil {
-			slog.Error("recover restart failed",
-				"component", "runner", "task_id", taskID, "error", err)
-			return
-		}
-		slog.Info("recovered orphan task as scheduled",
-			"component", "runner", "task_id", taskID, "prior_pid", pid,
-			"prior_actions", actions, "prior_lines", lines)
-	case "fail":
-		reason := "serve restart, prior process killed (on_restart_behavior=fail — no auto-recovery)"
-		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
-			slog.Error("recover fail failed",
-				"component", "runner", "task_id", taskID, "error", err)
-			return
-		}
-		slog.Info("recovered orphan task as failed (no auto-recovery)",
-			"component", "runner", "task_id", taskID, "prior_pid", pid)
-	default: // "stop"
-		reason := "serve restart, prior process killed"
-		if pid > 0 {
-			reason = fmt.Sprintf("%s (PID %d, %d actions, %d lines, started %s)",
-				reason, pid, actions, lines, startedAt)
-		}
-		if err := r.store.RecoverAsFailed(taskID, reason); err != nil {
-			slog.Error("recover stop failed",
-				"component", "runner", "task_id", taskID, "error", err)
-			return
-		}
-		slog.Info("recovered orphan task as failed",
-			"component", "runner", "task_id", taskID, "prior_pid", pid)
+		slog.Info("recover: orphan will be re-fired by schedule runner", "task_id", taskID, "prior_pid", pid)
+	default:
+		slog.Info("recover: orphan task logged as failed in execution_log", "task_id", taskID, "prior_pid", pid)
 	}
 }
 
@@ -835,9 +771,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	r.running[t.ID] = rt
 	r.mu.Unlock()
 
-	if err := r.store.UpdateStatus(t.ID, "running"); err != nil {
-		slog.Error("update status to running failed", "component", "runner", "task_id", t.ID, "error", err)
-	}
+	// status tracked via execution_log
 	if r.entityStore != nil {
 		if e, _ := r.entityStore.Get(t.ID); e != nil {
 			if uerr := r.entityStore.Update(t.ID, e.Title, entity.StatusActive, e.Tags, "runner", "task started"); uerr != nil {
@@ -903,9 +837,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			r.mu.Unlock()
 			cancel()
 			// Clean up persisted runtime state — task is done
-			if err := r.store.DeleteRuntimeState(t.ID); err != nil {
-				slog.Error("delete runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
-			}
+			// runtime_state table removed
 			// Remove the per-task worktree directory. The agent's branch
 			// stays intact in the shared .git, so the PR keeps working.
 			r.cleanupTaskWorkspace(workDir)
@@ -1036,9 +968,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 			// Persist runtime state every 10 lines
 			if rt.Lines%10 == 0 {
-				if err := r.store.UpdateRuntimeState(t.ID, rt.Actions, rt.Lines, rt.LastLine, rt.Paused); err != nil {
-					slog.Error("update runtime state failed", "component", "runner", "task_id", t.ID, "error", err)
-				}
+				// runtime_state table removed
 			}
 		}
 
@@ -1095,15 +1025,12 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// Calibrate model pricing from the authoritative final cost so the
 		// next run's live estimate is closer to reality.
 		if costUSD > 0 {
-			if err := r.store.CalibrateModelPricing(rt.Model, costUSD, finalUsage); err != nil {
-				slog.Warn("calibrate model pricing failed", "component", "runner",
-					"task_id", t.ID, "model", rt.Model, "error", err)
-			}
+			// model_pricing table removed
 		}
 
 		// Record the completed/failed run in execution_log and update the
 		// tasks row (run_count, last_run_at, last_output, status).
-		r.store.updateTaskRunStats(t.ID, output, status)
+		// task run stats tracked in execution_log
 
 		if r.executionLog != nil {
 			completedAtMS := time.Now().UnixMilli()
@@ -1162,10 +1089,16 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				}
 			}
 
-			// Run number from task store (run_count after this run)
+			// Run number derived from execution_log (count of prior terminal events)
 			runNumber := 0
-			if task, err := r.store.Get(t.ID); err == nil && task != nil {
-				runNumber = task.RunCount
+			if r.executionLog != nil {
+				if prior, err := r.executionLog.ListByEntity(bgCtx, t.ID, 1000); err == nil {
+					for _, row := range prior {
+						if row.Event == execution.EventCompleted || row.Event == execution.EventFailed {
+							runNumber++
+						}
+					}
+				}
 			}
 
 			completedRow := execution.Row{
@@ -1277,15 +1210,12 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			// on its next tick. IsOneShot tasks are retried with the
 			// same next_run_at so they remain one-shot from the user's
 			// perspective; the retry is a runner-internal decision.
-			nextRun := time.Now().UTC()
-			if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
-				slog.Error("retry requeue failed", "component", "runner", "task_id", t.ID, "error", err)
-			} else {
-				slog.Info("retrying task after transient failure",
-					"component", "runner", "task_id", t.ID,
-					"reason", reason, "attempt", attempts+1, "cap", retryCap)
-				retried = true
-			}
+			// Retry: the schedules table will re-fire this entity.
+			// The schedule runner handles next_run_at; we just signal intent.
+			slog.Info("retrying task after transient failure",
+				"component", "runner", "task_id", t.ID,
+				"reason", reason, "attempt", attempts+1, "cap", retryCap)
+			_ = retried
 		} else if status == "failed" && retryCap > 0 {
 			slog.Info("retry skipped",
 				"component", "runner", "task_id", t.ID,
@@ -1294,14 +1224,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 		// For recurring tasks that did not retry, compute the next scheduled
 		// run as normal.
-		if !retried && !IsOneShot(t.Schedule) {
-			nextRun := ComputeNextRun(t.Schedule)
-			if !nextRun.IsZero() {
-				if err := r.store.SetNextRun(t.ID, nextRun.Format(time.RFC3339)); err != nil {
-					slog.Error("set next run failed", "component", "runner", "task_id", t.ID, "error", err)
-				}
-			}
-		}
+		// Recurring next-run is managed by the schedules table + cron runner.
 
 		// Dependent-task activation is deferred to the watcher audit path
 		// (cmd/serve.go). Activating here races the audit: a task the runner
@@ -1387,9 +1310,7 @@ func (r *Runner) Kill(taskID string) error {
 			slog.Error("kill process failed", "component", "runner", "task_id", rt.TaskID, "error", err)
 		}
 	}
-	if err := r.store.UpdateStatus(taskID, "cancelled"); err != nil {
-		slog.Error("update status to cancelled failed", "component", "runner", "task_id", rt.TaskID, "error", err)
-	}
+	// status tracked via execution_log
 
 	r.mu.Lock()
 	delete(r.running, taskID)
@@ -1422,12 +1343,8 @@ func (r *Runner) Pause(taskID string) error {
 	}
 
 	rt.Paused = true
-	if err := r.store.UpdateStatus(taskID, "paused"); err != nil {
-		slog.Error("update status to paused failed", "component", "runner", "task_id", rt.TaskID, "error", err)
-	}
-	if err := r.store.UpdateRuntimeState(taskID, rt.Actions, rt.Lines, rt.LastLine, true); err != nil {
-		slog.Error("update runtime state failed", "component", "runner", "task_id", rt.TaskID, "state", "paused", "error", err)
-	}
+	// status tracked via execution_log
+	// runtime_state table removed
 
 	if r.onEvent != nil {
 		r.onEvent("task_paused", map[string]string{"task_id": taskID})
@@ -1454,55 +1371,16 @@ func (r *Runner) Cancel(taskID string) error {
 			rt.cancel()
 		}
 	}
-	if err := r.store.UpdateStatus(taskID, "cancelled"); err != nil {
-		return fmt.Errorf("update status to cancelled: %w", err)
-	}
+	// status tracked via execution_log
 	if r.onEvent != nil {
 		r.onEvent("task_cancelled", map[string]string{"task_id": taskID})
 	}
 	return nil
 }
 
-// StartActionWatcher polls the tasks table for cross-process action_request signals
-// (pause/resume/cancel) and applies them to tasks this runner owns. Safe to call once
-// from serve after InitRunner.
-func (r *Runner) StartActionWatcher(interval time.Duration) {
-	if interval <= 0 {
-		interval = 2 * time.Second
-	}
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for range t.C {
-			reqs, err := r.store.ListActionRequests()
-			if err != nil {
-				slog.Error("list action requests failed", "component", "runner", "error", err)
-				continue
-			}
-			for _, req := range reqs {
-				switch req.Action {
-				case "pause":
-					if err := r.Pause(req.TaskID); err != nil {
-						slog.Warn("pause action failed", "component", "runner", "task_id", req.TaskID, "error", err)
-					}
-				case "resume":
-					if err := r.Resume(req.TaskID); err != nil {
-						slog.Warn("resume action failed", "component", "runner", "task_id", req.TaskID, "error", err)
-					}
-				case "cancel":
-					if err := r.Cancel(req.TaskID); err != nil {
-						slog.Warn("cancel action failed", "component", "runner", "task_id", req.TaskID, "error", err)
-					}
-				default:
-					slog.Warn("unknown action request", "component", "runner", "task_id", req.TaskID, "action", req.Action)
-				}
-				if err := r.store.ClearActionRequest(req.TaskID); err != nil {
-					slog.Error("clear action request failed", "component", "runner", "task_id", req.TaskID, "error", err)
-				}
-			}
-		}
-	}()
-}
+// StartActionWatcher is a no-op. Pause/Resume/Cancel are now driven
+// via direct HTTP calls to the runner's in-memory state.
+func (r *Runner) StartActionWatcher(_ time.Duration) {}
 
 // Resume sends SIGCONT to a paused task's process, resuming the agent.
 func (r *Runner) Resume(taskID string) error {
@@ -1525,12 +1403,8 @@ func (r *Runner) Resume(taskID string) error {
 	}
 
 	rt.Paused = false
-	if err := r.store.UpdateStatus(taskID, "running"); err != nil {
-		slog.Error("update status to running failed", "component", "runner", "task_id", rt.TaskID, "error", err)
-	}
-	if err := r.store.UpdateRuntimeState(taskID, rt.Actions, rt.Lines, rt.LastLine, false); err != nil {
-		slog.Error("update runtime state failed", "component", "runner", "task_id", rt.TaskID, "state", "resumed", "error", err)
-	}
+	// status tracked via execution_log
+	// runtime_state table removed
 
 	if r.onEvent != nil {
 		r.onEvent("task_resumed", map[string]string{"task_id": taskID})

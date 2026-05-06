@@ -189,43 +189,100 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
-		// Schedule-driven dispatcher — the sole source of task firing.
-		// Reads entity_uid from the schedules table; looks up entity +
-		// description from entities+comments; executes via the runner.
+		// entityDesc returns the description_revision body for an entity,
+		// falling back to the entity title when no revision comment exists.
+		entityDesc := func(ctx context.Context, entityID, fallback string) string {
+			ct := comments.TypeDescriptionRevision
+			revs, _ := n.Comments.List(ctx, comments.TargetEntity, entityID, 1, &ct)
+			if len(revs) > 0 && revs[0].Body != "" {
+				return revs[0].Body
+			}
+			return fallback
+		}
+
+		// visceralRules loads all visceral rules into a numbered string.
+		visceralRules := func() string {
+			rules, _ := n.Index.ListByType("visceral", 100)
+			var s string
+			for i, r := range rules {
+				s += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
+			}
+			return s
+		}
+
+		// dispatch is the universal handler for any scheduled entity kind.
+		// The agent receives the entity UUID + type + description and is
+		// responsible for travelling the DAG: a product agent reads its
+		// manifests and tasks; a manifest agent reads its tasks; a task
+		// agent follows its instructions directly. The relationships,
+		// entities, and execution_log stores are the single source of truth
+		// — the agent uses OpenPraxis MCP tools to traverse them at runtime.
+		dispatch := func(ctx context.Context, entityID string, scheduleID int64) error {
+			e, err := n.Entities.Get(entityID)
+			if err != nil || e == nil {
+				return fmt.Errorf("entity not found: %s", entityID)
+			}
+
+			desc := entityDesc(ctx, entityID, e.Title)
+
+			var prompt string
+			switch e.Type {
+			case "product":
+				prompt = fmt.Sprintf(
+					"You have been scheduled to execute OpenPraxis product.\n\n"+
+						"Entity UUID: %s\nEntity Type: product\nTitle: %s\n\n"+
+						"## Product Definition\n%s\n\n"+
+						"## Your Job\n"+
+						"Use OpenPraxis MCP tools to travel the DAG:\n"+
+						"1. Use manifest_list (or product_get) to find all active manifests under this product\n"+
+						"2. For each manifest read its definition — this is your refinement context\n"+
+						"3. For each task under each manifest read and execute it with full product + manifest + task context\n"+
+						"4. Honour depends_on ordering between tasks (check relationships)\n"+
+						"5. Post results/findings back to this product via comment_add\n\n"+
+						"## Visceral Rules\n%s",
+					entityID, e.Title, desc, visceralRules(),
+				)
+			case "manifest":
+				prompt = fmt.Sprintf(
+					"You have been scheduled to execute OpenPraxis manifest.\n\n"+
+						"Entity UUID: %s\nEntity Type: manifest\nTitle: %s\n\n"+
+						"## Manifest Definition\n%s\n\n"+
+						"## Your Job\n"+
+						"Use OpenPraxis MCP tools to travel the DAG:\n"+
+						"1. Find all active tasks under this manifest (check relationships)\n"+
+						"2. Execute each task with this manifest as your refinement context\n"+
+						"3. Honour depends_on ordering between tasks\n"+
+						"4. Post results back to this manifest via comment_add\n\n"+
+						"## Visceral Rules\n%s",
+					entityID, e.Title, desc, visceralRules(),
+				)
+			default: // task (or any leaf entity)
+				prompt = fmt.Sprintf(
+					"You have been scheduled to execute OpenPraxis task.\n\n"+
+						"Entity UUID: %s\nEntity Type: %s\nTitle: %s\n\n"+
+						"## Task Instructions\n%s\n\n"+
+						"## Visceral Rules\n%s",
+					entityID, e.Type, e.Title, desc, visceralRules(),
+				)
+			}
+
+			slog.Info("schedule: dispatching entity", "entity_uid", entityID, "type", e.Type, "title", e.Title)
+
+			t := &task.Task{
+				ID:     entityID,
+				Title:  e.Title,
+				Status: "scheduled",
+				Agent:  "claude-code",
+			}
+			return runner.Execute(t, e.Title, prompt, visceralRules())
+		}
+
+		// Same dispatch function handles any entity kind — the agent travels
+		// the DAG using MCP tools at runtime.
 		scheduleRunner := schedule.NewRunner(n.Schedules, map[string]schedule.DispatchFunc{
-			"task": func(ctx context.Context, entityID string, scheduleID int64) error {
-				e, err := n.Entities.Get(entityID)
-				if err != nil || e == nil {
-					return fmt.Errorf("entity not found: %s", entityID)
-				}
-
-				// Build agent content from latest description_revision comment.
-				var content string
-				ct := comments.TypeDescriptionRevision
-				revs, _ := n.Comments.List(ctx, comments.TargetEntity, entityID, 1, &ct)
-				if len(revs) > 0 {
-					content = revs[0].Body
-				}
-				if content == "" {
-					content = e.Title
-				}
-
-				// Load visceral rules for the prompt.
-				rules, _ := n.Index.ListByType("visceral", 100)
-				var visceralText string
-				for i, r := range rules {
-					visceralText += fmt.Sprintf("%d. [%s] %s\n", i+1, r.ID, r.L2)
-				}
-
-				slog.Info("schedule fired entity", "entity_uid", entityID, "type", e.Type, "title", e.Title)
-
-				// Execute against the legacy task runner using entity_uid.
-				t, _ := n.Tasks.Get(entityID)
-				if t == nil {
-					return fmt.Errorf("task record not found for entity: %s", entityID)
-				}
-				return runner.Execute(t, e.Title, content, visceralText)
-			},
+			"task":     dispatch,
+			"manifest": dispatch,
+			"product":  dispatch,
 		})
 		n.ScheduleRunner = scheduleRunner
 		if err := scheduleRunner.Start(ctx); err != nil {
@@ -233,12 +290,6 @@ var serveCmd = &cobra.Command{
 		}
 
 		runner.StartActionWatcher(2 * time.Second)
-
-		// System host metrics sampler — writes CPU/RSS/disk to
-		// system_host_samples for the Stats tab System Capacity panel.
-		systemSampler := task.NewSystemSampler(n.Tasks.DB(), n.HostSamplerTick())
-		systemSampler.Start(ctx)
-		defer systemSampler.Stop()
 
 		// --- Startup state summary ---
 		fmt.Println("\n  === OpenPraxis State ===")

@@ -249,19 +249,24 @@ func apiTemplatePreview(n *node.Node) http.HandlerFunc {
 			BranchPrefix: "openpraxis",
 			Now:          time.Now(),
 		}
-		if taskID != "" && n.Tasks != nil {
-			if tk, err := n.Tasks.Get(taskID); err == nil && tk != nil {
+		if taskID != "" && n.Entities != nil {
+			if tk, err := n.Entities.Get(taskID); err == nil && tk != nil {
 				data.Task = templates.TaskView{
-					ID:          tk.ID,
-					Title:       tk.Title,
-					Description: tk.Description,
-					Agent:       tk.Agent,
+					ID:    tk.EntityUID,
+					Title: tk.Title,
+					Agent: "claude-code",
 				}
-				if tk.ManifestID != "" && n.Entities != nil {
-					if e, err := n.Entities.Get(tk.ManifestID); err == nil && e != nil {
-						data.Manifest = templates.ManifestView{
-							ID:    e.EntityUID,
-							Title: e.Title,
+				// Look up manifest via relationships (owns edge pointing to this task)
+				if n.Relationships != nil {
+					if edges, err := n.Relationships.ListIncoming(r.Context(), tk.EntityUID, "owns"); err == nil {
+						for _, edge := range edges {
+							if e, err2 := n.Entities.Get(edge.SrcID); err2 == nil && e != nil && e.Type == "manifest" {
+								data.Manifest = templates.ManifestView{
+									ID:    e.EntityUID,
+									Title: e.Title,
+								}
+								break
+							}
 						}
 					}
 				}

@@ -43,7 +43,7 @@ type Node struct {
 	Actions       *action.Store
 	Entities      *entity.Store
 	// Tasks is still needed by the task runner — TODO: migrate to entity store
-	Tasks            *task.Store
+	// Tasks field removed — all task data lives in entities + execution_log
 	ChatSessions     *chat.SessionStore
 	Watcher          *watcher.Store
 	SettingsStore    *settings.Store
@@ -145,22 +145,7 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, fmt.Errorf("init delusion schema: %w", err)
 	}
 
-	taskStore, err := task.NewStore(index.DB())
-	if err != nil {
-		return nil, fmt.Errorf("init task store: %w", err)
-	}
-
-	// Review comments wiring (#93). comments.Store is the durable
-	// home for review_rejection + review_approval comments; task.Store
-	// calls through these adapters so it doesn't take an
-	// internal/comments import. Review reads + writes flow through
-	// the same underlying store; the interface split exists for
-	// testability (stub either side independently).
 	commentsStore := comments.NewStore(index.DB())
-	taskStore.SetReviewCommentsAPI(
-		&taskReviewWriteAdapter{s: commentsStore},
-		&taskReviewReadAdapter{s: commentsStore},
-	)
 
 	chatStore, err := chat.NewSessionStore(index.DB())
 	if err != nil {
@@ -190,9 +175,7 @@ func New(cfg *config.Config) (*Node, error) {
 	commentsStore.SetAttachments(attachmentsStore)
 
 	settingsStore := settings.NewStore(index.DB())
-	taskSettingsAdapter := &task.SettingsAdapter{Store: taskStore}
-	// Manifest settings adapter uses the relationships + entity stores to
-	// walk manifest → product scope without importing internal/manifest.
+	taskSettingsAdapter := &entityTaskSettingsAdapter{rels: nil}
 	manifestSettingsAdapter := &entityManifestSettingsAdapter{
 		entities: entityStore,
 		rels:     nil, // wired after relationships store is constructed below
@@ -201,13 +184,12 @@ func New(cfg *config.Config) (*Node, error) {
 
 	// RC/M1: prompt_templates substrate. Schema + system seed run every
 	// boot; both are idempotent. Resolver walks task → manifest → product
-	// → agent → system using a task-scope lookup into the task store.
+	// → agent → system using relationships edges.
 	if err := templates.InitSchema(index.DB()); err != nil {
 		return nil, fmt.Errorf("init templates schema: %w", err)
 	}
 	templatesStore := templates.NewStore(index.DB())
 	templatesScopeAdapter := &taskTemplatesScopeAdapter{
-		tasks:    taskStore,
 		entities: entityStore,
 		rels:     nil, // wired after relationships store is constructed below
 	}
@@ -215,9 +197,8 @@ func New(cfg *config.Config) (*Node, error) {
 
 	// M4-T14: one-time migration of legacy tasks.max_turns column values into
 	// settings rows at task scope, followed by dropping the column. Both are
-	// idempotent — the migration is gated by a marker row; the drop is a
-	// no-op when the column is already absent. Must run before any code
-	// path (scanTask, taskColumns) that assumes the column is gone.
+	// idempotent — safe when the tasks table is absent (pragma_table_info
+	// returns empty, hasMaxTurnsColumn returns false, migration short-circuits).
 	if _, err := task.MigrateMaxTurnsToSettings(index.DB(), settingsStore); err != nil {
 		return nil, fmt.Errorf("migrate max_turns to settings: %w", err)
 	}
@@ -254,18 +235,8 @@ func New(cfg *config.Config) (*Node, error) {
 	}
 	// Wire the relationships store into the task dep store so its
 	// Add/Remove/List methods read + write the unified table.
-	taskStore.SetRelationshipsBackend(relationshipsStore)
-	// Re-fire the task SCD backfill now that the relationships backend
-	// is wired — task.NewStore ran the backfill before the wiring,
-	// which is a no-op when rels is nil. Pulls any tasks.depends_on
-	// cache rows that didn't make it into task_dependency (and thus
-	// into relationships via MigrateLegacyDeps) on prior boots.
-	if _, err := taskStore.BackfillTaskDepSCD(); err != nil {
-		return nil, fmt.Errorf("backfill task dep SCD: %w", err)
-	}
-
-	// Wire the relationships store into the settings + templates scope
-	// adapters now that it's available.
+	// Wire the relationships store into all scope adapters now that it's available.
+	taskSettingsAdapter.rels = relationshipsStore
 	manifestSettingsAdapter.rels = relationshipsStore
 	templatesScopeAdapter.rels = relationshipsStore
 
@@ -294,7 +265,6 @@ func New(cfg *config.Config) (*Node, error) {
 		Markers:          markerStore,
 		Actions:          actionStore,
 		Entities:         entityStore,
-		Tasks:            taskStore,
 		ChatSessions:     chatStore,
 		Watcher:          watcherStore,
 		SettingsStore:    settingsStore,
@@ -329,33 +299,38 @@ func New(cfg *config.Config) (*Node, error) {
 }
 
 // taskTemplatesScopeAdapter translates a task id into its manifest and
-// product ids for the templates resolver. Uses the entity + relationships
-// stores to avoid importing internal/manifest.
+// product ids for the templates resolver using the relationships edge store.
 type taskTemplatesScopeAdapter struct {
-	tasks    *task.Store
 	entities *entity.Store
 	rels     *relationships.Store
 }
 
 func (a *taskTemplatesScopeAdapter) ManifestAndProductForTask(ctx context.Context, taskID string) (string, string, error) {
-	if a.tasks == nil {
+	if a.rels == nil {
 		return "", "", nil
 	}
-	t, err := a.tasks.Get(taskID)
-	if err != nil || t == nil {
+	// Find the manifest that owns this task.
+	edges, err := a.rels.ListIncoming(ctx, taskID, relationships.EdgeOwns)
+	if err != nil {
 		return "", "", nil
 	}
-	manifestID := t.ManifestID
+	var manifestID string
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindManifest {
+			manifestID = e.SrcID
+			break
+		}
+	}
+	if manifestID == "" {
+		return "", "", nil
+	}
+	// Find the product that owns that manifest.
 	var productID string
-	if manifestID != "" && a.rels != nil {
-		// Walk incoming "owns" edges to find the product that owns this manifest.
-		edges, err := a.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns)
-		if err == nil {
-			for _, e := range edges {
-				if e.SrcKind == relationships.KindProduct {
-					productID = e.SrcID
-					break
-				}
+	if prodEdges, err := a.rels.ListIncoming(ctx, manifestID, relationships.EdgeOwns); err == nil {
+		for _, e := range prodEdges {
+			if e.SrcKind == relationships.KindProduct {
+				productID = e.SrcID
+				break
 			}
 		}
 	}
@@ -388,6 +363,29 @@ func (a *entityManifestSettingsAdapter) GetManifestForSettings(ctx context.Conte
 	return settings.ManifestRec{ID: manifestID, ProductID: productID}, nil
 }
 
+// entityTaskSettingsAdapter implements settings.TaskLookup using the
+// relationships edge store. Replaces task.SettingsAdapter after the
+// legacy tasks table was removed.
+type entityTaskSettingsAdapter struct {
+	rels *relationships.Store
+}
+
+func (a *entityTaskSettingsAdapter) GetTaskForSettings(ctx context.Context, taskID string) (settings.TaskRec, error) {
+	if a == nil || a.rels == nil {
+		return settings.TaskRec{ID: taskID}, nil
+	}
+	edges, err := a.rels.ListIncoming(ctx, taskID, relationships.EdgeOwns)
+	if err != nil {
+		return settings.TaskRec{ID: taskID}, nil
+	}
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindManifest {
+			return settings.TaskRec{ID: taskID, ManifestID: e.SrcID}, nil
+		}
+	}
+	return settings.TaskRec{ID: taskID}, nil
+}
+
 // InitRunner creates and sets the task Runner using the Node's own stores.
 // Must be called after New() and before serving requests.
 // The Runner reads its max_parallel cap per task via n.SettingsResolver —
@@ -396,7 +394,7 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// Empty repoDir → Runner falls back to process CWD at spawn time.
 	// cmd/serve.go passes an explicit dir via a follow-up SetRepoDir if it
 	// runs from outside the repo root.
-	n.runner = task.NewRunner(n.Tasks, n.Actions, n.SettingsResolver, "", onEvent)
+	n.runner = task.NewRunner(n.Actions, n.SettingsResolver, "", onEvent)
 	// Wire the post-completion execution_review gate (M4-T10). Non-fatal
 	// if Comments is nil — the runner treats nil as "feature off".
 	if n.Comments != nil {
@@ -920,17 +918,8 @@ func (n *Node) ResolveScopeID(scopeType, scopeID string) (string, error) {
 		}
 		return e.EntityUID, nil
 	case "task":
-		if n.Tasks == nil {
-			return scopeID, nil
-		}
-		t, err := n.Tasks.Get(scopeID)
-		if err != nil {
-			return "", fmt.Errorf("resolve task %q: %w", scopeID, err)
-		}
-		if t == nil {
-			return "", fmt.Errorf("task not found: %s", scopeID)
-		}
-		return t.ID, nil
+		// Tasks live in entities — just return the scopeID directly.
+		return scopeID, nil
 	}
 	return scopeID, nil
 }
@@ -1039,38 +1028,24 @@ func (n *Node) ValidateArchiveProduct(productID string) error {
 }
 
 // ValidateArchiveManifest checks that all linked tasks are terminal before allowing a manifest to be archived.
+// Uses the relationships + entities stores (no legacy tasks table).
 func (n *Node) ValidateArchiveManifest(manifestID string) error {
-	tasks, err := n.Tasks.ListByManifest(manifestID, 1000)
+	if n.Relationships == nil || n.Entities == nil {
+		return nil
+	}
+	edges, err := n.Relationships.ListOutgoing(context.Background(), manifestID, "owns")
 	if err != nil {
 		return fmt.Errorf("check tasks: %w", err)
 	}
-	terminal := map[string]bool{"completed": true, "failed": true, "cancelled": true}
-	for _, t := range tasks {
-		if !terminal[t.Status] {
-			return fmt.Errorf("cannot archive manifest: task [%s] %s is still '%s' — all tasks must be completed, failed, or cancelled first", t.ID, t.Title, t.Status)
+	terminal := map[string]bool{"completed": true, "failed": true, "cancelled": true, "archived": true}
+	for _, edge := range edges {
+		e, _ := n.Entities.Get(edge.DstID)
+		if e != nil && e.Type == "task" && !terminal[e.Status] {
+			return fmt.Errorf("cannot archive manifest: task [%s] %s is still '%s' — all tasks must be completed, failed, or cancelled first", e.EntityUID, e.Title, e.Status)
 		}
 	}
 	return nil
 }
-
-// taskReviewWriteAdapter satisfies task.ReviewWriter by delegating to
-// comments.Store.Add with the TargetType/CommentType type-conversion
-// the comments package needs. Keeps task free of an internal/comments
-// import; the type conversion lives here in the node layer where both
-// packages are already in scope.
-type taskReviewWriteAdapter struct{ s *comments.Store }
-
-func (a *taskReviewWriteAdapter) AddReviewComment(ctx context.Context, taskID, author, commentType, body string) error {
-	_, err := a.s.Add(ctx, comments.TargetTask, taskID, author, comments.CommentType(commentType), body)
-	return err
-}
-
-// taskReviewReadAdapter satisfies task.ReviewReader by listing
-// comments on the task target and filtering down to review-type rows.
-// Non-review comments (user_note, execution_review, etc.) are dropped
-// here so the caller's "latest review comment wins" logic doesn't
-// have to re-filter.
-type taskReviewReadAdapter struct{ s *comments.Store }
 
 // executionReviewCheckerAdapter satisfies task.ExecutionReviewChecker by
 // asking the comments store whether the given task carries at least one
@@ -1092,24 +1067,3 @@ func (a *executionReviewCheckerAdapter) HasAgentExecutionReview(ctx context.Cont
 	return false, nil
 }
 
-func (a *taskReviewReadAdapter) ListReviewCommentsForTask(ctx context.Context, taskID string, limit int) ([]task.ReviewComment, error) {
-	all, err := a.s.List(ctx, comments.TargetTask, taskID, limit, nil)
-	if err != nil {
-		return nil, err
-	}
-	var out []task.ReviewComment
-	for _, c := range all {
-		t := string(c.Type)
-		if t != "review_rejection" && t != "review_approval" {
-			continue
-		}
-		out = append(out, task.ReviewComment{
-			ID:        c.ID,
-			Type:      t,
-			Author:    c.Author,
-			Body:      c.Body,
-			CreatedAt: c.CreatedAt,
-		})
-	}
-	return out, nil
-}

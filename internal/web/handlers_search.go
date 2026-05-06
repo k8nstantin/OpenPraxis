@@ -10,7 +10,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/conversation"
 	"github.com/k8nstantin/OpenPraxis/internal/memory"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
 // GET-alias helpers for per-tab scoped search. See manifest 019daafb-b5e M2.
@@ -227,16 +226,16 @@ func apiTasksSearch(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q, limit := parseSearchParams(r)
 		if q == "" {
-			writeJSON(w, []*task.Task{})
+			writeJSON(w, []any{})
 			return
 		}
-		results, err := n.Tasks.Search(q, limit)
+		results, err := n.Entities.Search(q, "task", limit)
 		if err != nil {
 			writeError(w, err.Error(), 500)
 			return
 		}
 		if results == nil {
-			results = []*task.Task{}
+			results = nil
 		}
 		writeJSON(w, results)
 	}

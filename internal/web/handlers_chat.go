@@ -353,7 +353,7 @@ func handleChatCommand(n *node.Node, sess *chat.Session, cmd string, router *cha
 		memCount, _ := n.Index.Count()
 		convCount, _ := n.Conversations.Count()
 		manifests, _ := n.Entities.List("manifest", "open", 100)
-		tasks, _ := n.Tasks.List("running", 100)
+		tasks, _ := n.Entities.List("task", "running", 100)
 		return fmt.Sprintf("Memories: %d | Conversations: %d | Active Manifests: %d | Running Tasks: %d | Model: %s",
 			memCount, convCount, len(manifests), len(tasks), sess.Model)
 	case "/reset":
