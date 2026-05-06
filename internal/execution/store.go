@@ -718,7 +718,9 @@ const rowColumns = `id, run_uid, entity_uid, event, run_number, trigger, node_id
 	peak_cpu_pct, avg_cpu_pct, peak_rss_mb, avg_rss_mb,
 	net_rx_mbps, net_tx_mbps, disk_read_mbps, disk_write_mbps,
 	mem_used_mb, mem_total_mb, load_avg_1m,
-	created_by, created_at`
+	created_by, created_at, session_id,
+	tests_run, tests_passed, tests_failed,
+	agent_pid`
 
 func scanRow(rows *sql.Rows) (Row, error) {
 	var r Row
@@ -738,7 +740,9 @@ func scanRow(rows *sql.Rows) (Row, error) {
 		&r.PeakCPUPct, &r.AvgCPUPct, &r.PeakRSSMB, &r.AvgRSSMB,
 		&r.NetRxMbps, &r.NetTxMbps, &r.DiskReadMBps, &r.DiskWriteMBps,
 		&r.MemUsedMB, &r.MemTotalMB, &r.LoadAvg1m,
-		&r.CreatedBy, &r.CreatedAt,
+		&r.CreatedBy, &r.CreatedAt, &r.SessionID,
+		&r.TestsRun, &r.TestsPassed, &r.TestsFailed,
+		&r.AgentPID,
 	); err != nil {
 		return Row{}, err
 	}
