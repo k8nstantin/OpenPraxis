@@ -291,6 +291,22 @@ func (r *Runner) IsRunning(taskID string) bool {
 	return ok
 }
 
+// LiveTurnCount returns the in-memory turn count for a running task — the
+// number of distinct assistant message ids seen so far on its stdout. Updates
+// immediately at each turn boundary (before task_turn_started fires), so
+// dashboards polling /api/execution/live see the new value within ~1s instead
+// of waiting for the next 5s execution_log sample. Returns (0,false) when the
+// task is not currently in r.running.
+func (r *Runner) LiveTurnCount(taskID string) (int, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rt, ok := r.running[taskID]
+	if !ok {
+		return 0, false
+	}
+	return len(rt.usageByMessage), true
+}
+
 // RunningCount returns number of active executions.
 func (r *Runner) RunningCount() int {
 	r.mu.RLock()
