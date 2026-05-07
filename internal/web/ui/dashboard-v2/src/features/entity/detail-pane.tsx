@@ -10,12 +10,13 @@ import { DAGTab } from './tabs/dag'
 import { DependenciesTab } from './tabs/dependencies'
 import { ExecutionTab } from './tabs/execution'
 import { MainTab } from './tabs/main'
+import { RunsTab } from './tabs/runs'
 
-// Tabs: Main · Execution · Comments · Dependencies · DAG
-// Stats, Schedule, and Live Output removed — will be rebuilt from execution_log
+// Tabs: Main · Execution · Runs · Comments · Dependencies · DAG
 const TAB_IDS = [
   'main',
   'execution',
+  'runs',
   'comments',
   'dependencies',
   'dag',
@@ -100,6 +101,7 @@ export function EntityDetailPane({
             <TabsList>
               <TabsTrigger value='main'>Main</TabsTrigger>
               <TabsTrigger value='execution'>Execution</TabsTrigger>
+              <TabsTrigger value='runs'>Runs</TabsTrigger>
               <TabsTrigger value='comments'>Comments</TabsTrigger>
               <TabsTrigger value='dependencies'>Dependencies</TabsTrigger>
               <TabsTrigger value='dag'>DAG</TabsTrigger>
@@ -110,6 +112,9 @@ export function EntityDetailPane({
             </TabsContent>
             <TabsContent value='execution'>
               <ExecutionTab kind={kind} entityId={entityId} />
+            </TabsContent>
+            <TabsContent value='runs'>
+              <RunsTab kind={kind} entityId={entityId} />
             </TabsContent>
             <TabsContent value='comments'>
               <CommentsTab kind={kind} entityId={entityId} />

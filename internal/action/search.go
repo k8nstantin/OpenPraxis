@@ -38,7 +38,7 @@ func (s *Store) SearchPaged(query string, limit, offset int) ([]Action, int, err
 	}
 
 	rows, err := s.db.Query(
-		`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+		`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at
 		   FROM actions
 		  WHERE CAST(id AS TEXT) LIKE ? OR tool_name LIKE ? OR tool_input LIKE ? OR tool_response LIKE ?
 		  ORDER BY created_at DESC

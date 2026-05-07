@@ -444,7 +444,7 @@ func (s *Store) ListByEntity(ctx context.Context, entityUID string, limit int) (
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+rowColumns+` FROM execution_log
-		 WHERE entity_uid = ?
+		 WHERE entity_uid = ? AND event != 'turn'
 		 ORDER BY created_at DESC LIMIT ?`,
 		entityUID, limit,
 	)
