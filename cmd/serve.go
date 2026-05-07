@@ -15,6 +15,8 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
+	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
@@ -202,8 +204,33 @@ var serveCmd = &cobra.Command{
 		// Task runner — spawns autonomous agent subprocesses.
 		// Architecture: schedule.Runner fires entity_uid from the schedules
 		// table → runner executes the entity → stats go to execution_log.
+		//
+		// dispatchChainFn is set after dispatchAtomicTasks is defined so the
+		// task_completed callback can chain the next DAG-ready task without a
+		// forward-declaration problem.
+		var dispatchChainFn func(ctx context.Context, parentID string, scheduleID int64) error
+
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
+			// When a task completes, re-evaluate the owning manifest so the
+			// next depends_on-unblocked task fires automatically.
+			if event == "task_completed" {
+				taskID := data["task_id"]
+				if taskID != "" && n.Relationships != nil && dispatchChainFn != nil {
+					edges, _ := n.Relationships.ListIncoming(ctx, taskID, relationships.EdgeOwns)
+					for _, e := range edges {
+						if e.SrcKind == relationships.KindManifest || e.SrcKind == relationships.KindProduct {
+							parentID := e.SrcID
+							go func() {
+								if err := dispatchChainFn(ctx, parentID, 0); err != nil {
+									slog.Info("dag-chain: dispatch after task_completed", "parent", parentID[:12], "note", err.Error())
+								}
+							}()
+							break
+						}
+					}
+				}
+			}
 		})
 
 		if err := runner.RecoverInFlight(ctx); err != nil {
@@ -460,6 +487,32 @@ var serveCmd = &cobra.Command{
 			slog.Info("dispatch: firing tasks atomically", "parent_uid", parentID[:12], "type", parent.Type, "task_count", len(taskIDs))
 			var lastErr error
 			for _, taskID := range taskIDs {
+				// DAG gate: skip tasks whose depends_on edges point to tasks
+				// that have not yet completed. The depends_on edges in the
+				// relationships table are the source of truth — the scheduler
+				// must follow the DAG, not fire everything at once.
+				if n.Relationships != nil && n.ExecutionLog != nil {
+					deps, _ := n.Relationships.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
+					blocked := false
+					for _, dep := range deps {
+						rows, _ := n.ExecutionLog.ListByEntity(ctx, dep.DstID, 1)
+						completed := false
+						for _, row := range rows {
+							if row.Event == execution.EventCompleted {
+								completed = true
+								break
+							}
+						}
+						if !completed {
+							blocked = true
+							break
+						}
+					}
+					if blocked {
+						slog.Info("dag-chain: task blocked by unsatisfied depends_on — skipping", "task_id", taskID[:12])
+						continue
+					}
+				}
 				if err := dispatch(ctx, taskID, scheduleID); err != nil {
 					slog.Error("dispatch: task failed", "task_id", taskID[:12], "error", err)
 					lastErr = err
@@ -467,6 +520,9 @@ var serveCmd = &cobra.Command{
 			}
 			return lastErr
 		}
+
+		// Wire the chain function now that dispatchAtomicTasks is defined.
+		dispatchChainFn = dispatchAtomicTasks
 
 		// Schedule dispatcher:
 		//   task     → dispatch directly (atomic, execution recorded at task level)
