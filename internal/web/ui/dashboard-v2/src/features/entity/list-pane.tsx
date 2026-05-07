@@ -166,8 +166,8 @@ export function EntityListPane({
               >
                 {runningIds.has(row.id) ? (
                   <span className='relative mt-0.5 flex h-2 w-2 shrink-0'>
-                    <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
-                    <span className='relative inline-flex h-2 w-2 rounded-full bg-emerald-500' />
+                    <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75' />
+                    <span className='relative inline-flex h-2 w-2 rounded-full bg-violet-500' />
                   </span>
                 ) : (
                   <span className={cn(
@@ -177,7 +177,7 @@ export function EntityListPane({
                 )}
                 <span className={cn(
                   'min-w-0 flex-1 truncate',
-                  runningIds.has(row.id) && 'text-emerald-400 font-medium'
+                  runningIds.has(row.id) && 'text-violet-400 font-medium'
                 )}>{row.title}</span>
               </button>
             ))}
