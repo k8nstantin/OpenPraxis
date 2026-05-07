@@ -99,7 +99,7 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 							ViaSrc: edge.SrcID, ViaKind: relationships.EdgeOwns, Depth: 0,
 						})
 					}
-					break // one governing skill per product
+					// no break — show ALL skills linked to this product
 				}
 			}
 		}
