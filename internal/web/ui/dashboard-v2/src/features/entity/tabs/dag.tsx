@@ -1,9 +1,8 @@
-import { useMemo, useEffect, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { EChart } from '@/components/echart'
 import {
   useEntityGraph,
-  useLiveRuns,
   type EntityKind,
   type GraphNode,
   type GraphEdge,
@@ -87,9 +86,7 @@ interface ChartLink {
 function build(
   rootId: string,
   nodes: GraphNode[],
-  edges: GraphEdge[],
-  runningIds: Set<string>,
-  completedIds: Set<string>
+  edges: GraphEdge[]
 ): { data: ChartNode[]; links: ChartLink[]; categories: { name: string }[] } {
   const categories = [{ name: 'skill' }, { name: 'product' }, { name: 'manifest' }, { name: 'task' }]
   const catIndex: Record<string, number> = { skill: 0, product: 1, manifest: 2, task: 3 }
@@ -107,40 +104,28 @@ function build(
       { offset: 1, color: hex + '60' },
     ],
   })
-  const data: ChartNode[] = nodes.map((n) => {
-    const isRunning = runningIds.has(n.id)
-    const isDone   = completedIds.has(n.id)
-    const baseSize = n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind]
-    return {
-      id: n.id,
-      name: n.title,
-      symbol: KIND_SYMBOL[n.kind] ?? 'circle',
-      symbolSize: isRunning ? baseSize + 10 : baseSize,
-      category: catIndex[n.kind] ?? 0,
-      itemStyle: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        color: (isRunning
-          ? grad('#8b5cf6')
-          : isDone
-            ? grad('#10b981')
-            : grad(KIND_COLOR[n.kind] ?? '#3b82f6')) as any,
-        borderColor: isRunning ? '#ffffff' : isDone ? '#34d399' : (STATUS_BORDER[n.status] ?? '#71717a'),
-        borderWidth: isRunning ? 3 : (isDone ? 2.5 : (n.id === rootId ? 3 : 1.5)),
-        shadowBlur: isRunning ? 48 : isDone ? 20 : (n.id === rootId ? 24 : 8),
-        shadowColor: isRunning ? '#8b5cf6' : isDone ? '#10b981' : (KIND_COLOR[n.kind] ?? '#3b82f6'),
-        shadowOffsetX: 0,
-        shadowOffsetY: 0,
-        opacity: (!isRunning && !isDone && completedIds.size > 0) ? 0.55 : 1,
-      },
-      label: {
-        fontWeight: (isRunning || isDone || n.id === rootId) ? 'bold' : 'normal',
-        color: isRunning ? '#c4b5fd' : isDone ? '#6ee7b7' : '#e5e7eb',
-      },
-      _kind: n.kind,
-      _status: n.status,
-    }
-  })
-
+  const data: ChartNode[] = nodes.map((n) => ({
+    id: n.id,
+    name: n.title,
+    symbol: KIND_SYMBOL[n.kind] ?? 'circle',
+    symbolSize: n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind],
+    category: catIndex[n.kind] ?? 0,
+    itemStyle: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      color: grad(KIND_COLOR[n.kind] ?? '#3b82f6') as any,
+      borderColor: STATUS_BORDER[n.status] ?? '#71717a',
+      borderWidth: n.id === rootId ? 3 : 1.5,
+      shadowBlur: n.id === rootId ? 24 : 8,
+      shadowColor: KIND_COLOR[n.kind] ?? '#3b82f6',
+      shadowOffsetX: 0,
+      shadowOffsetY: 0,
+    },
+    label: {
+      fontWeight: n.id === rootId ? 'bold' : 'normal',
+    },
+    _kind: n.kind,
+    _status: n.status,
+  }))
   const links: ChartLink[] = edges.map((e) => {
     const isOwns = e.kind === 'owns'
     return {
@@ -157,77 +142,17 @@ function build(
       _kind: e.kind,
     }
   })
-  const traversedLinks: ChartLink[] = links.map((l) => {
-    const srcDone = completedIds.has(l.source as string)
-    const srcRun  = runningIds.has(l.source as string)
-    if (srcDone || srcRun) {
-      return {
-        ...l,
-        lineStyle: {
-          ...l.lineStyle,
-          color: srcDone ? '#34d399' : '#a78bfa',
-          width: 2.2,
-          opacity: 1,
-        },
-      }
-    }
-    return { ...l, lineStyle: { ...l.lineStyle, opacity: completedIds.size > 0 ? 0.3 : 0.8 } }
-  })
-  return { data, links: traversedLinks, categories }
+  return { data, links, categories }
 }
 
 export function DAGTab({ kind, entityId }: DAGTabProps) {
   const graph = useEntityGraph(kind, entityId, 10)
   const navigate = useNavigate()
-  const { data: liveRuns } = useLiveRuns()
-
-  // First render: notMerge=true so the force layout unfolds with animation.
-  // After 2.5s (layout settled), switch to notMerge=false so live progress
-  // updates (running/completed node styles) don't restart the simulation.
-  const [settled, setSettled] = useState(false)
-  useEffect(() => {
-    if (!graph.data) return
-    const t = setTimeout(() => setSettled(true), 2500)
-    return () => clearTimeout(t)
-  }, [graph.data])
-
-  const runningIds = useMemo(
-    () => new Set((liveRuns ?? []).map((r) => r.entity_uid)),
-    [liveRuns]
-  )
-
-  // Derive completed node IDs: any node in the graph that has a completed
-  // run (fetch /runs and check for a completed event). We batch by querying
-  // each task node's runs — only task nodes actually execute.
-  const taskNodeIds = useMemo(
-    () => (graph.data?.nodes ?? []).filter((n) => n.kind === 'task').map((n) => n.id),
-    [graph.data]
-  )
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    if (taskNodeIds.length === 0) return
-    let cancelled = false
-    Promise.all(
-      taskNodeIds.map((id) =>
-        fetch(`/api/entities/${id}/runs`)
-          .then((r) => r.json())
-          .then((rows: { event: string }[]) => ({
-            id,
-            done: Array.isArray(rows) && rows.some((r) => r.event === 'completed'),
-          }))
-          .catch(() => ({ id, done: false }))
-      )
-    ).then((results) => {
-      if (cancelled) return
-      setCompletedIds(new Set(results.filter((r) => r.done).map((r) => r.id)))
-    })
-    return () => { cancelled = true }
-  }, [taskNodeIds, runningIds]) // re-check when a run starts/ends
 
   const built = useMemo(() => {
     if (!graph.data) return null
-    return build(entityId, graph.data.nodes, graph.data.edges, runningIds, completedIds)
-  }, [graph.data, entityId, runningIds, completedIds])
+    return build(entityId, graph.data.nodes, graph.data.edges)
+  }, [graph.data, entityId])
 
   if (graph.isLoading) {
     return (
@@ -262,7 +187,6 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
         <div className='bg-background h-[calc(100vh-15rem)] min-h-[600px] w-full overflow-hidden rounded-md'>
           <EChart
             height='100%'
-            notMerge={!settled}
             option={{
               tooltip: {
                 trigger: 'item',
@@ -318,7 +242,7 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
                     edgeLength: built.data.length <= 10 ? [180, 280] : [100, 180],
                     gravity: 0.08,
                     friction: 0.6,
-                    layoutAnimation: !settled,
+                    layoutAnimation: true,
                   },
                   center: ['50%', '50%'],
                   lineStyle: { width: 1.4, curveness: 0.12, opacity: 0.8 },
