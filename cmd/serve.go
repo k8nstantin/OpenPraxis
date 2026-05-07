@@ -239,6 +239,51 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
+		// DAG chain recovery: on startup, re-evaluate every active manifest so
+		// chains interrupted by a server restart resume from where they left off.
+		// dispatchChainFn is not wired yet at this point — schedule this after
+		// the runner and dispatcher are fully initialised by deferring into a
+		// short-lived goroutine that waits for the wiring to complete.
+		go func() {
+			// Brief pause to let dispatchChainFn get wired below.
+			time.Sleep(2 * time.Second)
+			if n.Relationships == nil || n.Entities == nil {
+				return
+			}
+			manifests, err := n.Entities.List("manifest", "active", 0)
+			if err != nil || len(manifests) == 0 {
+				return
+			}
+			resumed := 0
+			for _, m := range manifests {
+				// Only resume manifests that have at least one completed task
+				// (chain was in progress) and at least one not-yet-completed task.
+				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
+				hasCompleted, hasPending := false, false
+				for _, e := range edges {
+					if e.DstKind != relationships.KindTask {
+						continue
+					}
+					done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
+					if done {
+						hasCompleted = true
+					} else {
+						hasPending = true
+					}
+				}
+				if hasCompleted && hasPending && dispatchChainFn != nil {
+					slog.Info("dag-chain: resuming interrupted chain on startup", "manifest", m.EntityUID[:12], "title", m.Title)
+					if err := dispatchChainFn(ctx, m.EntityUID, 0); err != nil {
+						slog.Info("dag-chain: resume dispatch", "manifest", m.EntityUID[:12], "note", err.Error())
+					}
+					resumed++
+				}
+			}
+			if resumed > 0 {
+				slog.Info("dag-chain: resumed chains on startup", "count", resumed)
+			}
+		}()
+
 		// defaultSkillID is the fallback execution protocol used when an entity
 		// has no skill assigned via the DAG.
 		const defaultSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
