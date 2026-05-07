@@ -1,10 +1,17 @@
-// Hand-written API response types for Portal V2.
+// Portal V2 type extension layer.
 //
-// Long term these are generated from Go structs via tygo (see Portal A's
-// `tools/tygo/config.yaml`). For now we hand-roll the fields each tab
-// actually reads — narrowing-by-need keeps the type surface honest and
-// keeps drift visible in code review.
+// Go-backed shapes come from `@/lib/api/generated.ts` (emitted by tygo,
+// see Makefile `types` target). Do not hand-edit those — re-run `make types`.
+// This file re-exports the generated types and adds frontend-only extensions.
 
+import type {
+  Entity as GeneratedEntity,
+} from '@/lib/api/generated'
+
+// ── Re-export Go-generated types ──────────────────────────────────────
+export type { Row as ExecutionRow, Action } from '@/lib/api/generated'
+
+// ── Frontend-only narrowed unions ─────────────────────────────────────
 export type EntityType = 'skill' | 'product' | 'manifest' | 'task' | 'idea'
 
 export type EntityStatus =
@@ -14,19 +21,16 @@ export type EntityStatus =
   | 'archived'
   | string
 
-export interface Entity {
-  row_id: number
-  entity_uid: string
+export type CommentType =
+  | 'prompt'
+  | 'comment'
+  | string
+
+// ── Entity with frontend extensions ───────────────────────────────────
+// Narrows `type` to EntityType and adds aggregate stats fields the API
+// attaches when fetching product/manifest summaries.
+export interface Entity extends Omit<GeneratedEntity, 'type'> {
   type: EntityType
-  title: string
-  status: EntityStatus
-  tags: string[]
-  valid_from: string
-  valid_to: string
-  changed_by: string
-  change_reason: string
-  created_at: string
-  // Aggregated stats fields
   total_manifests?: number
   total_tasks?: number
   total_turns?: number
@@ -34,29 +38,7 @@ export interface Entity {
   total_tokens?: number
 }
 
-export interface ExecutionRow {
-  id: string
-  run_uid: string
-  entity_uid: string
-  event: 'started' | 'sample' | 'completed' | 'failed' | 'turn'
-  run_number: number
-  turns: number
-  actions: number
-  input_tokens: number
-  output_tokens: number
-  cost_usd: number
-  duration_ms: number
-  cache_hit_rate_pct: number
-  cpu_pct: number
-  rss_mb: number
-  model: string
-  agent_runtime: string
-  started_at: number
-  completed_at: number
-  terminal_reason: string
-  created_at: string
-}
-
+// ── Frontend-only types (no Go equivalent) ────────────────────────────
 export interface OutputChunk {
   id: string
   run_uid: string
@@ -64,11 +46,6 @@ export interface OutputChunk {
   chunk: string
   created_at: string
 }
-
-export type CommentType =
-  | 'prompt'
-  | 'comment'
-  | string
 
 export interface Comment {
   id: string
@@ -86,7 +63,6 @@ export interface ProductDependency {
   id: string
   title: string
   status: EntityStatus
-  // Note: id here IS the entity_uid — the dependency endpoints return {id,title,status}
 }
 
 // Hierarchy endpoint response — recursive shape for breadcrumb building.
@@ -100,8 +76,7 @@ export interface HierarchyNode {
   sub_products?: HierarchyNode[]
 }
 
-// Legacy type aliases kept for backward compat with any remaining consumers.
-// All three now map to Entity — callers should migrate to Entity directly.
+// ── Legacy aliases (backward compat) ─────────────────────────────────
 export type Product = Entity
 export type Manifest = Entity
 export type Task = Entity

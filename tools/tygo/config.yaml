@@ -8,6 +8,12 @@
 # narrow — exporting test helpers or internal-only structs into the
 # frontend bundle would make refactoring painful.
 #
+# Portal V2 note: tygo writes one file per package (last write wins on a
+# shared output_path). To merge multiple Go packages into the single
+# `generated.ts` Portal V2 imports, each Portal V2 package emits to its
+# own staging file under `.tygo/`; the Makefile `types` target then
+# concatenates the staging files into `generated.ts`.
+#
 # To regenerate: `make types` (or `go install github.com/gzuidhof/tygo@latest && tygo generate`).
 packages:
   - path: "github.com/k8nstantin/OpenPraxis/internal/settings"
@@ -16,3 +22,39 @@ packages:
       - "catalog.go"
     type_mappings:
       "interface{}": "unknown"
+
+  - path: "github.com/k8nstantin/OpenPraxis/internal/execution"
+    output_path: "internal/web/ui/dashboard-v2/src/lib/api/.tygo/execution.ts"
+    include_files:
+      - "store.go"
+    optional_type: "null"
+    type_mappings:
+      "interface{}": "unknown"
+      "time.Time": "string"
+
+  - path: "github.com/k8nstantin/OpenPraxis/internal/entity"
+    output_path: "internal/web/ui/dashboard-v2/src/lib/api/.tygo/entity.ts"
+    include_files:
+      - "store.go"
+    optional_type: "null"
+    type_mappings:
+      "interface{}": "unknown"
+      "time.Time": "string"
+
+  - path: "github.com/k8nstantin/OpenPraxis/internal/action"
+    output_path: "internal/web/ui/dashboard-v2/src/lib/api/.tygo/action.ts"
+    include_files:
+      - "store.go"
+    optional_type: "null"
+    type_mappings:
+      "interface{}": "unknown"
+      "time.Time": "string"
+
+  - path: "github.com/k8nstantin/OpenPraxis/internal/comments"
+    output_path: "internal/web/ui/dashboard-v2/src/lib/api/.tygo/comments.ts"
+    include_files:
+      - "types.go"
+    optional_type: "null"
+    type_mappings:
+      "interface{}": "unknown"
+      "time.Time": "string"
