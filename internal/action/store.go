@@ -70,6 +70,7 @@ func (s *Store) init() error {
 	// Migrations
 	s.db.Exec(`ALTER TABLE actions ADD COLUMN source_node TEXT NOT NULL DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE actions ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE actions ADD COLUMN turn_number INTEGER NOT NULL DEFAULT 0`)
 
 	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_actions_task ON actions(task_id)`)
 	if err != nil {
@@ -97,15 +98,16 @@ func (s *Store) Record(sessionID, sourceNode, toolName string, toolInput, toolRe
 }
 
 // RecordForTask stores an action linked to a task and returns the inserted row ID.
-func (s *Store) RecordForTask(taskID, sourceNode, toolName, toolInput, toolResponse, cwd string) (int64, error) {
+// turnNumber is the current agent turn (1-based); 0 means unknown/pre-feature rows.
+func (s *Store) RecordForTask(taskID, sourceNode, toolName, toolInput, toolResponse, cwd string, turnNumber int) (int64, error) {
 	// Truncate large responses
 	if len(toolResponse) > 5000 {
 		toolResponse = toolResponse[:5000] + "..."
 	}
 
-	result, err := s.db.Exec(`INSERT INTO actions (session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"task:"+taskID, sourceNode, taskID, toolName, toolInput, toolResponse, cwd,
+	result, err := s.db.Exec(`INSERT INTO actions (session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"task:"+taskID, sourceNode, taskID, toolName, toolInput, toolResponse, cwd, turnNumber,
 		time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err

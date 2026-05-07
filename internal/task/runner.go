@@ -914,11 +914,27 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 							}
 							turnCount := len(rt.usageByMessage)
 							rt.mu.Unlock()
-							if !seen && r.onEvent != nil {
-								r.onEvent("task_turn_started", map[string]string{
-									"task_id": t.ID,
-									"turn":    strconv.Itoa(turnCount),
-								})
+							if !seen {
+								// Persist turn boundary to execution_log so turn history
+								// survives beyond the in-memory RunningTask lifetime.
+								if r.executionLog != nil {
+									_ = r.executionLog.Insert(bgCtx, execution.Row{
+										RunUID:       runUID,
+										EntityUID:    t.ID,
+										Event:        execution.EventTurn,
+										Trigger:      "agent",
+										NodeID:       r.sourceNode,
+										AgentRuntime: agent,
+										Turns:        turnCount,
+										CreatedBy:    "runner",
+									})
+								}
+								if r.onEvent != nil {
+									r.onEvent("task_turn_started", map[string]string{
+										"task_id": t.ID,
+										"turn":    strconv.Itoa(turnCount),
+									})
+								}
 							}
 						}
 					}
@@ -936,11 +952,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 										toolID, _ := bm["id"].(string)
 										toolInput := marshalJSON(bm["input"])
 
-										// Record action immediately (response filled when tool_result arrives)
+										// Record action with current turn number.
 										var actionID int64
 										if r.actions != nil {
+											rt.mu.RLock()
+											currentTurn := len(rt.usageByMessage)
+											rt.mu.RUnlock()
 											var recErr error
-											actionID, recErr = r.actions.RecordForTask(t.ID, t.SourceNode, toolName, toolInput, "", "")
+											actionID, recErr = r.actions.RecordForTask(t.ID, t.SourceNode, toolName, toolInput, "", "", currentTurn)
 											if recErr != nil {
 												slog.Error("record action failed", "component", "runner", "task_id", t.ID, "error", recErr)
 											}
