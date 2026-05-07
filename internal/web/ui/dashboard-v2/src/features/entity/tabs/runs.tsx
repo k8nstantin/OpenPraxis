@@ -112,7 +112,20 @@ function RunTable({ runs, entityId, selectedRunUid, onSelect, onSelectHistory }:
   runs: ExecutionRow[]; entityId: string; selectedRunUid: string | null
   onSelect: (uid: string | null) => void; onSelectHistory?: (uid: string) => void
 }) {
-  const history = runs.filter(r => ['completed','failed','started'].includes(r.event))
+  // One row per run_uid — prefer terminal event (completed/failed) over started.
+  const history = (() => {
+    const byRun = new Map<string, ExecutionRow>()
+    for (const r of runs) {
+      if (!['completed','failed','started'].includes(r.event)) continue
+      const existing = byRun.get(r.run_uid)
+      if (!existing || (r.event !== 'started' && existing.event === 'started')) {
+        byRun.set(r.run_uid, r)
+      }
+    }
+    return [...byRun.values()].sort((a,b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+  })()
   if (history.length === 0) return <div className='text-muted-foreground px-3 py-2 text-xs'>No runs.</div>
   return (
     <table className='w-full'>
