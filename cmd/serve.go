@@ -412,13 +412,72 @@ var serveCmd = &cobra.Command{
 			return runner.Execute(t, e.Title, prompt, visceralRules())
 		}
 
-		// Same dispatch function handles any entity kind — the agent travels
-		// the DAG using MCP tools at runtime.
+		// dispatchAtomicTasks fires every non-archived task under a manifest or product
+		// individually so each gets its own execution_log entry at the task level.
+		// Tasks are the atomic execution unit — run data must aggregate from task → manifest → product,
+		// not be recorded at the manifest/product level directly.
+		dispatchAtomicTasks := func(ctx context.Context, parentID string, scheduleID int64) error {
+			if n.Relationships == nil {
+				return fmt.Errorf("relationships store not wired")
+			}
+			parent, err := n.Entities.Get(parentID)
+			if err != nil || parent == nil {
+				return fmt.Errorf("entity not found: %s", parentID)
+			}
+
+			// Collect all tasks under this entity (one or two hops down).
+			var taskIDs []string
+			collectTasks := func(srcID string) {
+				edges, _ := n.Relationships.ListOutgoing(ctx, srcID, "owns")
+				for _, edge := range edges {
+					if edge.DstKind == "task" {
+						if te, _ := n.Entities.Get(edge.DstID); te != nil &&
+							te.Status != "archived" && te.Status != "closed" {
+							taskIDs = append(taskIDs, edge.DstID)
+						}
+					}
+				}
+			}
+
+			if parent.Type == "manifest" {
+				collectTasks(parentID)
+			} else { // product — walk manifest → tasks
+				manifEdges, _ := n.Relationships.ListOutgoing(ctx, parentID, "owns")
+				for _, me := range manifEdges {
+					if me.DstKind == "manifest" {
+						collectTasks(me.DstID)
+					}
+				}
+				// Also collect tasks directly under the product
+				collectTasks(parentID)
+			}
+
+			if len(taskIDs) == 0 {
+				slog.Info("dispatch: no active tasks found", "parent_uid", parentID[:12], "type", parent.Type)
+				return nil
+			}
+
+			slog.Info("dispatch: firing tasks atomically", "parent_uid", parentID[:12], "type", parent.Type, "task_count", len(taskIDs))
+			var lastErr error
+			for _, taskID := range taskIDs {
+				if err := dispatch(ctx, taskID, scheduleID); err != nil {
+					slog.Error("dispatch: task failed", "task_id", taskID[:12], "error", err)
+					lastErr = err
+				}
+			}
+			return lastErr
+		}
+
+		// Schedule dispatcher:
+		//   task     → dispatch directly (atomic, execution recorded at task level)
+		//   manifest → fire each owned task individually (execution recorded per task)
+		//   product  → fire each task across all manifests individually
+		//   skill    → fire each task across all owned products
 		scheduleRunner := schedule.NewRunner(n.Schedules, map[string]schedule.DispatchFunc{
 			"task":     dispatch,
-			"manifest": dispatch,
-			"product":  dispatch,
-			"skill":    dispatch, // skill is the root of the DAG — agent traverses down
+			"manifest": dispatchAtomicTasks,
+			"product":  dispatchAtomicTasks,
+			"skill":    dispatchAtomicTasks,
 		})
 		n.ScheduleRunner = scheduleRunner
 		if err := scheduleRunner.Start(ctx); err != nil {
