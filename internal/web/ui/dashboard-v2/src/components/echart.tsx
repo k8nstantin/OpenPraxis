@@ -15,9 +15,7 @@ interface EChartProps {
   option: EChartsOption
   height?: number | string
   className?: string
-  // notMerge=false preserves existing chart state (e.g. force-layout node
-  // positions) on option updates. Defaults to true (full replace).
-  notMerge?: boolean
+  // Notify on click; receives the clicked-data params from ECharts.
   onEvents?: Record<string, (...args: unknown[]) => void>
 }
 
@@ -33,7 +31,6 @@ export function EChart({
   option,
   height = 280,
   className,
-  notMerge = true,
   onEvents,
 }: EChartProps) {
   const chartRef = useRef<ReactECharts>(null)
@@ -117,7 +114,7 @@ export function EChart({
         option={themed}
         style={{ height: '100%', width: '100%' }}
         className={className}
-        notMerge={notMerge}
+        notMerge
         lazyUpdate
         opts={{ renderer: 'canvas' }}
         onEvents={onEvents}
