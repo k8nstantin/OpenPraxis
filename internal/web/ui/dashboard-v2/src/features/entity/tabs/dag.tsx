@@ -41,21 +41,24 @@ const STATUS_BORDER: Record<string, string> = {
 }
 
 const KIND_COLOR: Record<string, string> = {
-  product: '#3b82f6', // blue-500
+  skill:    '#f59e0b', // amber-400 — root of the DAG, stands out
+  product:  '#3b82f6', // blue-500
   manifest: '#a78bfa', // violet-400
-  task: '#10b981', // emerald-500
+  task:     '#10b981', // emerald-500
 }
 
 const KIND_SYMBOL: Record<string, string> = {
-  product: 'roundRect',
+  skill:    'star',       // star = top-level governance node
+  product:  'roundRect',
   manifest: 'diamond',
-  task: 'circle',
+  task:     'circle',
 }
 
 const KIND_SIZE: Record<string, number> = {
-  product: 32,
+  skill:    42,  // largest — root of the DAG
+  product:  32,
   manifest: 26,
-  task: 18,
+  task:     18,
 }
 
 interface ChartNode {
@@ -85,8 +88,8 @@ function build(
   nodes: GraphNode[],
   edges: GraphEdge[]
 ): { data: ChartNode[]; links: ChartLink[]; categories: { name: string }[] } {
-  const categories = [{ name: 'product' }, { name: 'manifest' }, { name: 'task' }]
-  const catIndex: Record<string, number> = { product: 0, manifest: 1, task: 2 }
+  const categories = [{ name: 'skill' }, { name: 'product' }, { name: 'manifest' }, { name: 'task' }]
+  const catIndex: Record<string, number> = { skill: 0, product: 1, manifest: 2, task: 3 }
   // Per-node radial-gradient fill. ECharts accepts {type:'radial',
   // colorStops:[]} on itemStyle.color directly. Center bright →
   // periphery deeper; gives each node a soft "glow from within" look.

@@ -30,7 +30,14 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			writeError(w, "root_id and root_kind required", http.StatusBadRequest)
 			return
 		}
+
+		// Skills are DAG roots governing many products. Cap depth at 1 so the
+		// graph shows only direct product children — not the entire sub-tree
+		// (which would be hundreds of manifests and tasks and unreadable).
 		depth := 10
+		if rootKind == relationships.KindSkill {
+			depth = 1
+		}
 		if v := r.URL.Query().Get("depth"); v != "" {
 			if d, err := strconv.Atoi(v); err == nil && d > 0 {
 				depth = d
@@ -48,22 +55,26 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 		}
 
 		// Bucket node IDs by kind for batched title/status lookup.
+		skillIDs := []string{}
 		productIDs := []string{}
 		manifestIDs := []string{}
 		taskIDs := []string{}
-		for _, w := range rows {
-			switch w.Kind {
+		otherIDs := []string{}
+		for _, row := range rows {
+			switch row.Kind {
+			case relationships.KindSkill:
+				skillIDs = append(skillIDs, row.ID)
 			case relationships.KindProduct:
-				productIDs = append(productIDs, w.ID)
+				productIDs = append(productIDs, row.ID)
 			case relationships.KindManifest:
-				manifestIDs = append(manifestIDs, w.ID)
+				manifestIDs = append(manifestIDs, row.ID)
 			case relationships.KindTask:
-				taskIDs = append(taskIDs, w.ID)
+				taskIDs = append(taskIDs, row.ID)
+			default:
+				otherIDs = append(otherIDs, row.ID)
 			}
 		}
 
-		// Resolve title + status per entity. Loops are fine — node count
-		// is bounded by walk depth × fan-out (typical: < 200 entities).
 		type nodeOut struct {
 			ID     string `json:"id"`
 			Kind   string `json:"kind"`
@@ -71,6 +82,44 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			Status string `json:"status"`
 		}
 		nodes := make([]nodeOut, 0, len(rows))
+
+		// For products: walk UP one hop to find governing skill and prepend it
+		// so the product DAG shows: skill → product → manifests → tasks.
+		if rootKind == relationships.KindProduct && n.Relationships != nil {
+			parentEdges, _ := n.Relationships.ListIncoming(r.Context(), rootID, relationships.EdgeOwns)
+			for _, edge := range parentEdges {
+				if edge.SrcKind == relationships.KindSkill {
+					if skill, _ := n.Entities.Get(edge.SrcID); skill != nil {
+						nodes = append(nodes, nodeOut{ID: skill.EntityUID, Kind: relationships.KindSkill, Title: skill.Title, Status: skill.Status})
+						// Add the skill→product edge to the edge list below.
+						skillIDs = append(skillIDs, edge.SrcID)
+						// Inject a synthetic walk row so the edge is emitted.
+						rows = append(rows, relationships.WalkRow{
+							ID: rootID, Kind: rootKind,
+							ViaSrc: edge.SrcID, ViaKind: relationships.EdgeOwns, Depth: 0,
+						})
+					}
+					break // one governing skill per product
+				}
+			}
+		}
+
+		// Resolve title + status per entity.
+		for _, id := range skillIDs {
+			if e, _ := n.Entities.Get(id); e != nil {
+				// Avoid duplicates — skill may already be added above.
+				dup := false
+				for _, existing := range nodes {
+					if existing.ID == e.EntityUID {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindSkill, Title: e.Title, Status: e.Status})
+				}
+			}
+		}
 		for _, id := range productIDs {
 			if e, _ := n.Entities.Get(id); e != nil {
 				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindProduct, Title: e.Title, Status: e.Status})
@@ -86,9 +135,12 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: relationships.KindTask, Title: e.Title, Status: e.Status})
 			}
 		}
+		for _, id := range otherIDs {
+			if e, _ := n.Entities.Get(id); e != nil {
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: e.Type, Title: e.Title, Status: e.Status})
+			}
+		}
 
-		// Edges: every WalkRow except the root carries the edge that
-		// brought us there (ViaSrc → ID, kind = ViaKind).
 		type edgeOut struct {
 			ID     string `json:"id"`
 			Source string `json:"source"`
@@ -97,16 +149,16 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 		}
 		edges := make([]edgeOut, 0, len(rows))
 		seen := make(map[string]bool)
-		for _, w := range rows {
-			if w.ViaSrc == "" {
+		for _, row := range rows {
+			if row.ViaSrc == "" {
 				continue
 			}
-			id := w.ViaSrc + "->" + w.ID + ":" + w.ViaKind
+			id := row.ViaSrc + "->" + row.ID + ":" + row.ViaKind
 			if seen[id] {
 				continue
 			}
 			seen[id] = true
-			edges = append(edges, edgeOut{ID: id, Source: w.ViaSrc, Target: w.ID, Kind: w.ViaKind})
+			edges = append(edges, edgeOut{ID: id, Source: row.ViaSrc, Target: row.ID, Kind: row.ViaKind})
 		}
 
 		writeJSON(w, map[string]any{"nodes": nodes, "edges": edges})
