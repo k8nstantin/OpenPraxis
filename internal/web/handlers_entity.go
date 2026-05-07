@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -81,24 +82,28 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 		// Wire the owns edge from parent to the newly created entity.
 		if n.Relationships != nil {
 			if req.ProjectID != "" && req.Type == "manifest" {
-				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+				if err := n.Relationships.Create(r.Context(), relationships.Edge{
 					SrcKind:   relationships.KindProduct,
 					SrcID:     req.ProjectID,
 					DstKind:   relationships.KindManifest,
 					DstID:     e.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
-				})
+				}); err != nil {
+					slog.Error("entity create: wire owns edge failed", "src", req.ProjectID, "dst", e.EntityUID, "err", err)
+				}
 			}
 			if req.ManifestID != "" && req.Type == "task" {
-				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+				if err := n.Relationships.Create(r.Context(), relationships.Edge{
 					SrcKind:   relationships.KindManifest,
 					SrcID:     req.ManifestID,
 					DstKind:   relationships.KindTask,
 					DstID:     e.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
-				})
+				}); err != nil {
+					slog.Error("entity create: wire owns edge failed", "src", req.ManifestID, "dst", e.EntityUID, "err", err)
+				}
 			}
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -180,43 +185,69 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 		if req.ProjectID != nil && n.Relationships != nil {
 			newProjectID := *req.ProjectID
 			// Remove old owns edge(s) pointing to this manifest from any product.
-			incoming, _ := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
+			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
+			if err != nil {
+				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
+				http.Error(w, "failed to list relationships", 500)
+				return
+			}
 			for _, e := range incoming {
 				if e.SrcKind == relationships.KindProduct {
-					_ = n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent")
+					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+						http.Error(w, "failed to remove old relationship", 500)
+						return
+					}
 				}
 			}
 			// Add new owns edge if non-empty project_id.
 			if newProjectID != "" {
-				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+				if err := n.Relationships.Create(r.Context(), relationships.Edge{
 					SrcKind:   relationships.KindProduct,
 					SrcID:     newProjectID,
 					DstKind:   relationships.KindManifest,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
-				})
+				}); err != nil {
+					slog.Error("re-parent: create new edge failed", "src", newProjectID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to create relationship", 500)
+					return
+				}
 			}
 		}
 
 		// Handle manifest_id (task → manifest ownership edge).
 		if req.ManifestID != nil && n.Relationships != nil {
 			newManifestID := *req.ManifestID
-			incoming, _ := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
+			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
+			if err != nil {
+				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
+				http.Error(w, "failed to list relationships", 500)
+				return
+			}
 			for _, e := range incoming {
 				if e.SrcKind == relationships.KindManifest {
-					_ = n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent")
+					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+						http.Error(w, "failed to remove old relationship", 500)
+						return
+					}
 				}
 			}
 			if newManifestID != "" {
-				_ = n.Relationships.Create(r.Context(), relationships.Edge{
+				if err := n.Relationships.Create(r.Context(), relationships.Edge{
 					SrcKind:   relationships.KindManifest,
 					SrcID:     newManifestID,
 					DstKind:   relationships.KindTask,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
-				})
+				}); err != nil {
+					slog.Error("re-parent: create new edge failed", "src", newManifestID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to create relationship", 500)
+					return
+				}
 			}
 		}
 
@@ -224,7 +255,11 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		updated, _ := n.Entities.Get(existing.EntityUID)
+		updated, err := n.Entities.Get(existing.EntityUID)
+		if err != nil || updated == nil {
+			http.Error(w, "entity not found after update", 500)
+			return
+		}
 		writeJSON(w, updated)
 	}
 }
