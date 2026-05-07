@@ -212,9 +212,11 @@ var serveCmd = &cobra.Command{
 
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
-			// When a task completes, re-evaluate the owning manifest so the
-			// next depends_on-unblocked task fires automatically.
-			if event == "task_completed" {
+			// When a task completes successfully, re-evaluate the owning manifest
+			// so the next depends_on-unblocked task fires automatically.
+			// Only advance on status=completed — a failed or cancelled task must
+			// not re-trigger the chain or the manifest re-dispatches T1 in a loop.
+			if event == "task_completed" && data["status"] == "completed" {
 				taskID := data["task_id"]
 				if taskID != "" && n.Relationships != nil && dispatchChainFn != nil {
 					edges, _ := n.Relationships.ListIncoming(ctx, taskID, relationships.EdgeOwns)
