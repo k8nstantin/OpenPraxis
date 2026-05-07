@@ -925,6 +925,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 											r.onEvent("task_turn_tool", map[string]string{
 												"task_id":   t.ID,
 												"tool_name": toolName,
+												"tool_id":   toolID,
 											})
 										}
 									}
