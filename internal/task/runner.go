@@ -41,6 +41,9 @@ type RunningTask struct {
 	// Model is the model id reported by the first assistant event — used to
 	// pick a pricing table and for calibration after the run.
 	Model string `json:"model"`
+	// mu protects fields written by the Execute goroutine and read by
+	// concurrent HTTP handlers: usageByMessage and Actions.
+	mu             sync.RWMutex
 	// usageByMessage tracks the last-seen usage per message id so we can
 	// dedupe the repeated assistant events Claude Code emits while a single
 	// logical message streams. Not serialized; live-estimate only.
@@ -298,12 +301,16 @@ func (r *Runner) IsRunning(taskID string) bool {
 // of waiting for the next 5s execution_log sample. Returns (0,false) when the
 // task is not currently in r.running.
 func (r *Runner) LiveTurnCount(taskID string) (int, bool) {
+	// Two-level lock: r.mu guards r.running (the map of RunningTasks),
+	// rt.mu guards fields written by the Execute goroutine (usageByMessage, Actions).
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	rt, ok := r.running[taskID]
+	r.mu.RUnlock()
 	if !ok {
 		return 0, false
 	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
 	return len(rt.usageByMessage), true
 }
 
@@ -842,7 +849,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// same 5s cadence — powers the Run Stats 5-aligned sparklines.
 		rtRef := rt
 		r.hostSampler.Attach(t.ID, func() (float64, int, int) {
-			return 0, len(rtRef.usageByMessage), rtRef.Actions
+			rtRef.mu.RLock()
+			turns := len(rtRef.usageByMessage)
+			actions := rtRef.Actions
+			rtRef.mu.RUnlock()
+			return 0, turns, actions
 		})
 	}
 
@@ -892,16 +903,22 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 					// assistant message id as it streams chunks, so dedupe on
 					// message.id via the existing usageByMessage map. Firing on
 					// every assistant line would overcount vs. result.num_turns.
+					// rt.mu guards usageByMessage — held only for the map op,
+					// released before calling onEvent to avoid lock inversion.
 					if msg, ok := event["message"].(map[string]any); ok {
 						if msgID, _ := msg["id"].(string); msgID != "" {
-							if _, seen := rt.usageByMessage[msgID]; !seen {
+							rt.mu.Lock()
+							_, seen := rt.usageByMessage[msgID]
+							if !seen {
 								rt.usageByMessage[msgID] = Usage{}
-								if r.onEvent != nil {
-									r.onEvent("task_turn_started", map[string]string{
-										"task_id": t.ID,
-										"turn":    strconv.Itoa(len(rt.usageByMessage)),
-									})
-								}
+							}
+							turnCount := len(rt.usageByMessage)
+							rt.mu.Unlock()
+							if !seen && r.onEvent != nil {
+								r.onEvent("task_turn_started", map[string]string{
+									"task_id": t.ID,
+									"turn":    strconv.Itoa(turnCount),
+								})
 							}
 						}
 					}
@@ -912,7 +929,9 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 							for _, block := range content {
 								if bm, ok := block.(map[string]any); ok {
 									if bm["type"] == "tool_use" {
+										rt.mu.Lock()
 										rt.Actions++
+										rt.mu.Unlock()
 										toolName, _ := bm["name"].(string)
 										toolID, _ := bm["id"].(string)
 										toolInput := marshalJSON(bm["input"])
@@ -1002,8 +1021,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 			// Broadcast progress
 			if rt.Lines%5 == 0 && r.onEvent != nil {
+				rt.mu.RLock()
+				actions := rt.Actions
+				rt.mu.RUnlock()
 				r.onEvent("task_progress", map[string]string{
-					"task_id": t.ID, "actions": fmt.Sprintf("%d", rt.Actions),
+					"task_id": t.ID, "actions": fmt.Sprintf("%d", actions),
 				})
 			}
 
