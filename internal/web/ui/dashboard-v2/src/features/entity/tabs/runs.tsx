@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, type EntityKind } from '@/lib/queries/entity'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -42,6 +43,7 @@ interface RunsTabProps {
 export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsTabProps) {
   const runs = useEntityRuns(kind, entityId)
   const live = useLiveRuns()
+  const [selectedRunUid, setSelectedRunUid] = useState<string | null>(null)
 
   const liveRun = live.data?.find(r => r.entity_uid === entityId && r.entity_uid !== 'stdio')
 
@@ -113,10 +115,11 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
 
           {/* Historical runs */}
           {history.map(run => (
+            <>
             <tr
               key={run.run_uid}
-              className='cursor-pointer border-b transition-colors hover:bg-white/5'
-              onClick={() => onSelectHistory?.(run.run_uid)}
+              className={`cursor-pointer border-b transition-colors hover:bg-white/5 ${selectedRunUid === run.run_uid ? 'bg-white/5' : ''}`}
+              onClick={() => setSelectedRunUid(selectedRunUid === run.run_uid ? null : run.run_uid)}
             >
               <td className={tdCls}>
                 <span className={
@@ -134,6 +137,16 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
               <td className={`${tdCls} text-[10px] opacity-50`}>{(run as any).model || '—'}</td>
               <td className={`${tdCls} text-[10px] opacity-50`}>{fmtTime(run.created_at)}</td>
             </tr>
+            {/* Expanded analytics section — T3 adds Turn Timeline, T4 adds Tools/Heatmap, T5 adds Cost/Turn */}
+            {selectedRunUid === run.run_uid && (
+              <tr key={`${run.run_uid}-detail`}>
+                <td colSpan={7} className='border-b bg-white/3 px-4 py-3'>
+                  {/* TURN_ANALYTICS_PLACEHOLDER — agents add charts here */}
+                  <div className='text-muted-foreground text-xs'>Turn analytics loading…</div>
+                </td>
+              </tr>
+            )}
+            </>
           ))}
 
           {history.length === 0 && !liveRun && (
