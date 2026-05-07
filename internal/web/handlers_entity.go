@@ -7,6 +7,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
+	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 
@@ -251,6 +252,7 @@ func apiExecutionLog(n *node.Node) http.HandlerFunc {
 
 func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 		id := mux.Vars(r)["id"]
 		limit := 50
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -258,12 +260,89 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 				limit = v
 			}
 		}
-		rows, err := n.ExecutionLog.ListByEntity(r.Context(), id, limit)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
+
+		// For task entities return the flat atomic run list (existing behaviour).
+		// For manifests and products walk the DAG and return a hierarchical shape:
+		//   manifest → [{task_id, task_title, runs:[...ExecutionRow]}]
+		//   product  → [{manifest_id, manifest_title, tasks:[{task_id, task_title, runs:[...]}]}]
+		e, _ := n.Entities.Get(id)
+		if e == nil || e.Type == "task" || n.Relationships == nil {
+			rows, err := n.ExecutionLog.ListByEntity(ctx, id, limit)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			writeJSON(w, rows)
 			return
 		}
-		writeJSON(w, rows)
+
+		type taskRuns struct {
+			TaskID    string      `json:"task_id"`
+			TaskTitle string      `json:"task_title"`
+			Runs      interface{} `json:"runs"`
+		}
+		type manifestGroup struct {
+			ManifestID    string     `json:"manifest_id"`
+			ManifestTitle string     `json:"manifest_title"`
+			Tasks         []taskRuns `json:"tasks"`
+		}
+
+		// Helper: collect runs for a task
+		taskRunsFor := func(taskID, taskTitle string) taskRuns {
+			rows, _ := n.ExecutionLog.ListByEntity(ctx, taskID, limit)
+			if rows == nil {
+				rows = []execution.Row{}
+			}
+			return taskRuns{TaskID: taskID, TaskTitle: taskTitle, Runs: rows}
+		}
+
+		if e.Type == "manifest" {
+			// manifest → tasks
+			edges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
+			result := []taskRuns{}
+			for _, edge := range edges {
+				if edge.DstKind == "task" {
+					te, _ := n.Entities.Get(edge.DstID)
+					title := edge.DstID
+					if te != nil {
+						title = te.Title
+					}
+					result = append(result, taskRunsFor(edge.DstID, title))
+				}
+			}
+			writeJSON(w, result)
+			return
+		}
+
+		// product → manifests → tasks
+		manifEdges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
+		groups := []manifestGroup{}
+		for _, me := range manifEdges {
+			if me.DstKind != "manifest" {
+				continue
+			}
+			manEnt, _ := n.Entities.Get(me.DstID)
+			manTitle := me.DstID
+			if manEnt != nil {
+				manTitle = manEnt.Title
+			}
+			taskEdges, _ := n.Relationships.ListOutgoing(ctx, me.DstID, "owns")
+			tasks := []taskRuns{}
+			for _, te := range taskEdges {
+				if te.DstKind == "task" {
+					tEnt, _ := n.Entities.Get(te.DstID)
+					tTitle := te.DstID
+					if tEnt != nil {
+						tTitle = tEnt.Title
+					}
+					tasks = append(tasks, taskRunsFor(te.DstID, tTitle))
+				}
+			}
+			groups = append(groups, manifestGroup{
+				ManifestID: me.DstID, ManifestTitle: manTitle, Tasks: tasks,
+			})
+		}
+		writeJSON(w, groups)
 	}
 }
 

@@ -1,20 +1,15 @@
 import { useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, type EntityKind } from '@/lib/queries/entity'
-import { Skeleton } from '@/components/ui/skeleton'
+import type { ExecutionRow } from '@/lib/types'
 import { TurnAnalyticsBlock } from '@/features/entity/turn-charts'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface LiveRun {
-  run_uid: string
-  entity_uid: string
-  entity_title: string
-  elapsed_sec: number
-  turns: number
-  actions: number
-  cost_usd: number
-  model: string
+  run_uid: string; entity_uid: string; entity_title: string
+  elapsed_sec: number; turns: number; actions: number
+  cost_usd: number; model: string
 }
-
 function useLiveRuns() {
   return useQuery({
     queryKey: ['execution-live'],
@@ -23,22 +18,80 @@ function useLiveRuns() {
   })
 }
 
+interface TaskRunGroup { task_id: string; task_title: string; runs: ExecutionRow[] }
+interface ManifestGroup { manifest_id: string; manifest_title: string; tasks: TaskRunGroup[] }
+
 function fmtCost(usd: number) {
   if (!usd) return '—'
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(3)}`
 }
-
 function fmtTime(v: string | number) {
   const ms = typeof v === 'number' ? v * 1000 : Date.parse(v)
-  if (!isFinite(ms)) return '—'
-  return new Date(ms).toLocaleString()
+  return isFinite(ms) ? new Date(ms).toLocaleString() : '—'
+}
+
+const thCls = 'text-muted-foreground px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide'
+const tdCls = 'px-3 py-2 text-xs'
+
+function RunRow({ run, entityId, selectedRunUid, onSelect, onSelectHistory }: {
+  run: ExecutionRow; entityId: string; selectedRunUid: string | null
+  onSelect: (uid: string | null) => void; onSelectHistory?: (uid: string) => void
+}) {
+  const expanded = selectedRunUid === run.run_uid
+  return (
+    <Fragment key={run.run_uid}>
+      <tr
+        className={`cursor-pointer border-b transition-colors hover:bg-white/5 ${expanded ? 'bg-white/5' : ''}`}
+        onClick={() => { onSelect(expanded ? null : run.run_uid); onSelectHistory?.(run.run_uid) }}
+      >
+        <td className={tdCls}><span className={
+          run.event === 'completed' ? 'text-emerald-400' :
+          run.event === 'failed' ? 'text-rose-400' : 'text-amber-400'
+        }>{run.event}</span></td>
+        <td className={`${tdCls} font-mono text-[10px] opacity-50`}>{run.run_uid.slice(0,12)}</td>
+        <td className={tdCls}>{run.turns || '—'}</td>
+        <td className={tdCls}>{run.actions || '—'}</td>
+        <td className={tdCls}>{fmtCost(run.cost_usd)}</td>
+        <td className={`${tdCls} text-[10px] opacity-50`}>{run.model || '—'}</td>
+        <td className={`${tdCls} text-[10px] opacity-50`}>{fmtTime(run.created_at)}</td>
+      </tr>
+      {expanded && (
+        <tr><td colSpan={7} className='border-b bg-white/3 px-4 py-3'>
+          <TurnAnalyticsBlock entityId={entityId} runUid={run.run_uid} />
+        </td></tr>
+      )}
+    </Fragment>
+  )
+}
+
+function RunTable({ runs, entityId, selectedRunUid, onSelect, onSelectHistory }: {
+  runs: ExecutionRow[]; entityId: string; selectedRunUid: string | null
+  onSelect: (uid: string | null) => void; onSelectHistory?: (uid: string) => void
+}) {
+  const history = runs.filter(r => ['completed','failed','started'].includes(r.event))
+  if (history.length === 0) return <div className='text-muted-foreground px-3 py-2 text-xs'>No runs.</div>
+  return (
+    <table className='w-full'>
+      <thead><tr className='border-b'>
+        <th className={thCls}>Status</th><th className={thCls}>Run</th>
+        <th className={thCls}>Turns</th><th className={thCls}>Actions</th>
+        <th className={thCls}>Cost</th><th className={thCls}>Model</th>
+        <th className={thCls}>Time</th>
+      </tr></thead>
+      <tbody>
+        {history.map(run => (
+          <RunRow key={run.run_uid} run={run} entityId={entityId}
+            selectedRunUid={selectedRunUid} onSelect={onSelect} onSelectHistory={onSelectHistory} />
+        ))}
+      </tbody>
+    </table>
+  )
 }
 
 interface RunsTabProps {
-  kind: EntityKind
-  entityId: string
-  onSelectLive?: (runUid: string) => void
-  onSelectHistory?: (runUid: string) => void
+  kind: EntityKind; entityId: string
+  onSelectLive?: (uid: string) => void
+  onSelectHistory?: (uid: string) => void
 }
 
 export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsTabProps) {
@@ -48,118 +101,64 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
 
   const liveRun = live.data?.find(r => r.entity_uid === entityId && r.entity_uid !== 'stdio')
 
-  // Deduplicate historical runs — one row per run_uid, prefer terminal event
-  const history = (() => {
-    if (!runs.data) return []
-    const map = new Map<string, typeof runs.data[0]>()
-    for (const row of runs.data) {
-      if (!['completed', 'failed', 'started'].includes(row.event)) continue
-      const existing = map.get(row.run_uid)
-      if (!existing || (row.event !== 'started' && existing.event === 'started')) {
-        map.set(row.run_uid, row)
-      }
-    }
-    return [...map.values()]
-      .filter(r => !liveRun || r.run_uid !== liveRun.run_uid)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  })()
+  if (runs.isLoading) return <div className='space-y-1 p-2'><Skeleton className='h-8 w-full' /><Skeleton className='h-8 w-full' /></div>
+  if (runs.isError) return <div className='p-4 text-sm text-rose-400'>Failed to load runs</div>
 
-  if (runs.isLoading) return (
-    <div className='space-y-1 p-2'>
-      <Skeleton className='h-8 w-full' />
-      <Skeleton className='h-8 w-full' />
-      <Skeleton className='h-8 w-full' />
-    </div>
-  )
-
-  const thCls = 'text-muted-foreground px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide'
-  const tdCls = 'px-3 py-2 text-xs'
+  const data = runs.data as any
 
   return (
-    <div className='overflow-x-auto'>
-      <table className='w-full'>
-        <thead>
-          <tr className='border-b'>
-            <th className={thCls}>Status</th>
-            <th className={thCls}>Run</th>
-            <th className={thCls}>Turns</th>
-            <th className={thCls}>Actions</th>
-            <th className={thCls}>Cost</th>
-            <th className={thCls}>Model</th>
-            <th className={thCls}>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* Live run — always first, highlighted */}
-          {liveRun && (
-            <tr
-              className='cursor-pointer border-b border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/20'
-              onClick={() => onSelectLive?.(liveRun.run_uid)}
-            >
-              <td className={tdCls}>
-                <span className='flex items-center gap-1.5'>
-                  <span className='relative flex h-2 w-2'>
-                    <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
-                    <span className='relative inline-flex h-2 w-2 rounded-full bg-emerald-500' />
-                  </span>
-                  <span className='font-medium text-emerald-400'>running</span>
-                </span>
-              </td>
-              <td className={`${tdCls} font-mono text-[10px] opacity-60`}>{liveRun.run_uid.slice(0, 12)}</td>
-              <td className={`${tdCls} font-bold text-emerald-400`}>{liveRun.turns}</td>
-              <td className={`${tdCls} text-blue-400`}>{liveRun.actions}</td>
-              <td className={tdCls}>{fmtCost(liveRun.cost_usd)}</td>
-              <td className={`${tdCls} text-[10px] opacity-60`}>{liveRun.model || '—'}</td>
-              <td className={`${tdCls} text-[10px] opacity-50`}>{liveRun.elapsed_sec}s ago</td>
-            </tr>
-          )}
+    <div className='space-y-4 overflow-x-auto'>
+      {/* Live run */}
+      {liveRun && (
+        <div className='flex cursor-pointer items-center gap-3 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 hover:bg-emerald-500/20'
+          onClick={() => onSelectLive?.(liveRun.run_uid)}>
+          <span className='relative flex h-2.5 w-2.5'>
+            <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
+            <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
+          </span>
+          <span className='text-sm font-medium text-emerald-400'>Running</span>
+          <span className='text-muted-foreground text-xs'>{liveRun.elapsed_sec}s</span>
+          <span className='font-bold text-emerald-400'>{liveRun.turns} turns</span>
+          <span className='text-blue-400'>{liveRun.actions} actions</span>
+          {liveRun.model && <span className='text-muted-foreground text-[10px]'>{liveRun.model}</span>}
+          <span className='text-muted-foreground ml-auto font-mono text-[10px]'>{liveRun.run_uid.slice(0,12)}</span>
+        </div>
+      )}
 
-          {/* Historical runs */}
-          {history.map(run => (
-            <Fragment key={run.run_uid}>
-            <tr
-              className={`cursor-pointer border-b transition-colors hover:bg-white/5 ${selectedRunUid === run.run_uid ? 'bg-white/5' : ''}`}
-              onClick={() => {
-                setSelectedRunUid(selectedRunUid === run.run_uid ? null : run.run_uid)
-                onSelectHistory?.(run.run_uid)
-              }}
-            >
-              <td className={tdCls}>
-                <span className={
-                  run.event === 'completed' ? 'text-emerald-400' :
-                  run.event === 'failed'    ? 'text-rose-400' :
-                  'text-amber-400'
-                }>
-                  {run.event}
-                </span>
-              </td>
-              <td className={`${tdCls} font-mono text-[10px] opacity-50`}>{run.run_uid.slice(0, 12)}</td>
-              <td className={tdCls}>{run.turns || '—'}</td>
-              <td className={tdCls}>{run.actions || '—'}</td>
-              <td className={tdCls}>{fmtCost(run.cost_usd)}</td>
-              <td className={`${tdCls} text-[10px] opacity-50`}>{(run as any).model || '—'}</td>
-              <td className={`${tdCls} text-[10px] opacity-50`}>{fmtTime(run.created_at)}</td>
-            </tr>
-            {/* Expanded analytics section — T3 adds Turn Timeline, T4 adds Tools/Heatmap, T5 adds Cost/Turn */}
-            {selectedRunUid === run.run_uid && (
-              <tr key={`${run.run_uid}-detail`}>
-                <td colSpan={7} className='border-b bg-white/3 px-4 py-3'>
-                  <TurnAnalyticsBlock entityId={entityId} runUid={run.run_uid} />
-                </td>
-              </tr>
-            )}
-            </Fragment>
-          ))}
+      {/* Task / skill / idea — flat atomic run list */}
+      {(kind === 'task' || kind === 'skill' || kind === 'idea') && Array.isArray(data) && (
+        <RunTable runs={data as ExecutionRow[]} entityId={entityId}
+          selectedRunUid={selectedRunUid} onSelect={setSelectedRunUid} onSelectHistory={onSelectHistory} />
+      )}
 
-          {history.length === 0 && !liveRun && (
-            <tr>
-              <td colSpan={7} className='text-muted-foreground px-3 py-6 text-center text-sm'>
-                No runs yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      {/* Manifest — grouped by task */}
+      {kind === 'manifest' && Array.isArray(data) && (data as TaskRunGroup[]).map(tg => (
+        <div key={tg.task_id}>
+          <div className='text-muted-foreground mb-1 px-1 text-[11px] font-medium uppercase tracking-wide'>{tg.task_title}</div>
+          <RunTable runs={tg.runs} entityId={tg.task_id}
+            selectedRunUid={selectedRunUid} onSelect={setSelectedRunUid} onSelectHistory={onSelectHistory} />
+        </div>
+      ))}
+
+      {/* Product — grouped by manifest → task */}
+      {kind === 'product' && Array.isArray(data) && (data as ManifestGroup[]).map(mg => (
+        <div key={mg.manifest_id} className='rounded border border-white/10'>
+          <div className='border-b border-white/10 px-3 py-2 text-xs font-semibold'>{mg.manifest_title}</div>
+          <div className='space-y-3 p-2'>
+            {mg.tasks.map(tg => (
+              <div key={tg.task_id}>
+                <div className='text-muted-foreground mb-1 px-1 text-[11px] uppercase tracking-wide'>{tg.task_title}</div>
+                <RunTable runs={tg.runs} entityId={tg.task_id}
+                  selectedRunUid={selectedRunUid} onSelect={setSelectedRunUid} onSelectHistory={onSelectHistory} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {!liveRun && (!data || (Array.isArray(data) && data.length === 0)) && (
+        <div className='text-muted-foreground p-6 text-center text-sm'>No runs yet.</div>
+      )}
     </div>
   )
 }
