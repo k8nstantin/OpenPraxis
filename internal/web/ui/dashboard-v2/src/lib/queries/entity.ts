@@ -291,22 +291,16 @@ export function useExecutionRun(runUid: string | undefined) {
 }
 
 // Live text chunks for a run's output stream.
-export function useExecutionOutput(runUid: string | undefined) {
+// Pass isLive=false for completed runs to disable polling entirely.
+export function useExecutionOutput(runUid: string | undefined, isLive = true) {
   return useQuery({
     queryKey: entityKeys.executionOutput(runUid ?? ''),
     queryFn: () =>
       fetchJSON<OutputChunk[]>(`/api/execution/${runUid}/output`),
     enabled: !!runUid,
-    refetchInterval: (q) => {
-      // Stop polling if we have a completed/failed event for this run.
-      const rows = q.state.data ?? []
-      const done = rows.some(
-        (r) => r.event === 'completed' || r.event === 'failed'
-      )
-      return done ? false : 750
-    },
+    refetchInterval: isLive ? 750 : false,
     refetchIntervalInBackground: false,
-    staleTime: 0,
+    staleTime: isLive ? 0 : 60_000,
   })
 }
 

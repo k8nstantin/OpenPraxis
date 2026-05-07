@@ -14,7 +14,8 @@ function useLiveRuns() {
   return useQuery({
     queryKey: ['execution-live'],
     queryFn: (): Promise<LiveRun[]> => fetch('/api/execution/live').then(r => r.json()),
-    refetchInterval: 4000,
+    refetchInterval: (q) => ((q.state.data?.length ?? 0) > 0 ? 4000 : 10000),
+    refetchIntervalInBackground: false,
   })
 }
 
