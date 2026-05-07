@@ -536,6 +536,11 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	// truth: the relationships SCD-2 table; Walk traversal handles the
 	// recursive descent.
 	api.HandleFunc("/relationships/graph", apiRelationshipsGraph(n)).Methods("GET")
+	// Agent DAG traversal — walk UP or DOWN the relationships table.
+	// GET /api/relationships/incoming?dst_id=...&kind=owns  → find parent of an entity
+	// GET /api/relationships/outgoing?src_id=...&kind=owns  → find children of an entity
+	api.HandleFunc("/relationships/incoming", apiRelationshipsIncoming(n)).Methods("GET")
+	api.HandleFunc("/relationships/outgoing", apiRelationshipsOutgoing(n)).Methods("GET")
 	api.HandleFunc("/visceral/by-peer", apiVisceralByPeer(n)).Methods("GET")
 	api.HandleFunc("/visceral", apiVisceralList(n)).Methods("GET")
 	api.HandleFunc("/visceral/confirmations", apiVisceralConfirmations(n)).Methods("GET")
