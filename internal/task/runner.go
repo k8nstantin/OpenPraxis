@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -871,6 +872,24 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				eventType, _ := event["type"].(string)
 
 				if eventType == "assistant" {
+					// Detect a new turn boundary. Claude Code re-emits the same
+					// assistant message id as it streams chunks, so dedupe on
+					// message.id via the existing usageByMessage map. Firing on
+					// every assistant line would overcount vs. result.num_turns.
+					if msg, ok := event["message"].(map[string]any); ok {
+						if msgID, _ := msg["id"].(string); msgID != "" {
+							if _, seen := rt.usageByMessage[msgID]; !seen {
+								rt.usageByMessage[msgID] = Usage{}
+								if r.onEvent != nil {
+									r.onEvent("task_turn_started", map[string]string{
+										"task_id": t.ID,
+										"turn":    strconv.Itoa(len(rt.usageByMessage)),
+									})
+								}
+							}
+						}
+					}
+
 					// Extract tool_use blocks from assistant message
 					if msg, ok := event["message"].(map[string]any); ok {
 						if content, ok := msg["content"].([]any); ok {
@@ -902,6 +921,10 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 										if r.onEvent != nil {
 											r.onEvent("task_action", map[string]string{
 												"task_id": t.ID, "tool": toolName,
+											})
+											r.onEvent("task_turn_tool", map[string]string{
+												"task_id":   t.ID,
+												"tool_name": toolName,
 											})
 										}
 									}
