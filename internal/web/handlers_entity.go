@@ -637,10 +637,14 @@ func buildHierarchy(r *http.Request, n *node.Node, entityID, kind string, depth 
 }
 
 // apiEntityActions returns the actions (tool calls) for an entity, newest first.
-// GET /api/entities/{id}/actions?limit=100
-// Used for live output polling during a run and historical action replay.
+// GET /api/entities/{id}/actions?limit=100&run_uid=<runUID>
+//
+// When run_uid is provided, actions are filtered to only those created after
+// the run's started_at timestamp — ensures live output shows only the current
+// run's tool calls, not historical ones from prior runs of the same task.
 func apiEntityActions(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 		id := mux.Vars(r)["id"]
 		limit := 100
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -648,6 +652,22 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 				limit = v
 			}
 		}
+
+		// If run_uid provided, filter to actions created at/after run start.
+		runUID := r.URL.Query().Get("run_uid")
+		var sinceTime string
+		if runUID != "" && n.ExecutionLog != nil {
+			rows, err := n.ExecutionLog.ListByRun(ctx, runUID)
+			if err == nil {
+				for _, row := range rows {
+					if row.Event == "started" {
+						sinceTime = row.CreatedAt
+						break
+					}
+				}
+			}
+		}
+
 		actions, err := n.Actions.ListByTask(id, limit)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -657,6 +677,18 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 			writeJSON(w, []any{})
 			return
 		}
+
+		// Filter by run start time when run_uid was specified.
+		if sinceTime != "" {
+			filtered := actions[:0]
+			for _, a := range actions {
+				if a.CreatedAt.Format("2006-01-02T15:04:05Z07:00") >= sinceTime {
+					filtered = append(filtered, a)
+				}
+			}
+			actions = filtered
+		}
+
 		writeJSON(w, actions)
 	}
 }
