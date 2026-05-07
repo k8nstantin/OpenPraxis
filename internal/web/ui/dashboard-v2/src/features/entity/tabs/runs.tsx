@@ -18,6 +18,49 @@ function useLiveRuns() {
   })
 }
 
+interface ActionRow {
+  id: string; task_id: string; tool_name: string
+  tool_input: string; tool_response: string; turn_number: number; created_at: string
+}
+
+// Live output: poll entity actions while run is active (every 3s), static otherwise
+function useEntityActions(entityId: string, isLive: boolean) {
+  return useQuery({
+    queryKey: ['entity-actions', entityId, isLive],
+    queryFn: (): Promise<ActionRow[]> =>
+      fetch(`/api/entities/${entityId}/actions?limit=200`).then(r => r.json()),
+    enabled: !!entityId,
+    refetchInterval: isLive ? 3000 : false,
+    staleTime: isLive ? 0 : 60_000,
+  })
+}
+
+function LiveOutput({ entityId }: { entityId: string }) {
+  const { data, isLoading } = useEntityActions(entityId, true)
+  if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
+  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
+  return (
+    <div className='max-h-96 overflow-y-auto font-mono text-xs'>
+      {[...data].reverse().map((a) => (
+        <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
+          <div className='flex items-center gap-2'>
+            <span className='text-blue-400 font-medium'>{a.tool_name}</span>
+            {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
+            <span className='text-muted-foreground ml-auto text-[10px]'>
+              {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
+            </span>
+          </div>
+          {a.tool_input && (
+            <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
+              {a.tool_input.slice(0, 120)}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 interface TaskRunGroup { task_id: string; task_title: string; runs: ExecutionRow[] }
 interface ManifestGroup { manifest_id: string; manifest_title: string; tasks: TaskRunGroup[] }
 
@@ -110,18 +153,24 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
     <div className='space-y-4 overflow-x-auto'>
       {/* Live run */}
       {liveRun && (
-        <div className='flex cursor-pointer items-center gap-3 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 hover:bg-emerald-500/20'
-          onClick={() => onSelectLive?.(liveRun.run_uid)}>
-          <span className='relative flex h-2.5 w-2.5'>
-            <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
-            <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
-          </span>
-          <span className='text-sm font-medium text-emerald-400'>Running</span>
-          <span className='text-muted-foreground text-xs'>{liveRun.elapsed_sec}s</span>
-          <span className='font-bold text-emerald-400'>{liveRun.turns} turns</span>
-          <span className='text-blue-400'>{liveRun.actions} actions</span>
-          {liveRun.model && <span className='text-muted-foreground text-[10px]'>{liveRun.model}</span>}
-          <span className='text-muted-foreground ml-auto font-mono text-[10px]'>{liveRun.run_uid.slice(0,12)}</span>
+        <div className='rounded border border-emerald-500/30 bg-emerald-500/5'>
+          {/* Header */}
+          <div className='flex items-center gap-3 px-3 py-2'>
+            <span className='relative flex h-2.5 w-2.5'>
+              <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
+              <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
+            </span>
+            <span className='text-sm font-medium text-emerald-400'>Running</span>
+            <span className='text-muted-foreground text-xs'>{liveRun.elapsed_sec}s</span>
+            <span className='font-bold text-emerald-400'>{liveRun.turns} turns</span>
+            <span className='text-blue-400'>{liveRun.actions} actions</span>
+            {liveRun.model && <span className='text-muted-foreground text-[10px]'>{liveRun.model}</span>}
+            <span className='text-muted-foreground ml-auto font-mono text-[10px]'>{liveRun.run_uid.slice(0,12)}</span>
+          </div>
+          {/* Live output — polls actions every 3s */}
+          <div className='border-t border-emerald-500/20'>
+            <LiveOutput entityId={liveRun.entity_uid} />
+          </div>
         </div>
       )}
 
