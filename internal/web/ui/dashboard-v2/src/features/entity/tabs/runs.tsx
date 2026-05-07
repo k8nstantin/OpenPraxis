@@ -2,6 +2,7 @@ import { useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, type EntityKind } from '@/lib/queries/entity'
 import { Skeleton } from '@/components/ui/skeleton'
+import { TurnAnalyticsBlock } from '@/features/entity/turn-charts'
 
 interface LiveRun {
   run_uid: string
@@ -143,8 +144,7 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
             {selectedRunUid === run.run_uid && (
               <tr key={`${run.run_uid}-detail`}>
                 <td colSpan={7} className='border-b bg-white/3 px-4 py-3'>
-                  {/* TURN_ANALYTICS_PLACEHOLDER — agents add charts here */}
-                  <div className='text-muted-foreground text-xs'>Turn analytics loading…</div>
+                  <TurnAnalyticsBlock entityId={entityId} runUid={run.run_uid} />
                 </td>
               </tr>
             )}

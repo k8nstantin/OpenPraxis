@@ -5,6 +5,7 @@ import { Main } from '@/components/layout/main'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
+import { useTurnActivity } from '@/lib/queries/turns'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -206,6 +207,7 @@ type ActivityRange = typeof ACTIVITY_RANGES[number]['days']
 interface ActivityRow {
   label: string
   turns: number; actions: number
+  totalTurns: number
   linesAdded: number; linesRemoved: number; files: number
   netRx: number; netTx: number
 }
@@ -218,11 +220,13 @@ function buildActivityRows(
   getFiles: (i: number) => number,
   getNetRx: (i: number) => number,
   getNetTx: (i: number) => number,
+  getTotalTurns: (i: number) => number = () => 0,
 ): ActivityRow[] {
   return efficiency.map((e, i) => ({
     label: labels[i],
     turns: +e.avg_turns.toFixed(0),
     actions: +e.avg_actions.toFixed(0),
+    totalTurns: getTotalTurns(i),
     linesAdded: getLinesAdded(i),
     linesRemoved: getLinesRemoved(i),
     files: getFiles(i),
@@ -234,9 +238,11 @@ function buildActivityRows(
 function ActivityChartInner({ rows }: { rows: ActivityRow[] }) {
   const labels = rows.map(r => r.label)
   // Single axis — turns and actions on the same scale
+  const hasTotalTurns = rows.some(r => r.totalTurns > 0)
   const series = [
     { name: 'turns',   data: rows.map(r => r.turns),   color: '#a78bfa' },
     { name: 'actions', data: rows.map(r => r.actions),  color: '#38bdf8' },
+    ...(hasTotalTurns ? [{ name: 'total turns', data: rows.map(r => r.totalTurns), color: '#fbbf24' }] : []),
   ]
   const axisMax = Math.max(1, ...series.flatMap(s => s.data))
 
@@ -270,6 +276,9 @@ export function ActivityChart({ defaultRange = 1 }: { defaultRange?: ActivityRan
     refetchInterval: 60_000, staleTime: 30_000,
   })
 
+  // Hourly turn-activity overlay (1d only)
+  const { data: turnActivity } = useTurnActivity(24)
+
   // Daily history data (2d+)
   const { data: hist } = useQuery<{
     efficiency: { day: string; avg_turns: number; avg_actions: number }[]
@@ -288,6 +297,7 @@ export function ActivityChart({ defaultRange = 1 }: { defaultRange?: ActivityRan
     const sys = charts.system ?? []
     const sysMap = new Map(sys.map(s => [s.hour, s]))
     const prodMap = new Map((charts.productivity ?? []).map(p => [p.hour, p]))
+    const turnMap = new Map((turnActivity ?? []).map(t => [t.hour, t.turns]))
     rows = buildActivityRows(
       charts.efficiency,
       charts.efficiency.map(d => hourLabel(d.hour)),
@@ -296,6 +306,7 @@ export function ActivityChart({ defaultRange = 1 }: { defaultRange?: ActivityRan
       i => prodMap.get(charts.efficiency[i].hour)?.files_changed ?? 0,
       i => sysMap.get(charts.efficiency[i].hour)?.avg_net_rx_mbps ?? 0,
       i => sysMap.get(charts.efficiency[i].hour)?.avg_net_tx_mbps ?? 0,
+      i => turnMap.get(charts.efficiency[i].hour) ?? 0,
     )
   } else if (range !== 1 && hist) {
     const sysMap = new Map((hist.system_daily ?? []).map(s => [s.day, s]))
