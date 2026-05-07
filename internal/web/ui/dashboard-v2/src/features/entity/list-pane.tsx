@@ -3,6 +3,7 @@ import { Plus, Search } from 'lucide-react'
 import {
   useEntityList,
   useCreateEntity,
+  useLiveRuns,
   type EntityKind,
 } from '@/lib/queries/entity'
 import type { Entity } from '@/lib/types'
@@ -37,6 +38,11 @@ export function EntityListPane({
 }) {
   const list = useEntityList(kind)
   const create = useCreateEntity(kind)
+  const { data: liveRuns } = useLiveRuns()
+  const runningIds = useMemo(
+    () => new Set((liveRuns ?? []).map((r) => r.entity_uid)),
+    [liveRuns]
+  )
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -158,11 +164,21 @@ export function EntityListPane({
                   selectedId === row.id && 'bg-accent'
                 )}
               >
+                {runningIds.has(row.id) ? (
+                  <span className='relative mt-0.5 flex h-2 w-2 shrink-0'>
+                    <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
+                    <span className='relative inline-flex h-2 w-2 rounded-full bg-emerald-500' />
+                  </span>
+                ) : (
+                  <span className={cn(
+                    'mt-0.5 h-2 w-2 shrink-0 rounded-full',
+                    STATUS_DOT[row.status] ?? 'bg-zinc-400'
+                  )} />
+                )}
                 <span className={cn(
-                  'mt-0.5 h-2 w-2 shrink-0 rounded-full',
-                  STATUS_DOT[row.status] ?? 'bg-zinc-400'
-                )} />
-                <span className='min-w-0 flex-1 truncate'>{row.title}</span>
+                  'min-w-0 flex-1 truncate',
+                  runningIds.has(row.id) && 'text-emerald-400 font-medium'
+                )}>{row.title}</span>
               </button>
             ))}
             {hasMore && (

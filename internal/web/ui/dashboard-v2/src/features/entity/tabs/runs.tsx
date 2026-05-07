@@ -1,22 +1,8 @@
 import { useState, Fragment } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useEntityRuns, type EntityKind } from '@/lib/queries/entity'
+import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
 import { TurnAnalyticsBlock } from '@/features/entity/turn-charts'
 import { Skeleton } from '@/components/ui/skeleton'
-
-interface LiveRun {
-  run_uid: string; entity_uid: string; entity_title: string
-  elapsed_sec: number; turns: number; actions: number
-  cost_usd: number; model: string
-}
-function useLiveRuns() {
-  return useQuery({
-    queryKey: ['execution-live'],
-    queryFn: (): Promise<LiveRun[]> => fetch('/api/execution/live').then(r => r.json()),
-    refetchInterval: 4000,
-  })
-}
 
 interface ActionRow {
   id: string; task_id: string; tool_name: string
