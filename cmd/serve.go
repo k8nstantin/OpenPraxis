@@ -15,6 +15,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
+	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	mcpserver "github.com/k8nstantin/OpenPraxis/internal/mcp"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
@@ -28,6 +29,25 @@ import (
 )
 
 var noBrowser bool
+
+// deriveBranchName converts an entity title to a valid git branch suffix.
+// "Turn-Level Agent Events" → "openpraxis/turn-level-agent-events"
+func deriveBranchName(prefix, title string) string {
+	s := strings.ToLower(title)
+	s = strings.ReplaceAll(s, " ", "-")
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	slug := b.String()
+	for strings.Contains(slug, "--") {
+		slug = strings.ReplaceAll(slug, "--", "-")
+	}
+	slug = strings.Trim(slug, "-")
+	return prefix + "/" + slug
+}
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -302,6 +322,70 @@ var serveCmd = &cobra.Command{
 			// fall back to the default execution protocol.
 			skillID, skillBody := skillPromptFor(ctx, entityID)
 			prompt := strings.ReplaceAll(skillBody, "{ENTITY_UUID}", entityID)
+
+			// Resolve branch_strategy knob — task (default), manifest, or product.
+			// The settings resolver walks task → manifest → product → system so
+			// setting it at any scope level cascades down to all children.
+			if n.SettingsResolver != nil {
+				scope := settings.Scope{TaskID: entityID}
+				if res, err := n.SettingsResolver.Resolve(ctx, scope, "branch_strategy"); err == nil {
+					strategy, _ := res.Value.(string)
+					if strategy == "manifest" || strategy == "product" {
+						// Derive the shared branch name from the owning entity's title.
+						sharedBranch := ""
+						branchPrefix := "openpraxis"
+						if bpRes, err2 := n.SettingsResolver.Resolve(ctx, scope, "branch_prefix"); err2 == nil {
+							if bp, _ := bpRes.Value.(string); bp != "" {
+								branchPrefix = bp
+							}
+						}
+						if n.Relationships != nil {
+							// Walk up to find the entity whose title drives the branch name.
+							lookupID := entityID
+							if strategy == "manifest" {
+								if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
+									for _, edge := range edges {
+										if edge.SrcKind == "manifest" {
+											if me, _ := n.Entities.Get(edge.SrcID); me != nil {
+												sharedBranch = deriveBranchName(branchPrefix, me.Title)
+											}
+											break
+										}
+									}
+								}
+							} else { // product — walk task → manifest → product
+								if manifEdges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(manifEdges) > 0 {
+									for _, me := range manifEdges {
+										if me.SrcKind == "manifest" {
+											if prodEdges, _ := n.Relationships.ListIncoming(ctx, me.SrcID, "owns"); len(prodEdges) > 0 {
+												for _, pe := range prodEdges {
+													if pe.SrcKind == "product" {
+														if pe2, _ := n.Entities.Get(pe.SrcID); pe2 != nil {
+															sharedBranch = deriveBranchName(branchPrefix, pe2.Title)
+														}
+														break
+													}
+												}
+											}
+											break
+										}
+									}
+								}
+							}
+						}
+						if sharedBranch != "" {
+							prompt += fmt.Sprintf(
+								"\n\n## Shared Branch (branch_strategy=%s)\n"+
+									"Use branch `%s` — do NOT create a new branch or PR.\n"+
+									"```bash\ngit fetch github\n"+
+									"git checkout %s 2>/dev/null || git checkout -b %s --track github/%s\n```\n"+
+									"Push all commits to `%s`.\n",
+								strategy, sharedBranch, sharedBranch, sharedBranch, sharedBranch, sharedBranch)
+							slog.Info("dispatch: shared branch", "entity_uid", entityID[:12], "branch", sharedBranch, "strategy", strategy)
+						}
+					}
+				}
+			}
 
 			// Append visceral rules so the agent receives them even without MCP.
 			if vr := visceralRules(); vr != "" {
