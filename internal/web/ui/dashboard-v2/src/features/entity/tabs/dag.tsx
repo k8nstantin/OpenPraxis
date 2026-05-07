@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { EChart } from '@/components/echart'
 import {
   useEntityGraph,
+  useLiveRuns,
   type EntityKind,
   type GraphNode,
   type GraphEdge,
@@ -86,7 +87,10 @@ interface ChartLink {
 function build(
   rootId: string,
   nodes: GraphNode[],
-  edges: GraphEdge[]
+  edges: GraphEdge[],
+  runningIds: Set<string>,
+  completedIds: Set<string>,
+  pulse: boolean
 ): { data: ChartNode[]; links: ChartLink[]; categories: { name: string }[] } {
   const categories = [{ name: 'skill' }, { name: 'product' }, { name: 'manifest' }, { name: 'task' }]
   const catIndex: Record<string, number> = { skill: 0, product: 1, manifest: 2, task: 3 }
@@ -104,28 +108,59 @@ function build(
       { offset: 1, color: hex + '60' },
     ],
   })
-  const data: ChartNode[] = nodes.map((n) => ({
-    id: n.id,
-    name: n.title,
-    symbol: KIND_SYMBOL[n.kind] ?? 'circle',
-    symbolSize: n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind],
-    category: catIndex[n.kind] ?? 0,
-    itemStyle: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      color: grad(KIND_COLOR[n.kind] ?? '#3b82f6') as any,
-      borderColor: STATUS_BORDER[n.status] ?? '#71717a',
-      borderWidth: n.id === rootId ? 3 : 1.5,
-      shadowBlur: n.id === rootId ? 24 : 8,
-      shadowColor: KIND_COLOR[n.kind] ?? '#3b82f6',
-      shadowOffsetX: 0,
-      shadowOffsetY: 0,
-    },
-    label: {
-      fontWeight: n.id === rootId ? 'bold' : 'normal',
-    },
-    _kind: n.kind,
-    _status: n.status,
-  }))
+  const data: ChartNode[] = nodes.map((n) => {
+    const isRunning = runningIds.has(n.id)
+    const isDone   = completedIds.has(n.id)
+    const baseSize = n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind]
+    // Pulse: alternate shadow between 32 and 56 on the running node
+    const runShadow = pulse ? 56 : 32
+    return {
+      id: n.id,
+      name: n.title,
+      symbol: KIND_SYMBOL[n.kind] ?? 'circle',
+      symbolSize: isRunning ? baseSize + 10 : baseSize,
+      category: catIndex[n.kind] ?? 0,
+      itemStyle: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        color: (isRunning
+          ? grad('#8b5cf6')
+          : isDone
+            ? grad('#10b981')
+            : grad(KIND_COLOR[n.kind] ?? '#3b82f6')) as any,
+        borderColor: isRunning ? '#ffffff' : isDone ? '#34d399' : (STATUS_BORDER[n.status] ?? '#71717a'),
+        borderWidth: isRunning ? 3 : (isDone ? 2.5 : (n.id === rootId ? 3 : 1.5)),
+        shadowBlur: isRunning ? runShadow : isDone ? 20 : (n.id === rootId ? 24 : 8),
+        shadowColor: isRunning ? '#8b5cf6' : isDone ? '#10b981' : (KIND_COLOR[n.kind] ?? '#3b82f6'),
+        shadowOffsetX: 0,
+        shadowOffsetY: 0,
+        opacity: (!isRunning && !isDone && completedIds.size > 0) ? 0.55 : 1,
+      },
+      label: {
+        fontWeight: (isRunning || isDone || n.id === rootId) ? 'bold' : 'normal',
+        color: isRunning ? '#c4b5fd' : isDone ? '#6ee7b7' : '#e5e7eb',
+      },
+      _kind: n.kind,
+      _status: n.status,
+    }
+  })
+
+  // Highlight edges whose source has completed — show the traversed path
+  const traversedLinks: ChartLink[] = links.map((l) => {
+    const srcDone = completedIds.has(l.source as string)
+    const srcRun  = runningIds.has(l.source as string)
+    if (srcDone || srcRun) {
+      return {
+        ...l,
+        lineStyle: {
+          ...l.lineStyle,
+          color: srcDone ? '#34d399' : '#a78bfa',
+          width: 2.2,
+          opacity: 1,
+        },
+      }
+    }
+    return { ...l, lineStyle: { ...l.lineStyle, opacity: completedIds.size > 0 ? 0.3 : 0.8 } }
+  })
   const links: ChartLink[] = edges.map((e) => {
     const isOwns = e.kind === 'owns'
     return {
@@ -142,17 +177,58 @@ function build(
       _kind: e.kind,
     }
   })
-  return { data, links, categories }
+  return { data, links: traversedLinks, categories }
 }
 
 export function DAGTab({ kind, entityId }: DAGTabProps) {
   const graph = useEntityGraph(kind, entityId, 10)
   const navigate = useNavigate()
+  const { data: liveRuns } = useLiveRuns()
+
+  // Pulse toggle — flips every 800ms to animate running node glow
+  const [pulse, setPulse] = useState(false)
+  const runningIds = useMemo(
+    () => new Set((liveRuns ?? []).map((r) => r.entity_uid)),
+    [liveRuns]
+  )
+  useEffect(() => {
+    if (runningIds.size === 0) return
+    const t = setInterval(() => setPulse((p) => !p), 800)
+    return () => clearInterval(t)
+  }, [runningIds.size])
+
+  // Derive completed node IDs: any node in the graph that has a completed
+  // run (fetch /runs and check for a completed event). We batch by querying
+  // each task node's runs — only task nodes actually execute.
+  const taskNodeIds = useMemo(
+    () => (graph.data?.nodes ?? []).filter((n) => n.kind === 'task').map((n) => n.id),
+    [graph.data]
+  )
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (taskNodeIds.length === 0) return
+    let cancelled = false
+    Promise.all(
+      taskNodeIds.map((id) =>
+        fetch(`/api/entities/${id}/runs`)
+          .then((r) => r.json())
+          .then((rows: { event: string }[]) => ({
+            id,
+            done: Array.isArray(rows) && rows.some((r) => r.event === 'completed'),
+          }))
+          .catch(() => ({ id, done: false }))
+      )
+    ).then((results) => {
+      if (cancelled) return
+      setCompletedIds(new Set(results.filter((r) => r.done).map((r) => r.id)))
+    })
+    return () => { cancelled = true }
+  }, [taskNodeIds, runningIds]) // re-check when a run starts/ends
 
   const built = useMemo(() => {
     if (!graph.data) return null
-    return build(entityId, graph.data.nodes, graph.data.edges)
-  }, [graph.data, entityId])
+    return build(entityId, graph.data.nodes, graph.data.edges, runningIds, completedIds, pulse)
+  }, [graph.data, entityId, runningIds, completedIds, pulse])
 
   if (graph.isLoading) {
     return (
