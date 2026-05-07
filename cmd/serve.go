@@ -239,6 +239,51 @@ var serveCmd = &cobra.Command{
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
 
+		// DAG chain recovery: on startup, re-evaluate every active manifest so
+		// chains interrupted by a server restart resume from where they left off.
+		// dispatchChainFn is not wired yet at this point — schedule this after
+		// the runner and dispatcher are fully initialised by deferring into a
+		// short-lived goroutine that waits for the wiring to complete.
+		go func() {
+			// Brief pause to let dispatchChainFn get wired below.
+			time.Sleep(2 * time.Second)
+			if n.Relationships == nil || n.Entities == nil {
+				return
+			}
+			manifests, err := n.Entities.List("manifest", "active", 0)
+			if err != nil || len(manifests) == 0 {
+				return
+			}
+			resumed := 0
+			for _, m := range manifests {
+				// Only resume manifests that have at least one completed task
+				// (chain was in progress) and at least one not-yet-completed task.
+				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
+				hasCompleted, hasPending := false, false
+				for _, e := range edges {
+					if e.DstKind != relationships.KindTask {
+						continue
+					}
+					done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
+					if done {
+						hasCompleted = true
+					} else {
+						hasPending = true
+					}
+				}
+				if hasCompleted && hasPending && dispatchChainFn != nil {
+					slog.Info("dag-chain: resuming interrupted chain on startup", "manifest", m.EntityUID[:12], "title", m.Title)
+					if err := dispatchChainFn(ctx, m.EntityUID, 0); err != nil {
+						slog.Info("dag-chain: resume dispatch", "manifest", m.EntityUID[:12], "note", err.Error())
+					}
+					resumed++
+				}
+			}
+			if resumed > 0 {
+				slog.Info("dag-chain: resumed chains on startup", "count", resumed)
+			}
+		}()
+
 		// defaultSkillID is the fallback execution protocol used when an entity
 		// has no skill assigned via the DAG.
 		const defaultSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
@@ -375,6 +420,12 @@ var serveCmd = &cobra.Command{
 								branchPrefix = bp
 							}
 						}
+						branchRemote := "github"
+						if brRes, err2 := n.SettingsResolver.Resolve(ctx, scope, "branch_remote"); err2 == nil {
+							if br, _ := brRes.Value.(string); br != "" {
+								branchRemote = br
+							}
+						}
 						if n.Relationships != nil {
 							// Walk up to find the entity whose title drives the branch name.
 							lookupID := entityID
@@ -413,10 +464,10 @@ var serveCmd = &cobra.Command{
 							prompt += fmt.Sprintf(
 								"\n\n## Shared Branch (branch_strategy=%s)\n"+
 									"Use branch `%s` — do NOT create a new branch or PR.\n"+
-									"```bash\ngit fetch github\n"+
-									"git checkout %s 2>/dev/null || git checkout -b %s --track github/%s\n```\n"+
+									"```bash\ngit fetch %s\n"+
+									"git checkout %s 2>/dev/null || git checkout -b %s --track %s/%s\n```\n"+
 									"Push all commits to `%s`.\n",
-								strategy, sharedBranch, sharedBranch, sharedBranch, sharedBranch, sharedBranch)
+								strategy, sharedBranch, branchRemote, sharedBranch, sharedBranch, branchRemote, sharedBranch, sharedBranch)
 							slog.Info("dispatch: shared branch", "entity_uid", entityID[:12], "branch", sharedBranch, "strategy", strategy)
 						}
 					}
