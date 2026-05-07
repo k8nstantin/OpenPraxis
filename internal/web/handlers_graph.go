@@ -161,6 +161,32 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			edges = append(edges, edgeOut{ID: id, Source: row.ViaSrc, Target: row.ID, Kind: row.ViaKind})
 		}
 
+		// Second pass: emit depends_on edges between discovered nodes that the
+		// Walk missed because the target was already visited via an owns edge.
+		// Build the discovered node set first, then query each node's outgoing
+		// depends_on edges and add any that connect two nodes already in the graph.
+		if n.Relationships != nil {
+			discovered := make(map[string]bool, len(rows)+1)
+			discovered[rootID] = true
+			for _, row := range rows {
+				discovered[row.ID] = true
+			}
+			for nodeID := range discovered {
+				depEdges, _ := n.Relationships.ListOutgoing(r.Context(), nodeID, relationships.EdgeDependsOn)
+				for _, de := range depEdges {
+					if !discovered[de.DstID] {
+						continue
+					}
+					id := nodeID + "->" + de.DstID + ":" + relationships.EdgeDependsOn
+					if seen[id] {
+						continue
+					}
+					seen[id] = true
+					edges = append(edges, edgeOut{ID: id, Source: nodeID, Target: de.DstID, Kind: relationships.EdgeDependsOn})
+				}
+			}
+		}
+
 		writeJSON(w, map[string]any{"nodes": nodes, "edges": edges})
 	}
 }
