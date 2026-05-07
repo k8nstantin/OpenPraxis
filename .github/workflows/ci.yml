@@ -47,6 +47,14 @@ jobs:
         working-directory: internal/web/ui/dashboard-v2
         run: npm run check
 
+      # Regenerate TS types from Go structs and fail if generated.ts drifts.
+      # Catches Go API changes that weren't paired with a `make types` commit.
+      - name: install tygo
+        run: go install github.com/gzuidhof/tygo@latest
+
+      - name: Check generated types are up to date
+        run: make types-check
+
       - name: npm run build (dashboard-v2)
         working-directory: internal/web/ui/dashboard-v2
         run: npm run build
