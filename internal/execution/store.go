@@ -455,6 +455,25 @@ func (s *Store) ListByEntity(ctx context.Context, entityUID string, limit int) (
 	return collectRows(rows)
 }
 
+// HasCompleted returns true if the entity has at least one completed event in
+// execution_log. Used by the DAG dep gate to determine whether a dependency
+// has been satisfied — explicitly checks for the completed event rather than
+// relying on the most-recent-row heuristic (which could return a sample row).
+func (s *Store) HasCompleted(ctx context.Context, entityUID string) (bool, error) {
+	if entityUID == "" {
+		return false, ErrEmptyEntityID
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM execution_log WHERE entity_uid = ? AND event = ?`,
+		entityUID, EventCompleted,
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("execution: has completed: %w", err)
+	}
+	return n > 0, nil
+}
+
 // InFlightRun holds the minimal fields needed for zombie-process detection.
 type InFlightRun struct {
 	RunUID    string

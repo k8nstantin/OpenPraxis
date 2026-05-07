@@ -992,3 +992,25 @@ export function useTaskRuns(taskId: string | undefined) {
 // Text chunks for a specific run — used by the Live Output tab for the
 // current in-flight run. Delegates to useExecutionOutput (same hook).
 export { useExecutionOutput as useTaskRunOutput }
+
+export interface LiveRun {
+  run_uid: string
+  entity_uid: string
+  entity_title: string
+  elapsed_sec: number
+  turns: number
+  actions: number
+  cost_usd: number
+  model: string
+}
+
+// Polls /api/execution/live — shared query used by list-pane to highlight
+// running entities and by RunsTab for the live run header.
+export function useLiveRuns() {
+  return useQuery({
+    queryKey: ['execution-live'],
+    queryFn: (): Promise<LiveRun[]> => fetchJSON<LiveRun[]>('/api/execution/live'),
+    refetchInterval: (q) => ((q.state.data?.length ?? 0) > 0 ? 4000 : 10000),
+    refetchIntervalInBackground: false,
+  })
+}

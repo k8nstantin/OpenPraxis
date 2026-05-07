@@ -23,6 +23,8 @@ import (
 )
 
 // Event name and key constants for the onEvent broadcast callback.
+// Using constants prevents typo-induced bugs when reading map keys in
+// callers (e.g. the DAG chain gate in cmd/serve.go).
 const (
 	EventTaskCompleted = "task_completed"
 	EventTaskStarted   = "task_started"
