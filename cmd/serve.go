@@ -420,6 +420,12 @@ var serveCmd = &cobra.Command{
 								branchPrefix = bp
 							}
 						}
+						branchRemote := "github"
+						if brRes, err2 := n.SettingsResolver.Resolve(ctx, scope, "branch_remote"); err2 == nil {
+							if br, _ := brRes.Value.(string); br != "" {
+								branchRemote = br
+							}
+						}
 						if n.Relationships != nil {
 							// Walk up to find the entity whose title drives the branch name.
 							lookupID := entityID
@@ -458,10 +464,10 @@ var serveCmd = &cobra.Command{
 							prompt += fmt.Sprintf(
 								"\n\n## Shared Branch (branch_strategy=%s)\n"+
 									"Use branch `%s` — do NOT create a new branch or PR.\n"+
-									"```bash\ngit fetch github\n"+
-									"git checkout %s 2>/dev/null || git checkout -b %s --track github/%s\n```\n"+
+									"```bash\ngit fetch %s\n"+
+									"git checkout %s 2>/dev/null || git checkout -b %s --track %s/%s\n```\n"+
 									"Push all commits to `%s`.\n",
-								strategy, sharedBranch, sharedBranch, sharedBranch, sharedBranch, sharedBranch)
+								strategy, sharedBranch, branchRemote, sharedBranch, sharedBranch, branchRemote, sharedBranch, sharedBranch)
 							slog.Info("dispatch: shared branch", "entity_uid", entityID[:12], "branch", sharedBranch, "strategy", strategy)
 						}
 					}

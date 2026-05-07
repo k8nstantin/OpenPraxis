@@ -84,6 +84,7 @@ func Catalog() []KnobDef {
 		{Key: "on_restart_behavior", Type: KnobEnum, EnumValues: []string{"restart", "stop", "fail"}, Default: "stop", Description: "What to do with tasks left in running state when serve restarts. stop=mark failed with recovery hint; restart=re-fire immediately; fail=mark failed with no auto-recovery."},
 		{Key: "branch_prefix", Type: KnobString, Default: "openpraxis", Description: "Prefix used in the agent's <git_workflow> branch name: <prefix>/<task_id>. Operators can set per-product for QA/staging branches."},
 		{Key: "branch_strategy", Type: KnobEnum, EnumValues: []string{"task", "manifest", "product"}, Default: "task", Description: "Branch scope for agent runs. task=own branch + PR per task (default). manifest=all tasks in the manifest share one branch derived from the manifest title. product=all tasks across all manifests share one branch derived from the product title."},
+		{Key: "branch_remote", Type: KnobString, Default: "github", Description: "Git remote name used in branch checkout instructions injected into agent prompts. Default is 'github'. Set to 'origin' for Bitbucket, GitLab, or any other remote."},
 		{Key: "worktree_base_dir", Type: KnobString, Default: ".openpraxis-work", Description: "Directory under the repo root where per-task git worktrees are materialised. Absolute paths are supported for out-of-tree worktrees."},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
 			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
