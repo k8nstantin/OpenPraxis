@@ -301,6 +301,17 @@ LIMIT 1`
 			t.EntityTitle = title
 			t.EntityType = etype
 
+			// Overlay the live in-memory turn count from the task runner. The
+			// execution_log sample row only refreshes every 5s, but the runner
+			// increments its turn counter immediately at each turn boundary
+			// (before firing task_turn_started). Looking it up here makes the
+			// /api/execution/live response reflect the current turn within ~1s.
+			if runner := n.GetRunner(); runner != nil {
+				if live, ok := runner.LiveTurnCount(t.EntityUID); ok && live > t.Turns {
+					t.Turns = live
+				}
+			}
+
 			result = append(result, t)
 		}
 
