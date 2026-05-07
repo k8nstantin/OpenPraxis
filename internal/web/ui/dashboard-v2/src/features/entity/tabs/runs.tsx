@@ -1,4 +1,5 @@
 import { useState, Fragment } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
 import { TurnAnalyticsBlock } from '@/features/entity/turn-charts'
