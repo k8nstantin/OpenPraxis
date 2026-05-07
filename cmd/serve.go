@@ -214,33 +214,36 @@ var serveCmd = &cobra.Command{
 		// has no skill assigned via the DAG.
 		const defaultSkillID = "019dfecc-a7b3-78a6-acc0-1cfa638eae18"
 
-		// skillPromptFor walks UP the DAG from entityID to find the nearest
-		// skill entity (skill → owns → product → owns → manifest → owns → task).
-		// Returns the skill's latest prompt comment body.
-		// Falls back to the default skill (defaultSkillID) if none found in the DAG,
-		// and to an inline minimal prompt if even the default has no prompt.
+		// skillPromptFor walks UP the DAG from entityID and collects ALL skill
+		// entities found (skill → owns → product). All skills are concatenated
+		// in order so every skill assigned to the entity's product is loaded.
+		// Falls back to the default skill if none found in the DAG.
 		skillPromptFor := func(ctx context.Context, entityID string) (string, string) {
 			if n.Relationships == nil {
 				return defaultSkillID, ""
 			}
 
-			// Walk UP through the ownership chain looking for a skill entity.
+			ct := comments.TypePrompt
+			var skillIDs []string
+			var combined strings.Builder
+
+			// Walk UP through the ownership chain collecting ALL skills.
 			// Limit to 4 hops: task → manifest → product → skill.
 			current := entityID
 			for hop := 0; hop < 4; hop++ {
 				edges, _ := n.Relationships.ListIncoming(ctx, current, "owns")
 				for _, edge := range edges {
 					if edge.SrcKind == "skill" {
-						// Found a skill — load its prompt.
-						ct := comments.TypePrompt
+						// Collect all skills — do not stop at the first one.
 						revs, err := n.Comments.List(ctx, comments.TargetEntity, edge.SrcID, 1, &ct)
 						if err == nil && len(revs) > 0 && revs[0].Body != "" {
-							slog.Info("skill resolved from DAG", "entity_uid", entityID[:12], "skill_id", edge.SrcID[:12])
-							return edge.SrcID, revs[0].Body
+							skillIDs = append(skillIDs, edge.SrcID)
+							if combined.Len() > 0 {
+								combined.WriteString("\n\n---\n\n")
+							}
+							combined.WriteString(revs[0].Body)
 						}
-					}
-					// Keep walking up — move to the parent entity.
-					if edge.SrcKind != "skill" {
+					} else {
 						current = edge.SrcID
 					}
 				}
@@ -249,8 +252,12 @@ var serveCmd = &cobra.Command{
 				}
 			}
 
+			if combined.Len() > 0 {
+				slog.Info("skills loaded from DAG", "entity_uid", entityID[:12], "skills", len(skillIDs))
+				return strings.Join(skillIDs, ","), combined.String()
+			}
+
 			// No skill found in DAG — use the default execution protocol.
-			ct := comments.TypePrompt
 			revs, err := n.Comments.List(ctx, comments.TargetEntity, defaultSkillID, 1, &ct)
 			if err == nil && len(revs) > 0 && revs[0].Body != "" {
 				return defaultSkillID, revs[0].Body
