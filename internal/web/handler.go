@@ -484,6 +484,7 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/entities", apiEntityCreate(n)).Methods("POST")
 	api.HandleFunc("/entities/{id}/history", apiEntityHistory(n)).Methods("GET")
 	api.HandleFunc("/entities/{id}/runs", apiEntityExecutionLog(n)).Methods("GET")
+	api.HandleFunc("/entities/{id}/actions", apiEntityActions(n)).Methods("GET")
 	api.HandleFunc("/entities/{id}/turn-timeline", apiTurnTimeline(n)).Methods("GET")
 	api.HandleFunc("/entities/{id}/turn-tools", apiTurnTools(n)).Methods("GET")
 	api.HandleFunc("/entities/{id}/cost-per-turn", apiCostPerTurn(n)).Methods("GET")

@@ -635,3 +635,28 @@ func buildHierarchy(r *http.Request, n *node.Node, entityID, kind string, depth 
 	}
 	return node
 }
+
+// apiEntityActions returns the actions (tool calls) for an entity, newest first.
+// GET /api/entities/{id}/actions?limit=100
+// Used for live output polling during a run and historical action replay.
+func apiEntityActions(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		limit := 100
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if v, err := strconv.Atoi(l); err == nil && v > 0 {
+				limit = v
+			}
+		}
+		actions, err := n.Actions.ListByTask(id, limit)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if actions == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		writeJSON(w, actions)
+	}
+}
