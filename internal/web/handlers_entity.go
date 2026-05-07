@@ -761,3 +761,57 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 		writeJSON(w, actions)
 	}
 }
+
+// apiRelationshipsIncoming handles GET /api/relationships/incoming?dst_id=...&kind=...
+// Returns all current edges pointing TO dst_id with the given kind.
+// Agents use this to walk UP the DAG — find the manifest that owns a task, etc.
+func apiRelationshipsIncoming(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.Relationships == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		dstID := r.URL.Query().Get("dst_id")
+		kind := r.URL.Query().Get("kind")
+		if dstID == "" || kind == "" {
+			writeError(w, "dst_id and kind are required", http.StatusBadRequest)
+			return
+		}
+		edges, err := n.Relationships.ListIncoming(r.Context(), dstID, kind)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if edges == nil {
+			edges = []relationships.Edge{}
+		}
+		writeJSON(w, edges)
+	}
+}
+
+// apiRelationshipsOutgoing handles GET /api/relationships/outgoing?src_id=...&kind=...
+// Returns all current edges pointing FROM src_id with the given kind.
+// Agents use this to walk DOWN the DAG — list tasks owned by a manifest, etc.
+func apiRelationshipsOutgoing(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.Relationships == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		srcID := r.URL.Query().Get("src_id")
+		kind := r.URL.Query().Get("kind")
+		if srcID == "" || kind == "" {
+			writeError(w, "src_id and kind are required", http.StatusBadRequest)
+			return
+		}
+		edges, err := n.Relationships.ListOutgoing(r.Context(), srcID, kind)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if edges == nil {
+			edges = []relationships.Edge{}
+		}
+		writeJSON(w, edges)
+	}
+}
