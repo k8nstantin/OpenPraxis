@@ -495,6 +495,12 @@ var serveCmd = &cobra.Command{
 				// query for the completed event rather than the most-recent-row
 				// heuristic which could return a sample row and false-negative.
 				if n.Relationships != nil && n.ExecutionLog != nil {
+					// Skip tasks that already completed — prevents re-firing
+					// tasks with no deps (they'd pass the gate every time).
+					if done, _ := n.ExecutionLog.HasCompleted(ctx, taskID); done {
+						slog.Info("dag-chain: task already completed — skipping", "task_id", taskID[:12])
+						continue
+					}
 					deps, _ := n.Relationships.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
 					blocked := false
 					for _, dep := range deps {
