@@ -68,6 +68,7 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 			Tags       []string `json:"tags"`
 			ProjectID  string   `json:"project_id"`   // manifest → parent product
 			ManifestID string   `json:"manifest_id"`  // task → parent manifest
+			Prompt     string   `json:"prompt"`       // optional initial prompt — posted as TypePrompt comment
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Type == "" || req.Title == "" {
 			http.Error(w, "type and title are required", 400)
@@ -99,6 +100,15 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
 				})
+			}
+		}
+		// Persist optional prompt as a TypePrompt comment so it's versioned
+		// and never silently dropped. Before this fix the field was not in the
+		// request struct and Go's JSON decoder dropped it without error.
+		if req.Prompt != "" && n.Comments != nil {
+			if _, err := n.Comments.Add(r.Context(), comments.TargetEntity, e.EntityUID,
+				"http-api", comments.TypePrompt, req.Prompt); err != nil {
+				slog.Warn("entity create: failed to save prompt comment", "entity", e.EntityUID, "error", err)
 			}
 		}
 		w.WriteHeader(http.StatusCreated)
