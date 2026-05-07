@@ -89,8 +89,7 @@ function build(
   nodes: GraphNode[],
   edges: GraphEdge[],
   runningIds: Set<string>,
-  completedIds: Set<string>,
-  pulse: boolean
+  completedIds: Set<string>
 ): { data: ChartNode[]; links: ChartLink[]; categories: { name: string }[] } {
   const categories = [{ name: 'skill' }, { name: 'product' }, { name: 'manifest' }, { name: 'task' }]
   const catIndex: Record<string, number> = { skill: 0, product: 1, manifest: 2, task: 3 }
@@ -112,8 +111,6 @@ function build(
     const isRunning = runningIds.has(n.id)
     const isDone   = completedIds.has(n.id)
     const baseSize = n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind]
-    // Pulse: alternate shadow between 32 and 56 on the running node
-    const runShadow = pulse ? 56 : 32
     return {
       id: n.id,
       name: n.title,
@@ -129,7 +126,7 @@ function build(
             : grad(KIND_COLOR[n.kind] ?? '#3b82f6')) as any,
         borderColor: isRunning ? '#ffffff' : isDone ? '#34d399' : (STATUS_BORDER[n.status] ?? '#71717a'),
         borderWidth: isRunning ? 3 : (isDone ? 2.5 : (n.id === rootId ? 3 : 1.5)),
-        shadowBlur: isRunning ? runShadow : isDone ? 20 : (n.id === rootId ? 24 : 8),
+        shadowBlur: isRunning ? 48 : isDone ? 20 : (n.id === rootId ? 24 : 8),
         shadowColor: isRunning ? '#8b5cf6' : isDone ? '#10b981' : (KIND_COLOR[n.kind] ?? '#3b82f6'),
         shadowOffsetX: 0,
         shadowOffsetY: 0,
@@ -144,23 +141,6 @@ function build(
     }
   })
 
-  // Highlight edges whose source has completed — show the traversed path
-  const traversedLinks: ChartLink[] = links.map((l) => {
-    const srcDone = completedIds.has(l.source as string)
-    const srcRun  = runningIds.has(l.source as string)
-    if (srcDone || srcRun) {
-      return {
-        ...l,
-        lineStyle: {
-          ...l.lineStyle,
-          color: srcDone ? '#34d399' : '#a78bfa',
-          width: 2.2,
-          opacity: 1,
-        },
-      }
-    }
-    return { ...l, lineStyle: { ...l.lineStyle, opacity: completedIds.size > 0 ? 0.3 : 0.8 } }
-  })
   const links: ChartLink[] = edges.map((e) => {
     const isOwns = e.kind === 'owns'
     return {
@@ -177,6 +157,22 @@ function build(
       _kind: e.kind,
     }
   })
+  const traversedLinks: ChartLink[] = links.map((l) => {
+    const srcDone = completedIds.has(l.source as string)
+    const srcRun  = runningIds.has(l.source as string)
+    if (srcDone || srcRun) {
+      return {
+        ...l,
+        lineStyle: {
+          ...l.lineStyle,
+          color: srcDone ? '#34d399' : '#a78bfa',
+          width: 2.2,
+          opacity: 1,
+        },
+      }
+    }
+    return { ...l, lineStyle: { ...l.lineStyle, opacity: completedIds.size > 0 ? 0.3 : 0.8 } }
+  })
   return { data, links: traversedLinks, categories }
 }
 
@@ -185,17 +181,20 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
   const navigate = useNavigate()
   const { data: liveRuns } = useLiveRuns()
 
-  // Pulse toggle — flips every 800ms to animate running node glow
-  const [pulse, setPulse] = useState(false)
+  // First render: notMerge=true so the force layout unfolds with animation.
+  // After 2.5s (layout settled), switch to notMerge=false so live progress
+  // updates (running/completed node styles) don't restart the simulation.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    if (!graph.data) return
+    const t = setTimeout(() => setSettled(true), 2500)
+    return () => clearTimeout(t)
+  }, [graph.data])
+
   const runningIds = useMemo(
     () => new Set((liveRuns ?? []).map((r) => r.entity_uid)),
     [liveRuns]
   )
-  useEffect(() => {
-    if (runningIds.size === 0) return
-    const t = setInterval(() => setPulse((p) => !p), 800)
-    return () => clearInterval(t)
-  }, [runningIds.size])
 
   // Derive completed node IDs: any node in the graph that has a completed
   // run (fetch /runs and check for a completed event). We batch by querying
@@ -227,8 +226,8 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
 
   const built = useMemo(() => {
     if (!graph.data) return null
-    return build(entityId, graph.data.nodes, graph.data.edges, runningIds, completedIds, pulse)
-  }, [graph.data, entityId, runningIds, completedIds, pulse])
+    return build(entityId, graph.data.nodes, graph.data.edges, runningIds, completedIds)
+  }, [graph.data, entityId, runningIds, completedIds])
 
   if (graph.isLoading) {
     return (
@@ -263,6 +262,7 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
         <div className='bg-background h-[calc(100vh-15rem)] min-h-[600px] w-full overflow-hidden rounded-md'>
           <EChart
             height='100%'
+            notMerge={!settled}
             option={{
               tooltip: {
                 trigger: 'item',
@@ -318,7 +318,7 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
                     edgeLength: built.data.length <= 10 ? [180, 280] : [100, 180],
                     gravity: 0.08,
                     friction: 0.6,
-                    layoutAnimation: true,
+                    layoutAnimation: !settled,
                   },
                   center: ['50%', '50%'],
                   lineStyle: { width: 1.4, curveness: 0.12, opacity: 0.8 },
