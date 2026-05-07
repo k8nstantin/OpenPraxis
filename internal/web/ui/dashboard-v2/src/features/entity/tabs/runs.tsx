@@ -23,20 +23,21 @@ interface ActionRow {
   tool_input: string; tool_response: string; turn_number: number; created_at: string
 }
 
-// Live output: poll entity actions while run is active (every 3s), static otherwise
-function useEntityActions(entityId: string, isLive: boolean) {
+// Live output: poll entity actions while run is active (every 3s), static otherwise.
+// run_uid scopes actions to the current run only — no historical bleed.
+function useEntityActions(entityId: string, runUid: string, isLive: boolean) {
   return useQuery({
-    queryKey: ['entity-actions', entityId, isLive],
+    queryKey: ['entity-actions', entityId, runUid, isLive],
     queryFn: (): Promise<ActionRow[]> =>
-      fetch(`/api/entities/${entityId}/actions?limit=200`).then(r => r.json()),
+      fetch(`/api/entities/${entityId}/actions?limit=200&run_uid=${runUid}`).then(r => r.json()),
     enabled: !!entityId,
     refetchInterval: isLive ? 3000 : false,
     staleTime: isLive ? 0 : 60_000,
   })
 }
 
-function LiveOutput({ entityId }: { entityId: string }) {
-  const { data, isLoading } = useEntityActions(entityId, true)
+function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
+  const { data, isLoading } = useEntityActions(entityId, runUid, true)
   if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
   if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
   return (
@@ -169,7 +170,7 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
           </div>
           {/* Live output — polls actions every 3s */}
           <div className='border-t border-emerald-500/20'>
-            <LiveOutput entityId={liveRun.entity_uid} />
+            <LiveOutput entityId={liveRun.entity_uid} runUid={liveRun.run_uid} />
           </div>
         </div>
       )}
