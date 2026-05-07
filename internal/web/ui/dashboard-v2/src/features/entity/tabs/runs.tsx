@@ -136,7 +136,7 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
               <td className={tdCls}>{run.turns || '—'}</td>
               <td className={tdCls}>{run.actions || '—'}</td>
               <td className={tdCls}>{fmtCost(run.cost_usd)}</td>
-              <td className={`${tdCls} text-[10px] opacity-50`}>{(run as any).model || '—'}</td>
+              <td className={`${tdCls} text-[10px] opacity-50`}>{run.model || '—'}</td>
               <td className={`${tdCls} text-[10px] opacity-50`}>{fmtTime(run.created_at)}</td>
             </tr>
             {/* Expanded analytics section — T3 adds Turn Timeline, T4 adds Tools/Heatmap, T5 adds Cost/Turn */}

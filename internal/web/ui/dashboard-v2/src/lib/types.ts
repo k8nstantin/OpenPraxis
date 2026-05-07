@@ -38,14 +38,22 @@ export interface ExecutionRow {
   id: string
   run_uid: string
   entity_uid: string
-  event: 'started' | 'sample' | 'completed' | 'failed'
+  event: 'started' | 'sample' | 'completed' | 'failed' | 'turn'
   run_number: number
   turns: number
+  actions: number
   input_tokens: number
   output_tokens: number
+  cost_usd: number
+  duration_ms: number
   cache_hit_rate_pct: number
   cpu_pct: number
   rss_mb: number
+  model: string
+  agent_runtime: string
+  started_at: number
+  completed_at: number
+  terminal_reason: string
   created_at: string
 }
 
