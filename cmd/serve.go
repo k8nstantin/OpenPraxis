@@ -216,8 +216,8 @@ var serveCmd = &cobra.Command{
 			// so the next depends_on-unblocked task fires automatically.
 			// Only advance on status=completed — a failed or cancelled task must
 			// not re-trigger the chain or the manifest re-dispatches T1 in a loop.
-			if event == "task_completed" && data["status"] == "completed" {
-				taskID := data["task_id"]
+			if event == task.EventTaskCompleted && data[task.EventKeyStatus] == execution.EventCompleted {
+				taskID := data[task.EventKeyTaskID]
 				if taskID != "" && n.Relationships != nil && dispatchChainFn != nil {
 					edges, _ := n.Relationships.ListIncoming(ctx, taskID, relationships.EdgeOwns)
 					for _, e := range edges {
@@ -490,22 +490,16 @@ var serveCmd = &cobra.Command{
 			var lastErr error
 			for _, taskID := range taskIDs {
 				// DAG gate: skip tasks whose depends_on edges point to tasks
-				// that have not yet completed. The depends_on edges in the
-				// relationships table are the source of truth — the scheduler
-				// must follow the DAG, not fire everything at once.
+				// that have not yet completed. Reads the relationships table
+				// (single source of truth) and uses HasCompleted — a targeted
+				// query for the completed event rather than the most-recent-row
+				// heuristic which could return a sample row and false-negative.
 				if n.Relationships != nil && n.ExecutionLog != nil {
 					deps, _ := n.Relationships.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
 					blocked := false
 					for _, dep := range deps {
-						rows, _ := n.ExecutionLog.ListByEntity(ctx, dep.DstID, 1)
-						completed := false
-						for _, row := range rows {
-							if row.Event == execution.EventCompleted {
-								completed = true
-								break
-							}
-						}
-						if !completed {
+						done, _ := n.ExecutionLog.HasCompleted(ctx, dep.DstID)
+						if !done {
 							blocked = true
 							break
 						}
