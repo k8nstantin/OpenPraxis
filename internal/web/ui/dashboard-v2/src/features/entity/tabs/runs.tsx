@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, type EntityKind } from '@/lib/queries/entity'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -115,11 +115,13 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
 
           {/* Historical runs */}
           {history.map(run => (
-            <>
+            <Fragment key={run.run_uid}>
             <tr
-              key={run.run_uid}
               className={`cursor-pointer border-b transition-colors hover:bg-white/5 ${selectedRunUid === run.run_uid ? 'bg-white/5' : ''}`}
-              onClick={() => setSelectedRunUid(selectedRunUid === run.run_uid ? null : run.run_uid)}
+              onClick={() => {
+                setSelectedRunUid(selectedRunUid === run.run_uid ? null : run.run_uid)
+                onSelectHistory?.(run.run_uid)
+              }}
             >
               <td className={tdCls}>
                 <span className={
@@ -146,7 +148,7 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
                 </td>
               </tr>
             )}
-            </>
+            </Fragment>
           ))}
 
           {history.length === 0 && !liveRun && (
