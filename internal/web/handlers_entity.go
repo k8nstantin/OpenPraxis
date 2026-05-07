@@ -11,8 +11,30 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/node"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
+
+// entityID extracts and validates the {id} path parameter as a UUID.
+// Returns (id, true) on success; writes 400 and returns ("", false) on failure.
+func entityID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := mux.Vars(r)["id"]
+	if _, err := uuid.Parse(id); err != nil {
+		http.Error(w, "invalid entity id", http.StatusBadRequest)
+		return "", false
+	}
+	return id, true
+}
+
+// runUID extracts and validates the {runUid} path parameter as a UUID.
+func runUID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := mux.Vars(r)["runUid"]
+	if _, err := uuid.Parse(id); err != nil {
+		http.Error(w, "invalid run uid", http.StatusBadRequest)
+		return "", false
+	}
+	return id, true
+}
 
 func apiEntityList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +108,10 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 
 func apiEntityGet(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		e, err := n.Entities.Get(id)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -102,7 +127,10 @@ func apiEntityGet(n *node.Node) http.HandlerFunc {
 
 func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		existing, err := n.Entities.Get(id)
 		if err != nil || existing == nil {
 			http.Error(w, "not found", 404)
@@ -203,7 +231,10 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 
 func apiEntityHistory(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		history, err := n.Entities.History(id)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -228,7 +259,10 @@ func apiEntitySearch(n *node.Node) http.HandlerFunc {
 
 func apiExecutionOutput(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		runUID := mux.Vars(r)["runUid"]
+		runUID, ok := runUID(w, r)
+		if !ok {
+			return
+		}
 		chunks, err := n.ExecutionLog.ListOutput(r.Context(), runUID)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -240,7 +274,10 @@ func apiExecutionOutput(n *node.Node) http.HandlerFunc {
 
 func apiExecutionLog(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		runUID := mux.Vars(r)["runUid"]
+		runUID, ok := runUID(w, r)
+		if !ok {
+			return
+		}
 		rows, err := n.ExecutionLog.ListByRun(r.Context(), runUID)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -253,7 +290,10 @@ func apiExecutionLog(n *node.Node) http.HandlerFunc {
 func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		limit := 50
 		if l := r.URL.Query().Get("limit"); l != "" {
 			if v, err := strconv.Atoi(l); err == nil && v > 0 {
@@ -371,7 +411,10 @@ type depRow struct {
 // Manifests: returns upstream manifests this one depends on (direction=out default).
 func apiEntityDependencies(n *node.Node, srcKind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		e, err := n.Entities.Get(id)
 		if err != nil || e == nil {
 			http.Error(w, "not found", 404)
@@ -436,7 +479,10 @@ func apiEntityDependencies(n *node.Node, srcKind string) http.HandlerFunc {
 // Manifests: adds an upstream dep (THIS depends on X).
 func apiEntityAddDependency(n *node.Node, srcKind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		e, err := n.Entities.Get(id)
 		if err != nil || e == nil {
 			http.Error(w, "not found", 404)
@@ -490,9 +536,15 @@ func apiEntityAddDependency(n *node.Node, srcKind string) http.HandlerFunc {
 // and DELETE /api/manifests/{id}/dependencies/{dep_id}.
 func apiEntityRemoveDependency(n *node.Node, srcKind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-		depID := vars["dep_id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
+		depID := mux.Vars(r)["dep_id"]
+		if _, err := uuid.Parse(depID); err != nil {
+			http.Error(w, "invalid dep_id", http.StatusBadRequest)
+			return
+		}
 		e, err := n.Entities.Get(id)
 		if err != nil || e == nil {
 			http.Error(w, "not found", 404)
@@ -583,7 +635,10 @@ type hierarchyNode struct {
 // Returns a recursive tree of sub-products and manifests rooted at this product.
 func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		e, err := n.Entities.Get(id)
 		if err != nil || e == nil {
 			http.Error(w, "not found", 404)
@@ -645,7 +700,10 @@ func buildHierarchy(r *http.Request, n *node.Node, entityID, kind string, depth 
 func apiEntityActions(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		id := mux.Vars(r)["id"]
+		id, ok := entityID(w, r)
+		if !ok {
+			return
+		}
 		limit := 100
 		if l := r.URL.Query().Get("limit"); l != "" {
 			if v, err := strconv.Atoi(l); err == nil && v > 0 {
