@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +20,40 @@ import (
 
 	"github.com/google/uuid"
 )
+
+const maxTranscriptPathLen = 4096
+
+// validateTranscriptPath rejects paths that could be used for directory
+// traversal or other file-read abuse. It requires:
+//   - non-empty absolute path (no relative traversal)
+//   - no null bytes (null-byte injection guard)
+//   - length ≤ maxTranscriptPathLen
+//   - the resolved path points to a regular file (not a directory or device)
+//
+// Returns the cleaned absolute path on success.
+func validateTranscriptPath(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("transcript_path is empty")
+	}
+	if len(path) > maxTranscriptPathLen {
+		return "", fmt.Errorf("transcript_path too long (%d bytes)", len(path))
+	}
+	if strings.ContainsRune(path, 0) {
+		return "", fmt.Errorf("transcript_path contains null byte")
+	}
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return "", fmt.Errorf("transcript_path must be absolute, got %q", clean)
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		return "", fmt.Errorf("transcript_path inaccessible: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("transcript_path is not a regular file")
+	}
+	return clean, nil
+}
 
 // apiHook handles Claude Code hook events — reads transcript file directly, no in-memory state.
 func apiHook(n *node.Node) http.HandlerFunc {
@@ -44,7 +79,13 @@ func apiHook(n *node.Node) http.HandlerFunc {
 		// Store live transcript path so the 5s MCP sampler can parse cumulative
 		// token/cost data mid-session. transcript_path is sent on every hook event.
 		if event.TranscriptPath != "" && event.SessionID != "" {
-			n.SetTranscriptPath(event.SessionID, event.TranscriptPath)
+			if cleaned, err := validateTranscriptPath(event.TranscriptPath); err == nil {
+				event.TranscriptPath = cleaned
+				n.SetTranscriptPath(event.SessionID, cleaned)
+			} else {
+				slog.Warn("hook: rejected invalid transcript_path", "session_id", event.SessionID, "error", err)
+				event.TranscriptPath = ""
+			}
 		}
 
 		// PostToolUse: write a throttled sample row to execution_log so

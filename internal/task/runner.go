@@ -1331,6 +1331,14 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// watcher check, but any dependents activated in the interim would
 		// already be scheduled/running.
 
+		// Remove from running map before firing task_completed so the
+		// DAG chain dispatch sees RunningCount()==0 and can start the
+		// next task without hitting the concurrency guard. The defer's
+		// delete is a safe no-op double-remove.
+		r.mu.Lock()
+		delete(r.running, t.ID)
+		r.mu.Unlock()
+
 		if r.onEvent != nil {
 			r.onEvent(EventTaskCompleted, map[string]string{
 				EventKeyTaskID: t.ID,

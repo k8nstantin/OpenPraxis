@@ -109,14 +109,23 @@ func (r *Runner) cleanupTaskWorkspace(workDir string) {
 // `<repoDir>/.openpraxis-work` when empty. Absolute baseDir values
 // are honoured verbatim so operators can park worktrees on a
 // dedicated volume outside the repo.
+//
+// Relative baseDirs are cleaned and validated to prevent path traversal:
+// a configured value of "../../../tmp" would otherwise escape the repo tree.
 func resolveWorkspacePath(repoDir, baseDir, taskID string) string {
 	if baseDir == "" {
 		baseDir = workspaceRoot
 	}
 	if filepath.IsAbs(baseDir) {
-		return filepath.Join(baseDir, taskID)
+		return filepath.Join(filepath.Clean(baseDir), taskID)
 	}
-	return filepath.Join(repoDir, baseDir, taskID)
+	// Reject relative paths that contain ".." components after cleaning —
+	// filepath.Join would silently resolve them out of repoDir.
+	clean := filepath.Clean(baseDir)
+	if strings.HasPrefix(clean, "..") {
+		clean = workspaceRoot
+	}
+	return filepath.Join(repoDir, clean, taskID)
 }
 
 // resolveRepoDir returns r.repoDir if set, otherwise falls back to the
