@@ -20,6 +20,7 @@ const (
 	EventSample    = "sample"
 	EventCompleted = "completed"
 	EventFailed    = "failed"
+	EventTurn      = "turn" // one row per turn boundary; Turns field holds the turn number
 )
 
 // Row is one append-only event row in execution_log.
