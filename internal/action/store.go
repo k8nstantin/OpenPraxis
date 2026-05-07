@@ -17,6 +17,7 @@ type Action struct {
 	ToolInput    string    `json:"tool_input"`
 	ToolResponse string    `json:"tool_response"`
 	CWD          string    `json:"cwd"`
+	TurnNumber   int       `json:"turn_number"` // agent turn this action belongs to; 0 = pre-feature
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -129,7 +130,7 @@ func (s *Store) ListBySession(sessionID string, limit int) ([]Action, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at
 		FROM actions WHERE session_id = ? OR session_id LIKE ? ORDER BY created_at DESC LIMIT ?`, sessionID, sessionID+"%", limit)
 	if err != nil {
 		return nil, err
@@ -143,7 +144,7 @@ func (s *Store) ListRecent(limit int) ([]Action, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at
 		FROM actions ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -167,7 +168,7 @@ func (s *Store) ListRecentPaged(limit, offset int) ([]Action, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at
 		FROM actions ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -179,10 +180,10 @@ func (s *Store) ListRecentPaged(limit, offset int) ([]Action, int, error) {
 
 // GetByID returns a single action by ID.
 func (s *Store) GetByID(id string) (*Action, error) {
-	row := s.db.QueryRow(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at FROM actions WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at FROM actions WHERE id = ?`, id)
 	var a Action
 	var createdStr string
-	err := row.Scan(&a.ID, &a.SessionID, &a.SourceNode, &a.TaskID, &a.ToolName, &a.ToolInput, &a.ToolResponse, &a.CWD, &createdStr)
+	err := row.Scan(&a.ID, &a.SessionID, &a.SourceNode, &a.TaskID, &a.ToolName, &a.ToolInput, &a.ToolResponse, &a.CWD, &a.TurnNumber, &createdStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -198,7 +199,7 @@ func (s *Store) ListByTask(taskID string, limit int) ([]Action, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, created_at
+	rows, err := s.db.Query(`SELECT id, session_id, source_node, task_id, tool_name, tool_input, tool_response, cwd, turn_number, created_at
 		FROM actions WHERE task_id = ? OR task_id LIKE ? ORDER BY created_at DESC LIMIT ?`, taskID, taskID+"%", limit)
 	if err != nil {
 		return nil, err
@@ -239,7 +240,7 @@ func scanActions(rows *sql.Rows) ([]Action, error) {
 	for rows.Next() {
 		var a Action
 		var createdStr string
-		if err := rows.Scan(&a.ID, &a.SessionID, &a.SourceNode, &a.TaskID, &a.ToolName, &a.ToolInput, &a.ToolResponse, &a.CWD, &createdStr); err != nil {
+		if err := rows.Scan(&a.ID, &a.SessionID, &a.SourceNode, &a.TaskID, &a.ToolName, &a.ToolInput, &a.ToolResponse, &a.CWD, &a.TurnNumber, &createdStr); err != nil {
 			return nil, err
 		}
 		a.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
