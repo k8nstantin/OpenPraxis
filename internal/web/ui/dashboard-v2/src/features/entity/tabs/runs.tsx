@@ -116,7 +116,11 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
               <div className='mt-1 space-y-1.5'>
                 {a.tool_input && (
                   <div>
-                    <div className='text-[10px] font-semibold text-blue-400/60 mb-0.5'>INPUT</div>
+                    <div className='flex items-center gap-2 mb-0.5'>
+                      <span className='text-[10px] font-semibold text-blue-400/60'>INPUT</span>
+                      <button type='button' onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(fmt(a.tool_input)) }}
+                        className='text-[10px] text-muted-foreground hover:text-foreground ml-auto'>copy</button>
+                    </div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
                       {fmt(a.tool_input)}
                     </div>
@@ -124,7 +128,11 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
                 )}
                 {a.tool_response && (
                   <div>
-                    <div className='text-[10px] font-semibold text-emerald-400/60 mb-0.5'>RESPONSE</div>
+                    <div className='flex items-center gap-2 mb-0.5'>
+                      <span className='text-[10px] font-semibold text-emerald-400/60'>RESPONSE</span>
+                      <button type='button' onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(fmt(a.tool_response)) }}
+                        className='text-[10px] text-muted-foreground hover:text-foreground ml-auto'>copy</button>
+                    </div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
                       {fmt(a.tool_response)}
                     </div>
