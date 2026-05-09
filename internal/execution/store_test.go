@@ -356,6 +356,277 @@ func insertTaskRun(t *testing.T, db *sql.DB, taskID string, runNum int, status s
 	}
 }
 
+// insertTerminalRow is a small helper used by pass-rate / frontier tests.
+// It writes a terminal execution_log row with the given event, terminal_reason,
+// turns, cost, and an explicit created_at so window-filter tests can backdate.
+func insertTerminalRow(t *testing.T, s *Store, runID, entityUID, event, reason string, turns int, cost float64, createdAt time.Time) {
+	t.Helper()
+	if err := s.Insert(context.Background(), Row{
+		ID:             runID,
+		RunUID:         runID,
+		EntityUID:      entityUID,
+		Event:          event,
+		TerminalReason: reason,
+		Turns:          turns,
+		CostUSD:        cost,
+		CreatedAt:      createdAt.UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("insert %s: %v", runID, err)
+	}
+}
+
+func TestFrontierByManifest_emptyTaskIDs(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+
+	got, err := s.FrontierByManifest(context.Background(), nil, 30)
+	if err != nil {
+		t.Fatalf("FrontierByManifest(nil): %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil empty map, got nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(got))
+	}
+
+	got, err = s.FrontierByManifest(context.Background(), []string{}, 30)
+	if err != nil {
+		t.Fatalf("FrontierByManifest([]): %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil empty map, got nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(got))
+	}
+}
+
+func TestPassRateByEntity_singleSuccess(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	insertTerminalRow(t, s, "run-1", "task-pass", EventCompleted, TerminalReasonSuccess, 4, 0.10, now)
+
+	got, err := s.PassRateByEntity(context.Background(), "task-pass", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity: %v", err)
+	}
+	if got.EntityUID != "task-pass" {
+		t.Errorf("EntityUID: got %q want task-pass", got.EntityUID)
+	}
+	if got.TotalRuns != 1 || got.SuccessRuns != 1 {
+		t.Errorf("counts: total=%d success=%d, want 1/1", got.TotalRuns, got.SuccessRuns)
+	}
+	if got.PassRate != 1.0 {
+		t.Errorf("PassRate: got %v want 1.0", got.PassRate)
+	}
+	if got.FailedRuns != 0 || got.MaxTurnsRuns != 0 || got.TimeoutRuns != 0 {
+		t.Errorf("non-success buckets: failed=%d max_turns=%d timeout=%d, want 0",
+			got.FailedRuns, got.MaxTurnsRuns, got.TimeoutRuns)
+	}
+}
+
+func TestPassRateByEntity_singleMaxTurns(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	insertTerminalRow(t, s, "run-mt", "task-mt", EventCompleted, TerminalReasonMaxTurns, 100, 0.50, now)
+
+	got, err := s.PassRateByEntity(context.Background(), "task-mt", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity: %v", err)
+	}
+	if got.TotalRuns != 1 || got.MaxTurnsRuns != 1 || got.SuccessRuns != 0 {
+		t.Errorf("counts: total=%d success=%d max_turns=%d, want 1/0/1",
+			got.TotalRuns, got.SuccessRuns, got.MaxTurnsRuns)
+	}
+	if got.PassRate != 0.0 {
+		t.Errorf("PassRate: got %v want 0.0", got.PassRate)
+	}
+}
+
+func TestPassRateByEntity_mixed(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	insertTerminalRow(t, s, "run-a", "task-mix", EventCompleted, TerminalReasonSuccess, 5, 0.10, now)
+	insertTerminalRow(t, s, "run-b", "task-mix", EventCompleted, TerminalReasonMaxTurns, 100, 0.30, now.Add(time.Second))
+
+	got, err := s.PassRateByEntity(context.Background(), "task-mix", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity: %v", err)
+	}
+	if got.TotalRuns != 2 {
+		t.Errorf("TotalRuns: got %d want 2", got.TotalRuns)
+	}
+	if got.SuccessRuns != 1 || got.MaxTurnsRuns != 1 {
+		t.Errorf("counts: success=%d max_turns=%d, want 1/1", got.SuccessRuns, got.MaxTurnsRuns)
+	}
+	if got.PassRate != 0.5 {
+		t.Errorf("PassRate: got %v want 0.5", got.PassRate)
+	}
+}
+
+func TestPassRateByEntity_neverRun(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+
+	got, err := s.PassRateByEntity(context.Background(), "task-ghost", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity: %v", err)
+	}
+	if got.EntityUID != "task-ghost" {
+		t.Errorf("EntityUID: got %q want task-ghost", got.EntityUID)
+	}
+	if got.TotalRuns != 0 {
+		t.Errorf("TotalRuns: got %d want 0", got.TotalRuns)
+	}
+	if got.PassRate != 0.0 {
+		t.Errorf("PassRate: got %v want 0.0", got.PassRate)
+	}
+}
+
+func TestPassRateByEntity_classification(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	// One of each terminal-reason bucket plus an arbitrary other reason.
+	insertTerminalRow(t, s, "run-s", "task-c", EventCompleted, TerminalReasonSuccess, 1, 0, now)
+	insertTerminalRow(t, s, "run-empty", "task-c", EventCompleted, "", 1, 0, now.Add(time.Millisecond))
+	insertTerminalRow(t, s, "run-mt", "task-c", EventCompleted, TerminalReasonMaxTurns, 1, 0, now.Add(2*time.Millisecond))
+	insertTerminalRow(t, s, "run-to", "task-c", EventFailed, TerminalReasonTimeout, 1, 0, now.Add(3*time.Millisecond))
+	insertTerminalRow(t, s, "run-be", "task-c", EventFailed, "build_fail", 1, 0, now.Add(4*time.Millisecond))
+	insertTerminalRow(t, s, "run-pe", "task-c", EventFailed, "process_error", 1, 0, now.Add(5*time.Millisecond))
+
+	got, err := s.PassRateByEntity(context.Background(), "task-c", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity: %v", err)
+	}
+	if got.TotalRuns != 6 {
+		t.Errorf("TotalRuns: got %d want 6", got.TotalRuns)
+	}
+	if got.SuccessRuns != 2 {
+		t.Errorf("SuccessRuns: got %d want 2 (success + empty reason)", got.SuccessRuns)
+	}
+	if got.MaxTurnsRuns != 1 {
+		t.Errorf("MaxTurnsRuns: got %d want 1", got.MaxTurnsRuns)
+	}
+	if got.TimeoutRuns != 1 {
+		t.Errorf("TimeoutRuns: got %d want 1", got.TimeoutRuns)
+	}
+	if got.FailedRuns != 2 {
+		t.Errorf("FailedRuns: got %d want 2 (build_fail + process_error)", got.FailedRuns)
+	}
+}
+
+func TestPassRateByEntity_windowFiltersOldRows(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	// One recent (in-window), one 48h old (out-of-window for windowDays=1).
+	insertTerminalRow(t, s, "run-recent", "task-win", EventCompleted, TerminalReasonSuccess, 1, 0, now)
+	insertTerminalRow(t, s, "run-old", "task-win", EventCompleted, TerminalReasonMaxTurns, 1, 0, now.Add(-48*time.Hour))
+
+	got, err := s.PassRateByEntity(context.Background(), "task-win", 1)
+	if err != nil {
+		t.Fatalf("PassRateByEntity windowDays=1: %v", err)
+	}
+	if got.TotalRuns != 1 {
+		t.Errorf("windowDays=1 TotalRuns: got %d want 1 (old row should be excluded)", got.TotalRuns)
+	}
+	if got.SuccessRuns != 1 {
+		t.Errorf("windowDays=1 SuccessRuns: got %d want 1", got.SuccessRuns)
+	}
+
+	// windowDays=30 includes both rows.
+	got, err = s.PassRateByEntity(context.Background(), "task-win", 30)
+	if err != nil {
+		t.Fatalf("PassRateByEntity windowDays=30: %v", err)
+	}
+	if got.TotalRuns != 2 {
+		t.Errorf("windowDays=30 TotalRuns: got %d want 2", got.TotalRuns)
+	}
+
+	// windowDays<=0 disables the filter — both rows included.
+	got, err = s.PassRateByEntity(context.Background(), "task-win", 0)
+	if err != nil {
+		t.Fatalf("PassRateByEntity windowDays=0: %v", err)
+	}
+	if got.TotalRuns != 2 {
+		t.Errorf("windowDays=0 TotalRuns: got %d want 2 (no filter)", got.TotalRuns)
+	}
+}
+
+func TestFrontierByManifest_perTaskMap(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	now := time.Now().UTC()
+	insertTerminalRow(t, s, "run-a1", "task-a", EventCompleted, TerminalReasonSuccess, 3, 0.10, now)
+	insertTerminalRow(t, s, "run-a2", "task-a", EventFailed, TerminalReasonTimeout, 5, 0.20, now.Add(time.Second))
+	insertTerminalRow(t, s, "run-b1", "task-b", EventCompleted, TerminalReasonMaxTurns, 100, 0.50, now)
+	// task-c has zero runs and should be absent from result.
+
+	got, err := s.FrontierByManifest(context.Background(), []string{"task-a", "task-b", "task-c"}, 30)
+	if err != nil {
+		t.Fatalf("FrontierByManifest: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got): %d want 2 (task-c absent)", len(got))
+	}
+	if _, ok := got["task-c"]; ok {
+		t.Error("task-c should be absent from result map (no runs)")
+	}
+	a := got["task-a"]
+	if a.TotalRuns != 2 || a.SuccessRuns != 1 || a.TimeoutRuns != 1 {
+		t.Errorf("task-a: total=%d success=%d timeout=%d, want 2/1/1",
+			a.TotalRuns, a.SuccessRuns, a.TimeoutRuns)
+	}
+	if a.PassRate != 0.5 {
+		t.Errorf("task-a PassRate: got %v want 0.5", a.PassRate)
+	}
+	b := got["task-b"]
+	if b.TotalRuns != 1 || b.MaxTurnsRuns != 1 || b.PassRate != 0.0 {
+		t.Errorf("task-b: total=%d max_turns=%d pass=%v, want 1/1/0.0",
+			b.TotalRuns, b.MaxTurnsRuns, b.PassRate)
+	}
+}
+
+func TestPassRateByEntity_emptyEntityUID(t *testing.T) {
+	db := openTestDB(t)
+	if err := InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db)
+	if _, err := s.PassRateByEntity(context.Background(), "", 30); err != ErrEmptyEntityID {
+		t.Errorf("expected ErrEmptyEntityID, got %v", err)
+	}
+}
+
 func TestBackfill_idempotent(t *testing.T) {
 	db := openTestDB(t)
 	if err := InitSchema(db); err != nil {

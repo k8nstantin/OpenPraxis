@@ -328,6 +328,12 @@ func apiExecutionLog(n *node.Node) http.HandlerFunc {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		// Recompute cost_per_turn / cost_per_action (and other ratios) so the
+		// response is correct even for legacy rows persisted before
+		// ComputeDerived was wired into the write path. Idempotent.
+		for i := range rows {
+			execution.ComputeDerived(&rows[i])
+		}
 		writeJSON(w, rows)
 	}
 }
