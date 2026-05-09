@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
@@ -25,26 +25,54 @@ function useEntityActions(entityId: string, runUid: string, isLive: boolean) {
 
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
   const { data, isLoading } = useEntityActions(entityId, runUid, true)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom as new actions arrive
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [data?.length])
+
   if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
   if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
+
+  const toggle = (id: string) => setExpanded(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
   return (
     <div className='max-h-96 overflow-y-auto font-mono text-xs'>
-      {[...data].reverse().map((a) => (
-        <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
-          <div className='flex items-center gap-2'>
-            <span className='text-blue-400 font-medium'>{a.tool_name}</span>
-            {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
-            <span className='text-muted-foreground ml-auto text-[10px]'>
-              {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
-            </span>
-          </div>
-          {a.tool_input && (
-            <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
-              {a.tool_input.slice(0, 120)}
+      {data.map((a) => {
+        const isExpanded = expanded.has(a.id)
+        const hasInput = !!a.tool_input
+        return (
+          <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
+            <div
+              className={`flex items-center gap-2 ${hasInput ? 'cursor-pointer' : ''}`}
+              onClick={() => hasInput && toggle(a.id)}
+            >
+              <span className='text-blue-400 font-medium'>{a.tool_name}</span>
+              {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
+              {hasInput && (
+                <span className='text-muted-foreground text-[10px]'>
+                  {isExpanded ? '▲ collapse' : '▼ expand'}
+                </span>
+              )}
+              <span className='text-muted-foreground ml-auto text-[10px]'>
+                {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
+              </span>
             </div>
-          )}
-        </div>
-      ))}
+            {hasInput && (
+              <div className={`text-muted-foreground mt-0.5 text-[10px] ${isExpanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`}>
+                {isExpanded ? a.tool_input : a.tool_input.slice(0, 120)}
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <div ref={bottomRef} />
     </div>
   )
 }
