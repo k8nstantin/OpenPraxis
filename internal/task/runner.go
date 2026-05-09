@@ -730,7 +730,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	}
 
 	// Build the prompt
-	prompt, err := buildPrompt(t, manifestTitle, manifestContent, visceralRules, knobs.BranchPrefix, r.tmpl)
+	prompt, err := buildPrompt(t, manifestTitle, manifestContent, visceralRules, knobs, r.tmpl, r.executionLog, r.commentsStore)
 	if err != nil {
 		return fmt.Errorf("build prompt: %w", err)
 	}
@@ -1581,16 +1581,31 @@ func (r *Runner) GetOutput(taskID string) ([]string, bool) {
 	return rt.Output, true
 }
 
-// buildPrompt assembles the runner's task prompt from the seven prompt
-// sections (RC/M1 read substrate). Each section body is resolved via
-// tmpl (task → manifest → product → agent → system) and rendered as a
+// defaultModelContextChars is the fallback context-window size used for
+// prompt budget calculations. Multiplied by knobs.PromptMaxContextPct to
+// yield the byte budget that PriorRuns + OtherComments must fit within.
+// Hardcoded number is centralized here so tuning is a single edit.
+const defaultModelContextChars = 200_000
+
+// buildPrompt assembles the runner's task prompt from the prompt sections
+// (RC/M1 read substrate). Each section body is resolved via tmpl
+// (task → manifest → product → agent → system) and rendered as a
 // text/template against a shared PromptData payload.
 //
 // When tmpl is nil, or a section resolves to "", the package defaults
 // in internal/templates are used so every historical test harness + the
 // snapshot test produce byte-identical output to the pre-RC/M1
 // hardcoded writer.
-func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules, branchPfx string, tmpl *templates.Resolver) (string, error) {
+//
+// execLog and commentsStore feed the prior_context section with run
+// digests and prior agent comments respectively. Either may be nil — the
+// section template guards on empty slices and renders nothing in that
+// case. knobs.PromptBuildTimeoutSecs bounds the history queries so a
+// slow DB cannot stall task dispatch.
+func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string,
+	knobs runtimeKnobs, tmpl *templates.Resolver,
+	execLog *execution.Store, commentsStore *comments.Store) (string, error) {
+	branchPfx := knobs.BranchPrefix
 	if branchPfx == "" {
 		branchPfx = "openpraxis"
 	}
@@ -1611,8 +1626,63 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules, branchP
 		Now:           time.Now(),
 	}
 
+	timeoutSecs := knobs.PromptBuildTimeoutSecs
+	if timeoutSecs <= 0 {
+		timeoutSecs = 5
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
+	defer cancel()
+
+	if execLog != nil && knobs.PromptPriorRunsLimit > 0 {
+		rows, _ := execLog.ListByEntity(ctx, t.ID, knobs.PromptPriorRunsLimit)
+		for i, row := range rows {
+			runShort := row.RunUID
+			if len(runShort) > 8 {
+				runShort = runShort[:8]
+			}
+			line := fmt.Sprintf("Run #%d (%s) — %s/%s — %d turns, %d actions, $%.3f, %dms. Branch: %s. Lines: +%d/-%d.",
+				i+1, runShort, row.Event, row.TerminalReason,
+				row.Turns, row.Actions, row.EstimatedCostUSD, row.DurationMS,
+				row.Branch, row.LinesAdded, row.LinesRemoved)
+			if knobs.PromptMaxCommentChars > 0 && len(line) > knobs.PromptMaxCommentChars {
+				line = line[:knobs.PromptMaxCommentChars]
+			}
+			data.PriorRuns = append(data.PriorRuns, line)
+		}
+	}
+
+	if commentsStore != nil && knobs.PromptPriorCommentsLimit > 0 {
+		ct := comments.TypeComment
+		cms, _ := commentsStore.List(ctx, comments.TargetEntity, t.ID, knobs.PromptPriorCommentsLimit, &ct)
+		for _, c := range cms {
+			body := c.Body
+			if knobs.PromptMaxCommentChars > 0 && len(body) > knobs.PromptMaxCommentChars {
+				body = body[:knobs.PromptMaxCommentChars] + "\n[truncated]"
+			}
+			data.OtherComments = append(data.OtherComments, body)
+		}
+	}
+
+	if knobs.PromptMaxContextPct > 0 {
+		budget := int(float64(defaultModelContextChars) * knobs.PromptMaxContextPct)
+		used := 0
+		for _, s := range data.PriorRuns {
+			used += len(s)
+		}
+		for _, s := range data.OtherComments {
+			used += len(s)
+		}
+		for used > budget && len(data.PriorRuns) > 0 {
+			used -= len(data.PriorRuns[len(data.PriorRuns)-1])
+			data.PriorRuns = data.PriorRuns[:len(data.PriorRuns)-1]
+		}
+		for used > budget && len(data.OtherComments) > 0 {
+			used -= len(data.OtherComments[len(data.OtherComments)-1])
+			data.OtherComments = data.OtherComments[:len(data.OtherComments)-1]
+		}
+	}
+
 	defaults := templates.SystemDefaults()
-	ctx := context.Background()
 
 	var b strings.Builder
 	for _, section := range templates.Sections {

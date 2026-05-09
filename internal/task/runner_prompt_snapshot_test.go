@@ -91,7 +91,7 @@ func TestRunner_BuildPrompt_ByteIdentical(t *testing.T) {
 
 	legacy := legacyBuildPrompt(sample, manifestTitle, manifestContent, visceralRules)
 
-	got, err := buildPrompt(sample, manifestTitle, manifestContent, visceralRules, "openpraxis", nil)
+	got, err := buildPrompt(sample, manifestTitle, manifestContent, visceralRules, runtimeKnobs{BranchPrefix: "openpraxis"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPrompt: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestRunner_BuildPrompt_ByteIdentical(t *testing.T) {
 // render as an empty wrapper.
 func TestRunner_BuildPrompt_VisceralRulesEmpty(t *testing.T) {
 	sample := &Task{ID: "abc", Title: "x"}
-	got, err := buildPrompt(sample, "M", "m body", "", "openpraxis", nil)
+	got, err := buildPrompt(sample, "M", "m body", "", runtimeKnobs{BranchPrefix: "openpraxis"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPrompt: %v", err)
 	}

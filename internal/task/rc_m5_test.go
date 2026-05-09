@@ -33,7 +33,7 @@ func insertRunningTask(t *testing.T, db *sql.DB, taskID string) {
 // qa/<id-prefix>`) is the concrete shape we assert.
 func TestBuildPrompt_BranchPrefixOverride(t *testing.T) {
 	task := &Task{ID: "019dba9f-9c5b-76ba-8221-e7e11093887f", Title: "T", Description: "D"}
-	got, err := buildPrompt(task, "M", "m body", "", "qa", nil)
+	got, err := buildPrompt(task, "M", "m body", "", runtimeKnobs{BranchPrefix: "qa"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPrompt: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestBuildPrompt_BranchPrefixOverride(t *testing.T) {
 // seeded DB).
 func TestBuildPrompt_EmptyBranchPrefixFallsBack(t *testing.T) {
 	task := &Task{ID: "019dba9f-9c5b-76ba-8221-e7e11093887f", Title: "T"}
-	got, err := buildPrompt(task, "M", "m body", "", "", nil)
+	got, err := buildPrompt(task, "M", "m body", "", runtimeKnobs{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPrompt: %v", err)
 	}
