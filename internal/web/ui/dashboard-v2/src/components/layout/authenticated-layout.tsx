@@ -18,7 +18,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
       <LayoutProvider>
         <SidebarProvider defaultOpen={defaultOpen}>
           <SkipToMain />
-          <AppSidebar />
+          <AppSidebar entityTree={null} />
           <SidebarInset
             className={cn(
               // Set content container, so we can use container queries

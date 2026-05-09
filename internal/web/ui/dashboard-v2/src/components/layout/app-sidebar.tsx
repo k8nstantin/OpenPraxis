@@ -3,6 +3,9 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarRail,
 } from '@/components/ui/sidebar'
@@ -12,7 +15,11 @@ import { NavGroup } from './nav-group'
 import { NavUser } from './nav-user'
 import { TeamSwitcher } from './team-switcher'
 
-export function AppSidebar() {
+type AppSidebarProps = {
+  entityTree?: React.ReactNode
+}
+
+export function AppSidebar({ entityTree = null }: AppSidebarProps = {}) {
   const { collapsible, variant } = useLayout()
   return (
     <Sidebar collapsible={collapsible} variant={variant}>
@@ -27,6 +34,12 @@ export function AppSidebar() {
         {sidebarData.navGroups.map((props) => (
           <NavGroup key={props.title} {...props} />
         ))}
+        {entityTree !== null && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Entities</SidebarGroupLabel>
+            <SidebarGroupContent>{entityTree}</SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={sidebarData.user} />
