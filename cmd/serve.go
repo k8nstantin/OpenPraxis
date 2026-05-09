@@ -227,6 +227,41 @@ var serveCmd = &cobra.Command{
 								if err := dispatchChainFn(ctx, parentID, 0); err != nil {
 									slog.Info("dag-chain: dispatch after task_completed", "parent", parentID[:12], "note", err.Error())
 								}
+								// After dispatching within the manifest, check if the
+								// manifest itself is now fully done (all owned tasks
+								// completed). If so, fire any manifests that depend on
+								// it via manifest-level depends_on edges.
+								if e.SrcKind != relationships.KindManifest || n.ExecutionLog == nil {
+									return
+								}
+								manifestID := e.SrcID
+								ownedTasks, _ := n.Relationships.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
+								allDone := len(ownedTasks) > 0
+								for _, ot := range ownedTasks {
+									if ot.DstKind != relationships.KindTask {
+										continue
+									}
+									done, _ := n.ExecutionLog.HasCompleted(ctx, ot.DstID)
+									if !done {
+										allDone = false
+										break
+									}
+								}
+								if !allDone {
+									return
+								}
+								// All tasks complete — fire downstream manifests.
+								downstreams, _ := n.Relationships.ListIncoming(ctx, manifestID, relationships.EdgeDependsOn)
+								for _, ds := range downstreams {
+									if ds.SrcKind != relationships.KindManifest {
+										continue
+									}
+									dsID := ds.SrcID
+									slog.Info("dag-chain: manifest complete — firing downstream manifest", "done", manifestID[:12], "next", dsID[:12])
+									if err := dispatchChainFn(ctx, dsID, 0); err != nil {
+										slog.Info("dag-chain: downstream manifest dispatch", "manifest", dsID[:12], "note", err.Error())
+									}
+								}
 							}()
 							break
 						}
