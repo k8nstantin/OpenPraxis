@@ -55,7 +55,7 @@ func legacyBuildPrompt(t *Task, manifestTitle, manifestContent, visceralRules st
 	b.WriteString("MANDATORY — before your final commit+push, call the MCP tool:\n\n")
 	b.WriteString("    mcp__openpraxis__comment_add\n")
 	b.WriteString(fmt.Sprintf("      target_type = \"task\"\n      target_id   = \"%s\"\n", t.ID))
-	b.WriteString("      type        = \"execution_review\"\n")
+	b.WriteString("      type        = \"comment\"\n")
 	b.WriteString("      author      = \"agent\"\n")
 	b.WriteString("      body        = <markdown summary>\n\n")
 	b.WriteString("The body should include:\n")

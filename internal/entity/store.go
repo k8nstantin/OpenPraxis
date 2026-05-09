@@ -281,6 +281,29 @@ func (s *Store) History(entityUID string) ([]*Entity, error) {
 	return scanEntities(rows)
 }
 
+// ListByIDs returns current (valid_to = '') rows for the given entity UIDs in a
+// single query. Missing or non-current entities are silently omitted.
+func (s *Store) ListByIDs(ids []string) ([]*Entity, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `SELECT row_id, entity_uid, type, title, status, tags,
+		valid_from, valid_to, changed_by, change_reason, created_at
+		FROM entities WHERE entity_uid IN (` + strings.Join(placeholders, ",") + `) AND valid_to = ''`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("entity: list_by_ids: %w", err)
+	}
+	defer rows.Close()
+	return scanEntities(rows)
+}
+
 // Search returns current rows where title contains query (case-insensitive
 // substring), optionally filtered by entityType. limit=0 returns all matches.
 func (s *Store) Search(query, entityType string, limit int) ([]*Entity, error) {

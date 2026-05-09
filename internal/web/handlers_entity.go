@@ -384,13 +384,32 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 		if e.Type == "manifest" {
 			// manifest → tasks
 			edges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
+
+			// Collect all task IDs first, then batch-fetch titles.
+			var taskIDs []string
+			for _, edge := range edges {
+				if edge.DstKind == "task" {
+					taskIDs = append(taskIDs, edge.DstID)
+				}
+			}
+			titleByID := make(map[string]string, len(taskIDs))
+			if len(taskIDs) > 0 {
+				entities, err := n.Entities.ListByIDs(taskIDs)
+				if err != nil {
+					slog.Warn("apiEntityExecutionLog: ListByIDs failed", "error", err)
+				} else {
+					for _, te := range entities {
+						titleByID[te.EntityUID] = te.Title
+					}
+				}
+			}
+
 			result := []taskRuns{}
 			for _, edge := range edges {
 				if edge.DstKind == "task" {
-					te, _ := n.Entities.Get(edge.DstID)
 					title := edge.DstID
-					if te != nil {
-						title = te.Title
+					if t, ok := titleByID[edge.DstID]; ok {
+						title = t
 					}
 					result = append(result, taskRunsFor(edge.DstID, title))
 				}
@@ -401,30 +420,74 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 
 		// product → manifests → tasks
 		manifEdges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
-		groups := []manifestGroup{}
+
+		// Pass 1: collect manifest IDs and, per manifest, their task edges.
+		// This is O(manifests) relationship queries — unavoidable without a
+		// new bulk-walk API. Entity title lookups are batched below.
+		type manifData struct {
+			id        string
+			taskEdges []relationships.Edge
+		}
+		var manifList []manifData
+		var allTaskIDs []string
+		var manifIDs []string
 		for _, me := range manifEdges {
 			if me.DstKind != "manifest" {
 				continue
 			}
-			manEnt, _ := n.Entities.Get(me.DstID)
-			manTitle := me.DstID
-			if manEnt != nil {
-				manTitle = manEnt.Title
-			}
-			taskEdges, _ := n.Relationships.ListOutgoing(ctx, me.DstID, "owns")
-			tasks := []taskRuns{}
-			for _, te := range taskEdges {
+			manifIDs = append(manifIDs, me.DstID)
+			tEdges, _ := n.Relationships.ListOutgoing(ctx, me.DstID, "owns")
+			md := manifData{id: me.DstID, taskEdges: tEdges}
+			for _, te := range tEdges {
 				if te.DstKind == "task" {
-					tEnt, _ := n.Entities.Get(te.DstID)
-					tTitle := te.DstID
-					if tEnt != nil {
-						tTitle = tEnt.Title
-					}
-					tasks = append(tasks, taskRunsFor(te.DstID, tTitle))
+					allTaskIDs = append(allTaskIDs, te.DstID)
 				}
 			}
+			manifList = append(manifList, md)
+		}
+
+		// Pass 2: two ListByIDs calls — one for all manifests, one for all tasks.
+		manifTitleByID := make(map[string]string, len(manifIDs))
+		if len(manifIDs) > 0 {
+			if ents, err := n.Entities.ListByIDs(manifIDs); err != nil {
+				slog.Warn("apiEntityExecutionLog: ListByIDs manifests failed", "error", err)
+			} else {
+				for _, e := range ents {
+					manifTitleByID[e.EntityUID] = e.Title
+				}
+			}
+		}
+		taskTitleByID := make(map[string]string, len(allTaskIDs))
+		if len(allTaskIDs) > 0 {
+			if ents, err := n.Entities.ListByIDs(allTaskIDs); err != nil {
+				slog.Warn("apiEntityExecutionLog: ListByIDs tasks failed", "error", err)
+			} else {
+				for _, e := range ents {
+					taskTitleByID[e.EntityUID] = e.Title
+				}
+			}
+		}
+
+		// Pass 3: assemble result from pre-fetched data.
+		groups := []manifestGroup{}
+		for _, md := range manifList {
+			manTitle := md.id
+			if t, ok := manifTitleByID[md.id]; ok {
+				manTitle = t
+			}
+			tasks := []taskRuns{}
+			for _, te := range md.taskEdges {
+				if te.DstKind != "task" {
+					continue
+				}
+				tTitle := te.DstID
+				if t, ok := taskTitleByID[te.DstID]; ok {
+					tTitle = t
+				}
+				tasks = append(tasks, taskRunsFor(te.DstID, tTitle))
+			}
 			groups = append(groups, manifestGroup{
-				ManifestID: me.DstID, ManifestTitle: manTitle, Tasks: tasks,
+				ManifestID: md.id, ManifestTitle: manTitle, Tasks: tasks,
 			})
 		}
 		writeJSON(w, groups)

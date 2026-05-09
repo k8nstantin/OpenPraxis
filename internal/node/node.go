@@ -25,7 +25,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/task"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
-	"github.com/k8nstantin/OpenPraxis/internal/watcher"
 
 	gpcpu     "github.com/shirou/gopsutil/v3/cpu"
 	gpdisk    "github.com/shirou/gopsutil/v3/disk"
@@ -44,10 +43,7 @@ type Node struct {
 	Markers       *marker.Store
 	Actions       *action.Store
 	Entities      *entity.Store
-	// Tasks is still needed by the task runner — TODO: migrate to entity store
-	// Tasks field removed — all task data lives in entities + execution_log
 	ChatSessions     *chat.SessionStore
-	Watcher          *watcher.Store
 	SettingsStore    *settings.Store
 	SettingsResolver *settings.Resolver
 	Templates        *templates.Store
@@ -152,11 +148,6 @@ func New(cfg *config.Config) (*Node, error) {
 	chatStore, err := chat.NewSessionStore(index.DB())
 	if err != nil {
 		return nil, fmt.Errorf("init chat store: %w", err)
-	}
-
-	watcherStore, err := watcher.NewStore(index.DB())
-	if err != nil {
-		return nil, fmt.Errorf("init watcher store: %w", err)
 	}
 
 	if err := settings.InitSchema(index.DB()); err != nil {
@@ -269,7 +260,6 @@ func New(cfg *config.Config) (*Node, error) {
 		Actions:          actionStore,
 		Entities:         entityStore,
 		ChatSessions:     chatStore,
-		Watcher:          watcherStore,
 		SettingsStore:    settingsStore,
 		SettingsResolver: settingsResolver,
 		Templates:        templatesStore,
@@ -434,7 +424,7 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	// Empty repoDir → Runner falls back to process CWD at spawn time.
 	// cmd/serve.go passes an explicit dir via a follow-up SetRepoDir if it
 	// runs from outside the repo root.
-	n.runner = task.NewRunner(n.Actions, n.SettingsResolver, "", onEvent)
+	n.runner = task.NewRunner(nil, n.Actions, n.SettingsResolver, "", onEvent)
 	// Wire the post-completion comment gate (M4-T10). Non-fatal
 	// if Comments is nil — the runner treats nil as "feature off".
 	if n.Comments != nil {

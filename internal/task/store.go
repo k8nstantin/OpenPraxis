@@ -109,7 +109,9 @@ type Store struct {
 	// tasks.depends_on cache column (out of scope for this PR — kept
 	// because the scheduler + runner read it directly). The legacy
 	// task_dependency SCD audit table is dormant.
-	rels *relationships.Store
+	rels         *relationships.Store
+	reviewWriter ReviewWriter
+	reviewReader ReviewReader
 }
 
 // SetRelationshipsBackend wires the unified relationships SCD-2 store

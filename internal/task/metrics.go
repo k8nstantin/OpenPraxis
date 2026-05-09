@@ -553,16 +553,14 @@ type ProductivityMetrics struct {
 	// Positive signals
 	TasksCompleted    int `json:"tasks_completed"`
 	FirstAttemptPass  int `json:"first_attempt_pass"`  // completed on run 1
-	LinesCommitted   int `json:"lines_committed"`      // insertions from watcher git_details
+	LinesCommitted   int `json:"lines_committed"`      // insertions from git_details
 	FilesChanged     int `json:"files_changed"`
-	WatcherPassRate  int `json:"watcher_pass_rate"`     // percentage
 	TotalActions     int `json:"total_actions"`
 
 	// Negative signals
 	TasksFailed      int `json:"tasks_failed"`
 	ReworkRuns       int `json:"rework_runs"`           // tasks with run_count > 1
 	AmnesiaCount     int `json:"amnesia_count"`
-	WatcherFailures  int `json:"watcher_failures"`
 
 	// Efficiency
 	AvgTurnsPerTask  float64 `json:"avg_turns_per_task"`
@@ -634,20 +632,7 @@ func (s *Store) Productivity(db *sql.DB, period string) (*ProductivityMetrics, e
 		AND task_id IN (SELECT id FROM tasks WHERE run_count > 1)
 	`, dateFilter)).Scan(&m.ReworkRuns)
 
-	// Watcher pass/fail from watcher_audits
-	var watcherTotal, watcherPassed, watcherFailed int
-	s.db.QueryRow(`
-		SELECT COUNT(*),
-			COALESCE(SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0)
-		FROM watcher_audits
-	`).Scan(&watcherTotal, &watcherPassed, &watcherFailed)
-	m.WatcherFailures = watcherFailed
-	if watcherTotal > 0 {
-		m.WatcherPassRate = int(float64(watcherPassed) / float64(watcherTotal) * 100)
-	}
-
-	// Lines committed + files changed from watcher git_details JSON
+	// Lines committed + files changed from git_details JSON
 	rows, err := db.Query(`SELECT git_details FROM watcher_audits WHERE git_details != ''`)
 	if err == nil {
 		defer rows.Close()
@@ -690,9 +675,6 @@ func (s *Store) Productivity(db *sql.DB, period string) (*ProductivityMetrics, e
 		// First-attempt success rate (0-25 points) — efficiency matters
 		firstAttemptRate := float64(m.FirstAttemptPass) / float64(totalRuns)
 		score += firstAttemptRate * 25
-
-		// Watcher pass rate (0-15 points) — quality gate
-		score += float64(m.WatcherPassRate) / 100 * 15
 
 		// Failure penalty (-20 max)
 		failRate := float64(m.TasksFailed) / float64(totalRuns)
