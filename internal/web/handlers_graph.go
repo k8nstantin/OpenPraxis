@@ -111,18 +111,6 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			addNode(root.EntityUID, root.Type, root.Title, root.Status)
 		}
 
-		// For products: walk UP to find governing skills so they render above the product.
-		if rootKind == relationships.KindProduct && n.Relationships != nil {
-			parentEdges, _ := n.Relationships.ListIncoming(r.Context(), rootID, relationships.EdgeOwns)
-			for _, edge := range parentEdges {
-				if edge.SrcKind == relationships.KindSkill {
-					if skill, _ := n.Entities.Get(edge.SrcID); skill != nil {
-						addNode(skill.EntityUID, relationships.KindSkill, skill.Title, skill.Status)
-						nodeSet[skill.EntityUID] = true
-					}
-				}
-			}
-		}
 
 		for _, id := range skillIDs {
 			if e, _ := n.Entities.Get(id); e != nil {
