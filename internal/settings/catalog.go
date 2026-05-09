@@ -79,6 +79,9 @@ func Catalog() []KnobDef {
 		{Key: "prompt_prior_runs_limit", Type: KnobInt, SliderMin: f(0), SliderMax: f(20), SliderStep: f(1), Default: 5, Description: "How many prior execution-log rows to inject into the prior_context prompt section. 0 disables."},
 		{Key: "prompt_prior_comments_limit", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 3, Description: "How many prior agent-authored comments (type=comment) to inject into the prior_context prompt section. 0 disables."},
 		{Key: "prompt_build_timeout_seconds", Type: KnobInt, SliderMin: f(1), SliderMax: f(30), SliderStep: f(1), Default: 5, Unit: "seconds", Description: "Deadline for prompt-build history queries. Prevents a slow DB from blocking task dispatch."},
+		// Frontier & Scoring — rolling-window pass-rate computation. Used by
+		// the M2 frontier endpoint and the M3 proposer loop.
+		{Key: "frontier_window_days", Type: KnobInt, SliderMin: f(1), SliderMax: f(90), SliderStep: f(1), Default: 30, Unit: "days", Description: "Rolling window for per-task and per-manifest pass-rate computation. Runs older than this window are excluded."},
 		{Key: "compliance_checks_enabled", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "true", Description: "When true, PostToolUse hooks run visceral-compliance + manifest-delusion embedding checks per tool call. Disable for high-throughput agents — each tool call triggers up to N × M embedding calls (N rules, M open manifests) which can peg serve CPU. Defaults true; set false at product or task scope to opt out."},
 		// RC/M5 operator knobs — cadence, restart behavior, branch prefix,
 		// worktree base dir. All inherit via task → manifest → product →
@@ -90,6 +93,15 @@ func Catalog() []KnobDef {
 		{Key: "branch_strategy", Type: KnobEnum, EnumValues: []string{"task", "manifest", "product"}, Default: "task", Description: "Branch scope for agent runs. task=own branch + PR per task (default). manifest=all tasks in the manifest share one branch derived from the manifest title. product=all tasks across all manifests share one branch derived from the product title."},
 		{Key: "branch_remote", Type: KnobString, Default: "github", Description: "Git remote name used in branch checkout instructions injected into agent prompts. Default is 'github'. Set to 'origin' for Bitbucket, GitLab, or any other remote."},
 		{Key: "worktree_base_dir", Type: KnobString, Default: ".openpraxis-work", Description: "Directory under the repo root where per-task git worktrees are materialised. Absolute paths are supported for out-of-tree worktrees."},
+		// Proposer Loop — autonomous scaffold-evolution knobs. Gated by
+		// proposer_enabled (off by default). Triggers fire from the runner's
+		// post-execute hook (see M3/T2). All knobs inherit task → manifest →
+		// product → system like every other catalog entry.
+		{Key: "proposer_enabled", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "false", Description: "Enables the autonomous proposer loop. When true, the runner monitors manifest pass rates and fires a proposer task when a trigger condition is met. Requires at least one trigger knob to be non-zero."},
+		{Key: "proposer_trigger_failure_streak", Type: KnobInt, SliderMin: f(1), SliderMax: f(20), SliderStep: f(1), Default: 3, Description: "Consecutive non-transient failures (max_turns or deliverable_missing) on a manifest before the proposer auto-fires. Transient failures (timeout, process_error) do not count."},
+		{Key: "proposer_trigger_cost_usd", Type: KnobFloat, SliderMin: f(0), SliderMax: f(1000), SliderStep: f(0.5), Default: 0.0, Unit: "USD", Description: "Per-run cost threshold. When a run exceeds this, the proposer fires for that manifest. 0 disables cost-based triggering."},
+		{Key: "proposer_min_pass_rate_delta", Type: KnobFloat, SliderMin: f(0), SliderMax: f(1), SliderStep: f(0.01), Default: 0.05, Description: "Minimum pass-rate improvement required to accept a candidate template change. Candidates below this delta are tombstoned and the prior body restored."},
+		{Key: "proposer_max_candidates", Type: KnobInt, SliderMin: f(1), SliderMax: f(10), SliderStep: f(1), Default: 3, Description: "Max template variant candidates per proposer iteration. Each must test exactly one mechanism change. Caps the evaluation queue size."},
 		{Key: "allowed_tools", Type: KnobMultiselect, Default: []string{
 			"Bash", "Read", "Write", "Edit", "Glob", "Grep",
 			// MCP tools the runner's prompt template instructs agents to call.
@@ -107,6 +119,15 @@ func Catalog() []KnobDef {
 			"mcp__openpraxis__settings_resolve",
 			"mcp__openpraxis__settings_catalog",
 			"mcp__openpraxis__comment_add",
+			// Template + entity tools required by the M3 proposer/evaluator
+			// protocol — proposer applies a one-axis change via template_set
+			// or entity_update; evaluator rolls back via template_tombstone
+			// when the candidate fails to clear the pass-rate delta.
+			"mcp__openpraxis__template_set",
+			"mcp__openpraxis__template_get",
+			"mcp__openpraxis__template_history",
+			"mcp__openpraxis__template_tombstone",
+			"mcp__openpraxis__entity_get",
 		}, Description: "Tool allowlist for agent. Includes MCP tools the runner prompts reference; removing any breaks the corresponding closing step."},
 		// Frontend dashboard v2 cutover flags. Resolve at system scope; the
 		// existing inheritance chain still applies if an operator wants to

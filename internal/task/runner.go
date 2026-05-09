@@ -18,6 +18,8 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
+	"github.com/k8nstantin/OpenPraxis/internal/schedule"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
@@ -135,6 +137,19 @@ type Runner struct {
 	// comment for a task when building the prompt. Nil → falls back to
 	// task.Description from the tasks row.
 	commentsStore *comments.Store
+
+	// relsStore is the unified SCD-2 relationships store. The runner uses
+	// it directly (rather than indirecting through r.store) because the
+	// task package's legacy *Store is wired as nil in production — the
+	// runner is fed relationships through SetRelationships at boot. Nil
+	// disables the proposer trigger path.
+	relsStore *relationships.Store
+
+	// scheduleStore is the schedules table backing the cron-driven
+	// dispatcher. The proposer trigger path inserts a one-shot schedule
+	// row to fire the auto-created proposer task. Nil disables the
+	// proposer trigger path.
+	scheduleStore *schedule.Store
 }
 
 // SetHostSampler wires a started HostSampler onto the runner. Attach is
@@ -156,6 +171,16 @@ func (r *Runner) SetExecutionLog(el *execution.Store) { r.executionLog = el }
 // builder can fetch the latest prompt for a task. When nil,
 // the runner uses task.Description from the tasks row directly.
 func (r *Runner) SetCommentsStore(cs *comments.Store) { r.commentsStore = cs }
+
+// SetRelationships wires the unified relationships store onto the runner.
+// Nil disables any code path that requires DAG traversal (currently the
+// proposer trigger path). Call once at startup.
+func (r *Runner) SetRelationships(rs *relationships.Store) { r.relsStore = rs }
+
+// SetScheduleStore wires the schedules table onto the runner so the
+// proposer trigger path can enqueue a one-shot schedule for a freshly
+// minted proposer task. Nil disables the proposer trigger path.
+func (r *Runner) SetScheduleStore(ss *schedule.Store) { r.scheduleStore = ss }
 
 // SetTemplateResolver wires the RC/M1 prompt-template resolver onto
 // the runner. Nil disables scope-aware resolution — the runner uses the
@@ -219,6 +244,138 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, r
 					"component", "runner", "task_id", taskID, "error", amnErr)
 			}
 		}
+	}
+}
+
+// proposerStreakKey is the settings-table key under which the runner
+// persists the per-manifest non-transient-failure streak counter for the
+// proposer trigger. Underscore prefix marks it as internal runtime state
+// (mirrors retryCountKey above) — operators do not edit this directly.
+const proposerStreakKey = "_proposer_failure_streak"
+
+// proposerTaskTitle is the entity title used when the runner auto-creates
+// a meta-harness proposer task. Centralised so dashboards / tests can
+// match against one canonical string.
+const proposerTaskTitle = "meta-harness proposer"
+
+// checkProposerTriggers updates the per-manifest non-transient-failure
+// streak after a terminal run and, when either the streak or the cost
+// threshold trips, auto-fires a meta-harness proposer task under the
+// owning manifest. Wired off the ProposerEnabled knob; nil store fields
+// short-circuit so the path is safe to invoke even on partially wired
+// runners (tests / boot order).
+//
+// Failure classification is single-source-of-truth: transient failures
+// (timeout / process_error / build_fail) reset the streak, non-transient
+// failures (max_turns / deliverable_missing) advance it, and any other
+// reason — success included — leaves the counter unchanged so a single
+// successful run does NOT clear a building streak. The proposer fires
+// at-or-above the configured streak length OR strictly above the cost
+// threshold; on fire the streak resets so the proposer doesn't re-fire
+// on the very next run.
+func (r *Runner) checkProposerTriggers(ctx context.Context, t *Task, reason string, row *execution.Row, knobs runtimeKnobs) {
+	if r.relsStore == nil || r.entityStore == nil || r.scheduleStore == nil {
+		return
+	}
+	if r.resolver == nil || r.resolver.Store() == nil {
+		return
+	}
+
+	// Find the parent manifest via the SCD-2 relationships graph (never
+	// the legacy tasks.manifest_id column — it's been removed). A task
+	// without a manifest parent has no scope to score, so the proposer
+	// can't act on it; bail.
+	edges, err := r.relsStore.ListIncoming(ctx, t.ID, relationships.EdgeOwns)
+	if err != nil {
+		slog.Warn("proposer trigger: list incoming edges failed",
+			"component", "runner", "task_id", t.ID, "error", err)
+		return
+	}
+	manifestID := ""
+	for _, e := range edges {
+		if e.SrcKind == relationships.KindManifest {
+			manifestID = e.SrcID
+			break
+		}
+	}
+	if manifestID == "" {
+		return
+	}
+
+	// Streak counter at manifest scope — survives runs of any task under
+	// the manifest, which is the unit the proposer cares about.
+	settingsStore := r.resolver.Store()
+	streak := 0
+	if entry, gerr := settingsStore.Get(ctx, settings.ScopeManifest, manifestID, proposerStreakKey); gerr == nil && entry.Value != "" {
+		if uerr := json.Unmarshal([]byte(entry.Value), &streak); uerr != nil {
+			slog.Warn("proposer trigger: decode streak failed, treating as 0",
+				"component", "runner", "manifest_id", manifestID, "raw", entry.Value, "error", uerr)
+			streak = 0
+		}
+	}
+	switch reason {
+	case execution.TerminalReasonMaxTurns, execution.TerminalReasonDeliverableMissing:
+		streak++
+	case execution.TerminalReasonTimeout, execution.TerminalReasonProcessError, execution.TerminalReasonBuildFail:
+		streak = 0
+	}
+	if raw, merr := json.Marshal(streak); merr == nil {
+		if serr := settingsStore.Set(ctx, settings.ScopeManifest, manifestID, proposerStreakKey, string(raw), "runner"); serr != nil {
+			slog.Warn("proposer trigger: persist streak failed",
+				"component", "runner", "manifest_id", manifestID, "error", serr)
+		}
+	}
+
+	streakFired := knobs.ProposerTriggerFailureStreak > 0 && streak >= knobs.ProposerTriggerFailureStreak
+	costFired := knobs.ProposerTriggerCostUSD > 0 && row != nil && row.EstimatedCostUSD > knobs.ProposerTriggerCostUSD
+	if !streakFired && !costFired {
+		return
+	}
+
+	// Reset the streak so a back-to-back failure on the very next run
+	// doesn't re-fire the proposer before the previous one has had a
+	// chance to land.
+	if raw, merr := json.Marshal(0); merr == nil {
+		if serr := settingsStore.Set(ctx, settings.ScopeManifest, manifestID, proposerStreakKey, string(raw), "runner"); serr != nil {
+			slog.Warn("proposer trigger: reset streak failed",
+				"component", "runner", "manifest_id", manifestID, "error", serr)
+		}
+	}
+
+	proposer, err := r.entityStore.Create(entity.TypeTask, proposerTaskTitle, entity.StatusDraft, nil, "runner", "auto-fired by proposer trigger")
+	if err != nil {
+		slog.Warn("proposer trigger: create entity failed",
+			"component", "runner", "manifest_id", manifestID, "error", err)
+		return
+	}
+	if err := r.relsStore.Create(ctx, relationships.Edge{
+		SrcKind:   relationships.KindManifest,
+		SrcID:     manifestID,
+		DstKind:   relationships.KindTask,
+		DstID:     proposer.EntityUID,
+		Kind:      relationships.EdgeOwns,
+		CreatedBy: "runner",
+		Reason:    "proposer auto-fired",
+	}); err != nil {
+		slog.Warn("proposer trigger: create owns edge failed",
+			"component", "runner", "manifest_id", manifestID,
+			"proposer_id", proposer.EntityUID, "error", err)
+	}
+
+	triggerReason := "failure streak"
+	if !streakFired {
+		triggerReason = "cost threshold"
+	}
+	if _, err := r.scheduleStore.Create(ctx, &schedule.Schedule{
+		EntityKind: schedule.KindTask,
+		EntityID:   proposer.EntityUID,
+		RunAt:      time.Now().UTC().Format(time.RFC3339),
+		CreatedBy:  "runner",
+		Reason:     "proposer trigger: " + triggerReason,
+	}); err != nil {
+		slog.Warn("proposer trigger: schedule failed",
+			"component", "runner", "manifest_id", manifestID,
+			"proposer_id", proposer.EntityUID, "error", err)
 	}
 }
 
@@ -544,6 +701,16 @@ type runtimeKnobs struct {
 	PromptPriorRunsLimit     int
 	PromptPriorCommentsLimit int
 	PromptBuildTimeoutSecs   int
+
+	// Proposer-loop knobs — drive the auto-firing meta-harness proposer.
+	// The catalog stores ProposerEnabled as an enum ("true"/"false"); the
+	// decoder normalises it to a bool so call sites read a real flag.
+	// ProposerTriggerFailureStreak == 0 disables streak-based firing;
+	// ProposerTriggerCostUSD == 0 disables cost-based firing. Both off
+	// means the trigger check is inert even if ProposerEnabled is true.
+	ProposerEnabled              bool
+	ProposerTriggerFailureStreak int
+	ProposerTriggerCostUSD       float64
 }
 
 // decodeRuntimeKnobs pulls the 11 execution-shaping knobs out of a
@@ -608,6 +775,21 @@ func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) 
 	}
 	if k.PromptBuildTimeoutSecs, err = resolvedInt(all["prompt_build_timeout_seconds"].Value); err != nil {
 		return k, fmt.Errorf("prompt_build_timeout_seconds: %w", err)
+	}
+	// proposer_enabled is stored as an enum ("true"/"false") so the catalog
+	// can render a dropdown; normalise to bool here so the runner toggles
+	// behaviour off the typed flag. A non-"true" value (including unset)
+	// disables the proposer trigger path entirely — fail-closed default.
+	enabledStr, err := resolvedStr(all["proposer_enabled"].Value)
+	if err != nil {
+		return k, fmt.Errorf("proposer_enabled: %w", err)
+	}
+	k.ProposerEnabled = enabledStr == "true"
+	if k.ProposerTriggerFailureStreak, err = resolvedInt(all["proposer_trigger_failure_streak"].Value); err != nil {
+		return k, fmt.Errorf("proposer_trigger_failure_streak: %w", err)
+	}
+	if k.ProposerTriggerCostUSD, err = resolvedFloat(all["proposer_trigger_cost_usd"].Value); err != nil {
+		return k, fmt.Errorf("proposer_trigger_cost_usd: %w", err)
 	}
 	return k, nil
 }
@@ -1188,6 +1370,11 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// tasks row (run_count, last_run_at, last_output, status).
 		// task run stats tracked in execution_log
 
+		// completedRunRow exposes the just-built terminal Row (with
+		// ComputeDerived already applied) to post-completion paths that
+		// need cost / token / turn fields — currently the proposer
+		// trigger check below. Stays nil when execution logging is off.
+		var completedRunRow *execution.Row
 		if r.executionLog != nil {
 			completedAtMS := time.Now().UnixMilli()
 			durationMS := completedAtMS - rt.StartedAt.UnixMilli()
@@ -1305,6 +1492,7 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				CreatedBy:         "runner",
 			}
 			execution.ComputeDerived(&completedRow)
+			completedRunRow = &completedRow
 			if err := r.executionLog.Insert(bgCtx, completedRow); err != nil {
 				slog.Warn("execution_log: insert completed event failed", "component", "runner", "task_id", t.ID, "error", err)
 			}
@@ -1351,6 +1539,15 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 		// surfaces on the dashboard. Non-blocking — the watcher still has
 		// final say on the completion status.
 		r.enforceExecutionReview(bgCtx, t.ID, status, reason)
+
+		// Proposer-loop trigger. Off by default; the catalog enum +
+		// per-scope override let operators enable it without restart.
+		// Failure-streak and cost thresholds are evaluated per parent
+		// manifest — if either trips, the runner spawns a proposer task
+		// and queues it on the schedules table. See checkProposerTriggers.
+		if knobs.ProposerEnabled {
+			r.checkProposerTriggers(bgCtx, t, reason, completedRunRow, knobs)
+		}
 
 		// Retry on transient failure. Counter persists across restarts via
 		// the settings table so a crash mid-retry does not reset progress.
