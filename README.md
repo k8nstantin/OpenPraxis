@@ -41,11 +41,17 @@ flowchart TB
 **Cost control, independent quality audit, cross-agent comparison, and forecasting are outcomes of the engine** — not separate tools bolted on.
 
 <p align="center">
-  <img src="docs/screenshots/v0.6/overview.png" alt="OpenPraxis dashboard — overview: stat cards, ECharts from execution_log, live activity" width="100%" />
+  <img src="docs/screenshots/v0.9/overview.png" alt="OpenPraxis v0.9 dashboard — overview with activity, turns, and live execution metrics" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/v0.9/product-dag.png" alt="OpenPraxis v0.9 — product DAG showing skills, manifests, tasks, and linked idea" width="49%" />
+  <img src="docs/screenshots/v0.9/settings-catalog.png" alt="OpenPraxis v0.9 — settings catalog with Prompt Context, Frontier & Scoring, and Proposer Loop groups" width="49%" />
 </p>
 
 ### Features
 
+- **Trace-grounded feedback loop.** *(v0.9)* Every retry sees what the previous run attempted — prior execution digests and agent review comments injected into the prompt automatically. Agents stop repeating the same mistakes. Pass rates per task queryable via API. An autonomous proposer loop evolves the prompt scaffold when tasks plateau. [Full guide →](docs/trace-grounded-feedback.md)
 - **End-to-end product build graph.** One Product, many independent Manifests (fire each on its own), many Tasks per Manifest with paired Review Tasks chained via `depends_on`. The graph plans, dispatches, audits, and costs every step from initiative spec to merged commit. IDE agents, orchestration SDKs, and observability proxies each cover a slice; OpenPraxis owns the whole chain. [Detailed comparison →](docs/compared-to-ai-agent-tools.md)
 - **Line-item cost attribution.** Every cost unit spent attributed to a task, a spec, a product, a day, and the authorizing policy.
 - **Pre-fire cost forecasting.** Predict what the next run, manifest, or sprint will cost from your actual history, per model, per agent, per spec shape.
