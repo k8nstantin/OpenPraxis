@@ -254,10 +254,20 @@ var serveCmd = &cobra.Command{
 			if err != nil || len(manifests) == 0 {
 				return
 			}
-			// Only recover chains interrupted within the last hour.
-			// A crash between task-A completing and task-B dispatching takes
-			// seconds; anything older is not an interrupted chain.
-			recoverySince := time.Now().Add(-1 * time.Hour)
+			// Resolve recovery window from dag_chain_recovery_window_minutes (default 60).
+			// 0 disables chain recovery entirely.
+			windowMinutes := 60
+			if n.SettingsResolver != nil {
+				if resolved, err := n.SettingsResolver.Resolve(ctx, settings.Scope{}, "dag_chain_recovery_window_minutes"); err == nil {
+					if v, ok := resolved.Value.(int64); ok && v >= 0 {
+						windowMinutes = int(v)
+					}
+				}
+			}
+			if windowMinutes == 0 {
+				return
+			}
+			recoverySince := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
 			resumed := 0
 			for _, m := range manifests {
 				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
