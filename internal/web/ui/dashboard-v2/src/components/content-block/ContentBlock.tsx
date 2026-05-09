@@ -4,11 +4,8 @@
  * Uses BlockNoteComposer which has native drag/drop/paste attachment support
  * via the uploadFile callback — no custom editor needed.
  *
- * All entity types → label="Prompt"
- * All entity types → label="Prompt"
- 
- 
- */
+ * All entity types use label="Prompt" for their description block.
+*/
 import { useRef, useState } from 'react'
 import { Pencil, ChevronDown, ChevronUp } from 'lucide-react'
 import { CopyButton } from '@/components/copy-button'

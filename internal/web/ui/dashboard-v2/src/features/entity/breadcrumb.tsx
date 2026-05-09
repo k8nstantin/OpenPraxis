@@ -36,12 +36,13 @@ const KIND_HOME_LABEL: Record<EntityKind, string> = {
   [KIND.idea]: 'Ideas',
 }
 
+// All entity types navigate through the unified /entities route.
 const KIND_HOME_PATH: Record<EntityKind, string> = {
-  [KIND.product]: '/products',
-  [KIND.manifest]: '/manifests',
-  [KIND.task]: '/tasks',
-  [KIND.skill]: '/skills',
-  [KIND.idea]: '/ideas',
+  [KIND.product]: '/entities',
+  [KIND.manifest]: '/entities',
+  [KIND.task]: '/entities',
+  [KIND.skill]: '/entities',
+  [KIND.idea]: '/entities',
 }
 
 // Kind-aware dispatcher — used by the legacy per-kind detail pages

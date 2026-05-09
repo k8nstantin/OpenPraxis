@@ -229,48 +229,23 @@ async function buildIdeaNode(
   }
 }
 
+// Single request to the backend tree endpoint — no N+1 fan-out.
+// The Go handler assembles the full tree in 5+1 bulk queries.
 async function fetchEntityTree(): Promise<EntityTree> {
-  // Group 1 + initial fan-out for Group 2 in parallel.
-  const [skillRows, ideaRows, productRows] = await Promise.all([
-    fetchEntities(KIND.skill, { status: STATUS.active, limit: 100 }),
-    fetchEntities(KIND.idea, { limit: 200 }),
-    fetchEntities(KIND.product, { limit: 200 }),
-  ])
-
-  const skills: TreeNode[] = skillRows.map((s) => ({
-    id: s.entity_uid,
-    name: s.title,
-    kind: KIND.skill,
-    status: normalizeStatus(s.status),
-  }))
-
-  const productByID = new Map(productRows.map((p) => [p.entity_uid, p]))
-  const linkedProductIDs = new Set<string>()
-
-  const ideaNodes = await Promise.all(
-    ideaRows.map((i) => buildIdeaNode(i, linkedProductIDs, productByID)),
-  )
-
-  // Products not linked to any idea → "Unlinked Products" group.
-  const unlinkedProducts = productRows.filter(
-    (p) => !linkedProductIDs.has(p.entity_uid),
-  )
-  const unlinkedNodes = await Promise.all(
-    unlinkedProducts.map((p) => buildProductNode(p)),
-  )
-
-  const lifecycle: TreeNode[] = [...ideaNodes]
-  if (unlinkedNodes.length) {
-    lifecycle.push({
-      id: 'unlinked-products',
-      name: 'Unlinked Products',
-      kind: KIND.idea,
-      status: deriveStatus(unlinkedNodes),
-      children: unlinkedNodes,
-    })
+  const res = await fetch('/api/entities/tree')
+  if (!res.ok) throw new Error(`/api/entities/tree → ${res.status}`)
+  const data = await res.json() as EntityTree
+  // Normalise statuses so the overlay logic works correctly.
+  const normalizeNodes = (nodes: TreeNode[]): TreeNode[] =>
+    nodes.map(n => ({
+      ...n,
+      status: normalizeStatus(n.status),
+      children: n.children ? normalizeNodes(n.children) : undefined,
+    }))
+  return {
+    skills: normalizeNodes(data.skills ?? []),
+    lifecycle: normalizeNodes(data.lifecycle ?? []),
   }
-
-  return { skills, lifecycle }
 }
 
 // ── Live status overlay ───────────────────────────────────────────────
