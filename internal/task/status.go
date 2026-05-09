@@ -120,7 +120,6 @@ var validTransitions = map[Status]map[Status]bool{
 		StatusCancelled: true,
 	},
 	StatusCompleted: {
-		// Watcher audit downgrade is the one legacy exit.
 		StatusFailed: true,
 		// Review-rejection re-run path (#93). Gated by
 		// Store.RejectCompletedTask which writes the rejection

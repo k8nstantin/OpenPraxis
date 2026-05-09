@@ -593,8 +593,6 @@ var serveCmd = &cobra.Command{
 			slog.Error("schedule runner start failed", "error", err)
 		}
 
-		runner.StartActionWatcher(2 * time.Second)
-
 		// --- Startup state summary ---
 		fmt.Println("\n  === OpenPraxis State ===")
 		fmt.Printf("  Peer:      %s\n", cfg.Node.UUID)

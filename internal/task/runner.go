@@ -78,6 +78,7 @@ type RunningTask struct {
 // → system so two products can have different caps. Standalone tasks (no
 // manifest/product) fall through to the catalog system defaults.
 type Runner struct {
+	store    *Store
 	actions  *action.Store
 	resolver *settings.Resolver
 	running  map[string]*RunningTask
@@ -225,8 +226,9 @@ func (r *Runner) enforceExecutionReview(bgCtx context.Context, taskID, status, r
 // shapes task execution is looked up through it on every Execute call.
 // repoDir is the git repo root tasks will clone worktrees from; pass "" to
 // default to the server's process CWD at spawn time.
-func NewRunner(actions *action.Store, resolver *settings.Resolver, repoDir string, onEvent func(string, map[string]string)) *Runner {
+func NewRunner(store *Store, actions *action.Store, resolver *settings.Resolver, repoDir string, onEvent func(string, map[string]string)) *Runner {
 	return &Runner{
+		store:    store,
 		actions:  actions,
 		resolver: resolver,
 		running:  make(map[string]*RunningTask),
@@ -248,13 +250,31 @@ func NewRunner(actions *action.Store, resolver *settings.Resolver, repoDir strin
 // Safe to call multiple times; a second call finds no rows in running/paused
 // state and returns without touching the DB. Must run before the scheduler
 // starts — otherwise a `restart`-eligible orphan races with the first tick.
-// RecoverInFlight is a no-op. In-flight recovery now relies on execution_log:
-// any run with a started event but no terminal event is considered orphaned
-// and will be retried by the next schedule tick.
-func (r *Runner) RecoverInFlight(_ context.Context) error { return nil }
+func (r *Runner) RecoverInFlight(ctx context.Context) error {
+	if r.store == nil {
+		return nil
+	}
+	orphans, err := r.store.listOrphanRunningTasks()
+	if err != nil {
+		return fmt.Errorf("list orphan tasks: %w", err)
+	}
+	var errs []error
+	for _, t := range orphans {
+		if err := r.recoverOneOrphan(ctx, t.ID, 0, 0, 0, ""); err != nil {
+			errs = append(errs, fmt.Errorf("recover task %s: %w", t.ID, err))
+		}
+	}
+	if len(errs) > 0 {
+		msgs := make([]string, len(errs))
+		for i, e := range errs {
+			msgs[i] = e.Error()
+		}
+		return fmt.Errorf("recovery had %d error(s): %s", len(errs), strings.Join(msgs, "; "))
+	}
+	return nil
+}
 
-// recoverOneOrphan is unused — kept for compilation until full cleanup.
-func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actions, lines int, startedAt string) {
+func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actions, lines int, startedAt string) error {
 	behavior := "stop"
 	if r.resolver != nil {
 		scope, err := r.resolver.NormalizeScope(ctx, settings.Scope{TaskID: taskID})
@@ -286,10 +306,22 @@ func (r *Runner) recoverOneOrphan(ctx context.Context, taskID string, pid, actio
 
 	switch behavior {
 	case "restart":
-		slog.Info("recover: orphan will be re-fired by schedule runner", "task_id", taskID, "prior_pid", pid)
-	default:
-		slog.Info("recover: orphan task logged as failed in execution_log", "task_id", taskID, "prior_pid", pid)
+		if err := r.store.RecoverAsScheduled(taskID, "serve restart: rescheduled per on_restart_behavior=restart"); err != nil {
+			return fmt.Errorf("reschedule orphan: %w", err)
+		}
+		slog.Info("recover: orphan rescheduled", "task_id", taskID)
+	case "fail":
+		if err := r.store.RecoverAsFailed(taskID, "serve restart: no auto-recovery; operator must re-fire"); err != nil {
+			return fmt.Errorf("mark failed (strict): %w", err)
+		}
+		slog.Info("recover: orphan marked failed (strict)", "task_id", taskID)
+	default: // "stop"
+		if err := r.store.RecoverAsFailed(taskID, "serve restart: task was still running when the server stopped"); err != nil {
+			return fmt.Errorf("mark failed: %w", err)
+		}
+		slog.Info("recover: orphan marked failed", "task_id", taskID)
 	}
+	return nil
 }
 
 // ListRunning returns currently executing tasks.
@@ -1297,10 +1329,6 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 
 		// Retry on transient failure. Counter persists across restarts via
 		// the settings table so a crash mid-retry does not reset progress.
-		// Watcher-driven downgrades (completed→failed via deliverable audit)
-		// are intentionally NOT retried — they run in cmd/serve.go's audit
-		// callback, which is the documented single retry decision point for
-		// those cases. This path only handles the runner's own detection.
 		retried := false
 		attempts := r.getRetryCount(bgCtx, t.ID)
 		if shouldRetry(status, reason, attempts, retryCap) {
@@ -1486,10 +1514,6 @@ func (r *Runner) Cancel(taskID string) error {
 	}
 	return nil
 }
-
-// StartActionWatcher is a no-op. Pause/Resume/Cancel are now driven
-// via direct HTTP calls to the runner's in-memory state.
-func (r *Runner) StartActionWatcher(_ time.Duration) {}
 
 // Resume sends SIGCONT to a paused task's process, resuming the agent.
 func (r *Runner) Resume(taskID string) error {

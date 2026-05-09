@@ -68,7 +68,7 @@ func TestRunner_PromptTemplate_IncludesClosingSection(t *testing.T) {
 
 	mustContain(t, got, "<closing_protocol>")
 	mustContain(t, got, "mcp__openpraxis__comment_add")
-	mustContain(t, got, `type        = "execution_review"`)
+	mustContain(t, got, `type        = "comment"`)
 	mustContain(t, got, `author      = "agent"`)
 	// target_id must be the full task ID so the comment lands on the right row.
 	mustContain(t, got, `target_id   = "019da142-479c-70d2-865b-d6e593883e3f"`)
@@ -102,8 +102,8 @@ func TestRunner_MissingExecutionReview_FlagsAmnesia(t *testing.T) {
 	if list[0].RuleMarker != "exec-review" {
 		t.Fatalf("RuleMarker = %q, want exec-review", list[0].RuleMarker)
 	}
-	if list[0].MatchedPattern != "missing_execution_review" {
-		t.Fatalf("MatchedPattern = %q, want missing_execution_review", list[0].MatchedPattern)
+	if list[0].MatchedPattern != "missing_comment" {
+		t.Fatalf("MatchedPattern = %q, want missing_comment", list[0].MatchedPattern)
 	}
 }
 

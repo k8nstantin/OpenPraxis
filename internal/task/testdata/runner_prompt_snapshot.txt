@@ -45,7 +45,7 @@ MANDATORY — before your final commit+push, call the MCP tool:
     mcp__openpraxis__comment_add
       target_type = "task"
       target_id   = "019dba9f-9c5b-76ba-8221-e7e11093887f"
-      type        = "execution_review"
+      type        = "comment"
       author      = "agent"
       body        = <markdown summary>
 

@@ -549,12 +549,6 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/visceral/patterns", apiRulePatterns(n)).Methods("GET")
 	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternGet(n)).Methods("GET")
 	api.HandleFunc("/visceral/patterns/{rule_id}", apiRulePatternUpdate(n)).Methods("PUT")
-	// Watcher — independent task execution audits
-	api.HandleFunc("/watcher/audits", apiWatcherList(n)).Methods("GET")
-	api.HandleFunc("/watcher/stats", apiWatcherStats(n)).Methods("GET")
-	api.HandleFunc("/watcher/audits/{id}", apiWatcherGet(n)).Methods("GET")
-	api.HandleFunc("/watcher/tasks/{id}", apiWatcherForTask(n)).Methods("GET")
-	api.HandleFunc("/watcher/audit/{id}", apiWatcherTrigger(n)).Methods("POST")
 	// Recall — soft-deleted items
 	api.HandleFunc("/recall", apiRecall(n)).Methods("GET")
 	api.HandleFunc("/recall/{type}/{id}/restore", apiRestore(n)).Methods("POST")

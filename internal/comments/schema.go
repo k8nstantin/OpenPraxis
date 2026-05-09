@@ -32,8 +32,9 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("create comments table: %w", err)
 	}
 
-	// Migrate legacy per-type target_type values → 'entity'.
-	// Runs as a no-op on fresh DBs and on DBs already migrated.
+	// Rewrite all legacy target_type values (product/manifest/task/idea) to
+	// 'entity' and rebuild the table with the tightened CHECK constraint.
+	// Idempotent — a no-op on fresh DBs and on DBs already migrated.
 	if err := migrateTargetTypeToEntity(db); err != nil {
 		return fmt.Errorf("migrate target_type to entity: %w", err)
 	}
@@ -58,15 +59,16 @@ func InitSchema(db *sql.DB) error {
 
 // migrateTargetTypeToEntity rewrites all legacy per-type target_type values
 // (product, manifest, task, idea) to 'entity' and rebuilds the table with a
-// tightened CHECK constraint. Idempotent — a no-op when the DDL already only
-// allows 'entity'.
+// tightened CHECK constraint allowing only 'entity'. Idempotent — a no-op
+// when the DDL already only contains 'entity'.
 func migrateTargetTypeToEntity(db *sql.DB) error {
 	var ddl string
 	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='comments'`).Scan(&ddl); err != nil {
 		return fmt.Errorf("read table ddl: %w", err)
 	}
-	// Already on the clean schema?
-	if !strings.ContainsAny(ddl, "product") && strings.Contains(ddl, "'entity'") {
+	// Already on the clean schema — nothing to do.
+	if !strings.Contains(ddl, "'product'") && !strings.Contains(ddl, "'manifest'") &&
+		!strings.Contains(ddl, "'task'") && !strings.Contains(ddl, "'idea'") {
 		return nil
 	}
 
@@ -76,7 +78,8 @@ func migrateTargetTypeToEntity(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	// Rebuild with legacy values coerced to 'entity' in one pass.
+	// Create the new table with the tightened constraint, coercing all legacy
+	// target_type values to 'entity' in the INSERT so no row violates it.
 	if _, err := tx.Exec(`CREATE TABLE comments_new (
 		id           TEXT NOT NULL PRIMARY KEY,
 		target_type  TEXT NOT NULL CHECK (target_type IN ('entity')),
