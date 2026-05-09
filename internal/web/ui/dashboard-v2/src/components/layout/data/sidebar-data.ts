@@ -2,15 +2,19 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Boxes,
   Brain,
   CalendarClock,
+  CheckSquare,
   Command,
-  GitBranch,
+  FileText,
   Inbox,
+  Lightbulb,
   LayoutDashboard,
   ScrollText,
   Settings,
   TrendingUp,
+  Wand2,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -46,9 +50,29 @@ export const sidebarData: SidebarData = {
           icon: ScrollText,
         },
         {
-          title: 'Entities',
-          url: '/entities',
-          icon: GitBranch,
+          title: 'Products',
+          url: '/products',
+          icon: Boxes,
+        },
+        {
+          title: 'Manifests',
+          url: '/manifests',
+          icon: FileText,
+        },
+        {
+          title: 'Tasks',
+          url: '/tasks',
+          icon: CheckSquare,
+        },
+        {
+          title: 'Skills',
+          url: '/skills',
+          icon: Wand2,
+        },
+        {
+          title: 'Ideas',
+          url: '/ideas',
+          icon: Lightbulb,
         },
         {
           title: 'Schedules',

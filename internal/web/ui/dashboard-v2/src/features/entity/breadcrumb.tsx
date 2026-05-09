@@ -1,13 +1,10 @@
 import { Link } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Home } from 'lucide-react'
 import {
-  useEntityByUid,
   useEntityHierarchy,
   type EntityKind,
 } from '@/lib/queries/entity'
-import { EDGE, KIND } from '@/lib/queries/entity-tree'
-import type { Entity, HierarchyNode } from '@/lib/types'
+import type { HierarchyNode } from '@/lib/types'
 
 // Walk the hierarchy tree to find the path from the root to the
 // target entity id. Returns null if the target isn't reachable.
@@ -25,32 +22,14 @@ function findPath(
   return null
 }
 
-// Index-page label and path for each kind. The home crumb in the
-// per-kind breadcrumbs links here; entity-ancestor crumbs always link
-// to /entities/$uid.
-const KIND_HOME_LABEL: Record<EntityKind, string> = {
-  [KIND.product]: 'Products',
-  [KIND.manifest]: 'Manifests',
-  [KIND.task]: 'Tasks',
-  [KIND.skill]: 'Skills',
-  [KIND.idea]: 'Ideas',
-}
-
-// All entity types navigate through the unified /entities route.
-const KIND_HOME_PATH: Record<EntityKind, string> = {
-  [KIND.product]: '/entities',
-  [KIND.manifest]: '/entities',
-  [KIND.task]: '/entities',
-  [KIND.skill]: '/entities',
-  [KIND.idea]: '/entities',
-}
-
-// Kind-aware dispatcher — used by the legacy per-kind detail pages
-// (EntityPage). Branches on kind:
-//   product            → walks the product hierarchy via useEntityHierarchy
-//   manifest|task|idea|skill → flat "<KindName> › <EntityTitle>"
+// Generic entity breadcrumb. Branches on kind:
+//   product  → Products › <ProductTitle>
+//   manifest → Products › <ParentProductTitle> › Manifests › <ManifestTitle>
 //
-// Internal entity-ancestor links always navigate to /entities/$uid.
+// Manifest's parent product is resolved via manifest.project_id; the
+// product detail load surfaces its title for the parent crumb. If the
+// manifest isn't linked to a product (project_id empty), the parent
+// crumb is dropped.
 export function EntityBreadcrumb({
   kind,
   entityId,
@@ -60,7 +39,7 @@ export function EntityBreadcrumb({
   entityId: string
   entityTitle?: string
 }) {
-  if (kind === KIND.product) {
+  if (kind === 'product') {
     return (
       <ProductBreadcrumb
         productId={entityId}
@@ -68,11 +47,13 @@ export function EntityBreadcrumb({
       />
     )
   }
+  if (kind === 'task') {
+    return <TaskBreadcrumb taskId={entityId} taskTitle={entityTitle} />
+  }
   return (
-    <FlatBreadcrumb
-      kind={kind}
-      entityId={entityId}
-      entityTitle={entityTitle}
+    <ManifestBreadcrumb
+      manifestId={entityId}
+      manifestTitle={entityTitle}
     />
   )
 }
@@ -84,7 +65,7 @@ function ProductBreadcrumb({
   productId: string
   productTitle?: string
 }) {
-  const hierarchy = useEntityHierarchy(KIND.product, productId)
+  const hierarchy = useEntityHierarchy('product', productId)
   const path = hierarchy.data ? findPath(hierarchy.data, productId) : null
 
   return (
@@ -93,11 +74,11 @@ function ProductBreadcrumb({
       className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to={KIND_HOME_PATH[KIND.product]}
+        to='/products'
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
-        {KIND_HOME_LABEL[KIND.product]}
+        Products
       </Link>
       {path && path.length > 0 ? (
         path.map((node) => (
@@ -107,8 +88,8 @@ function ProductBreadcrumb({
               <span className='text-foreground font-medium'>{node.title}</span>
             ) : (
               <Link
-                to='/entities/$uid'
-                params={{ uid: node.id }}
+                to='/products'
+                search={{ id: node.id, tab: 'main' }}
                 className='hover:text-foreground'
               >
                 {node.title}
@@ -126,18 +107,16 @@ function ProductBreadcrumb({
   )
 }
 
-// Flat breadcrumb — kind home root, then the entity title. Used for
-// every kind that doesn't have a dedicated hierarchy walker (manifest,
-// task, idea, skill). Entity-ancestor relationships are not surfaced
-// here; operators drill up via the kind-scoped index.
-function FlatBreadcrumb({
-  kind,
-  entityId,
-  entityTitle,
+// Tasks: flat 2-crumb breadcrumb (Tasks › <TaskTitle>). The parent
+// manifest relationship lives in the relationships table, not on the
+// entity. The breadcrumb shows Tasks › <title> only; drill up via
+// the Manifests menu to reach the parent.
+function TaskBreadcrumb({
+  taskId,
+  taskTitle,
 }: {
-  kind: EntityKind
-  entityId: string
-  entityTitle?: string
+  taskId: string
+  taskTitle?: string
 }) {
   return (
     <nav
@@ -145,109 +124,47 @@ function FlatBreadcrumb({
       className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to={KIND_HOME_PATH[kind]}
+        to='/tasks'
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
-        {KIND_HOME_LABEL[kind]}
+        Tasks
       </Link>
       <span className='inline-flex items-center gap-1.5'>
         <ChevronRight className='h-3.5 w-3.5 opacity-50' />
         <span className='text-foreground font-medium'>
-          {entityTitle ?? entityId.slice(0, 12)}
+          {taskTitle ?? taskId.slice(0, 12)}
         </span>
       </span>
     </nav>
   )
 }
 
-// ── Universal breadcrumb ─────────────────────────────────────────────
-//
-// Walks the `owns` chain from this entity up to the root. Each ancestor
-// is rendered as a link to /entities/$uid; the leaf (current entity) is
-// rendered as plain text. Used by the /entities/$uid route — kind
-// doesn't matter, the same walker handles every entity type.
-
-interface RelationshipRow {
-  SrcID: string
-  SrcKind: EntityKind
-  DstID: string
-  DstKind: EntityKind
-  Kind: string
-}
-
-interface AncestorCrumb {
-  id: string
-  title: string
-}
-
-const UNIVERSAL_WALK_DEPTH_CAP = 16
-
-async function fetchAncestry(uid: string): Promise<AncestorCrumb[]> {
-  const chain: AncestorCrumb[] = []
-  let cursor: string | undefined = uid
-  const seen = new Set<string>()
-  for (let i = 0; i < UNIVERSAL_WALK_DEPTH_CAP && cursor; i++) {
-    if (seen.has(cursor)) break
-    seen.add(cursor)
-    const incoming = await fetch(
-      `/api/relationships/incoming?dst_id=${cursor}&kind=${EDGE.owns}`
-    )
-    if (!incoming.ok) break
-    const rows = ((await incoming.json()) as RelationshipRow[] | null) ?? []
-    if (rows.length === 0) break
-    const parentId = rows[0].SrcID
-    const parentRes = await fetch(`/api/entities/${parentId}`)
-    if (!parentRes.ok) break
-    const parent = (await parentRes.json()) as Entity
-    chain.push({ id: parent.entity_uid, title: parent.title })
-    cursor = parent.entity_uid
-  }
-  return chain.reverse()
-}
-
-function useUniversalAncestry(uid: string | undefined) {
-  return useQuery({
-    queryKey: ['entity', 'ancestry', uid ?? ''] as const,
-    queryFn: () => fetchAncestry(uid as string),
-    enabled: !!uid,
-    staleTime: 30 * 1000,
-  })
-}
-
-export function UniversalBreadcrumb({ uid }: { uid: string }) {
-  const entity = useEntityByUid(uid)
-  const ancestry = useUniversalAncestry(uid)
-  const ancestors = ancestry.data ?? []
-
+function ManifestBreadcrumb({
+  manifestId,
+  manifestTitle,
+}: {
+  manifestId: string
+  manifestTitle?: string
+}) {
+  // Parent product is resolved via relationships, not a field on the entity.
+  // Show Manifests › <title> — operator can navigate to Products to drill up.
   return (
     <nav
       aria-label='Breadcrumb'
-      className='text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm'
+      className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to='/entities'
+        to='/manifests'
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
-        Entities
+        Manifests
       </Link>
-      {ancestors.map((node) => (
-        <span key={node.id} className='inline-flex items-center gap-1.5'>
-          <ChevronRight className='h-3.5 w-3.5 opacity-50' />
-          <Link
-            to='/entities/$uid'
-            params={{ uid: node.id }}
-            className='hover:text-foreground'
-          >
-            {node.title}
-          </Link>
-        </span>
-      ))}
       <span className='inline-flex items-center gap-1.5'>
         <ChevronRight className='h-3.5 w-3.5 opacity-50' />
         <span className='text-foreground font-medium'>
-          {entity.data?.title ?? uid.slice(0, 12)}
+          {manifestTitle ?? manifestId.slice(0, 12)}
         </span>
       </span>
     </nav>

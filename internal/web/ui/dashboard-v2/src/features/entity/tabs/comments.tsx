@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { CopyButton } from '@/components/copy-button'
 import { useQueryClient } from '@tanstack/react-query'
 import { CommentAttachments } from '@/components/comment-attachments'
 import {
@@ -55,7 +54,6 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
   const update = useUpdateEntity(kind, entityId)
 
   const [filter, setFilter] = useState('all')
-  const [rawMode, setRawMode] = useState(false)
   const [composeType, setComposeType] = useState<keyof typeof TYPE_LABEL>('comment')
   const [composing, setComposing] = useState(false)
   const [posting, setPosting] = useState(false)
@@ -140,14 +138,6 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
               ))}
             </SelectContent>
           </Select>
-          <button
-            type='button'
-            onClick={() => setRawMode(r => !r)}
-            className={`rounded px-2 py-1 text-[10px] transition-colors ${rawMode ? 'bg-amber-500/20 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}
-            title={rawMode ? 'Showing raw markdown — click for rendered' : 'Click to show raw markdown'}
-          >
-            {rawMode ? 'RAW' : 'RENDERED'}
-          </button>
           {!composing && (
             <Button type='button' size='sm' variant='outline' onClick={() => setComposing(true)} className='h-8 text-xs'>
               <Plus className='mr-1 h-3 w-3' />Add comment
@@ -228,19 +218,10 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                         {TYPE_LABEL[c.type] ?? c.type}
                       </Badge>
                     </div>
-                    <div className='flex items-center gap-2'>
-                      <CopyButton text={c.body ?? ''} title='Copy body' />
-                      <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
-                    </div>
+                    <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
                   </div>
 
-                  {rawMode ? (
-                    <pre className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 font-mono text-[11px] text-muted-foreground'>
-                      {c.body ?? ''}
-                    </pre>
-                  ) : (
-                    <BlockNoteReadView markdown={c.body ?? ''} />
-                  )}
+                  <BlockNoteReadView markdown={c.body ?? ''} />
                   <CommentAttachments commentId={c.id} />
                 </div>
               ))}

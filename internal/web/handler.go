@@ -480,7 +480,6 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/amnesia/{id}/confirm", apiAmnesiaUpdate(n, "confirmed")).Methods("POST")
 	api.HandleFunc("/amnesia/{id}/dismiss", apiAmnesiaUpdate(n, "dismissed")).Methods("POST")
 	api.HandleFunc("/entities/search", apiEntitySearch(n)).Methods("GET")
-	api.HandleFunc("/entities/tree", apiEntityTree(n)).Methods("GET")
 	api.HandleFunc("/entities", apiEntityList(n)).Methods("GET")
 	api.HandleFunc("/entities", apiEntityCreate(n)).Methods("POST")
 	api.HandleFunc("/entities/{id}/history", apiEntityHistory(n)).Methods("GET")

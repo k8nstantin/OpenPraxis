@@ -1,5 +1,4 @@
-import { useState, Fragment, useEffect, useRef } from 'react'
-import { CopyButton } from '@/components/copy-button'
+import { useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
@@ -24,126 +23,28 @@ function useEntityActions(entityId: string, runUid: string, isLive: boolean) {
   })
 }
 
-function prettifyJson(s: string): string {
-  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
-}
-
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
-  const [paused, setPaused] = useState(false)
-  const { data, isLoading } = useEntityActions(entityId, runUid, !paused)
-  const [frozen, setFrozen] = useState<typeof data>(undefined)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [rawMode, setRawMode] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  // When pausing, freeze the current snapshot. When resuming, clear it.
-  const togglePause = () => {
-    setPaused(p => {
-      if (!p) setFrozen(data)   // freeze on pause
-      else setFrozen(undefined) // unfreeze on resume
-      return !p
-    })
-  }
-
-  // Auto-scroll only when not paused
-  useEffect(() => {
-    if (!paused) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [data?.length, paused])
-
-  const display = paused ? frozen : data
-
+  const { data, isLoading } = useEntityActions(entityId, runUid, true)
   if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
-  if (!display?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
-
-  const toggle = (id: string) => setExpanded(prev => {
-    const next = new Set(prev)
-    next.has(id) ? next.delete(id) : next.add(id)
-    return next
-  })
-
-  const fmt = (s: string) => rawMode ? s : prettifyJson(s)
-
+  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
   return (
-    <div className='font-mono text-xs'>
-      {/* Global toolbar */}
-      <div className='flex items-center justify-end gap-2 border-b border-white/5 px-3 py-1'>
-        <button
-          type='button'
-          onClick={togglePause}
-          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${paused ? 'bg-rose-500/20 text-rose-300' : 'text-muted-foreground hover:text-foreground'}`}
-          title={paused ? 'Paused — click to resume' : 'Pause output'}
-        >
-          {paused ? '▶ RESUME' : '⏸ PAUSE'}
-        </button>
-        <button
-          type='button'
-          onClick={() => setRawMode(r => !r)}
-          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${rawMode ? 'bg-amber-500/20 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}
-        >
-          {rawMode ? 'RAW' : 'PARSED'}
-        </button>
-      </div>
-
-      <div className='max-h-96 overflow-y-auto'>
-      {display.map((a) => {
-        const isExpanded = expanded.has(a.id)
-        const hasContent = !!(a.tool_input || a.tool_response)
-        return (
-          <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
-            {/* Header row — click to expand */}
-            <div
-              className={`flex items-center gap-2 ${hasContent ? 'cursor-pointer select-none' : ''}`}
-              onClick={() => hasContent && toggle(a.id)}
-            >
-              <span className='text-blue-400 font-medium'>{a.tool_name}</span>
-              {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
-              {hasContent && (
-                <span className='text-muted-foreground text-[10px]'>{isExpanded ? '▲' : '▼'}</span>
-              )}
-              <span className='text-muted-foreground ml-auto text-[10px]'>
-                {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
-              </span>
-            </div>
-
-            {/* Collapsed preview */}
-            {!isExpanded && a.tool_input && (
-              <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
-                {a.tool_input.slice(0, 120)}
-              </div>
-            )}
-
-            {/* Expanded: full input + response */}
-            {isExpanded && (
-              <div className='mt-1 space-y-1.5'>
-                {a.tool_input && (
-                  <div>
-                    <div className='flex items-center gap-2 mb-0.5'>
-                      <span className='text-[10px] font-semibold text-blue-400/60'>INPUT</span>
-                      <CopyButton text={fmt(a.tool_input)} className='ml-auto' title='Copy input' />
-                    </div>
-                    <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
-                      {fmt(a.tool_input)}
-                    </div>
-                  </div>
-                )}
-                {a.tool_response && (
-                  <div>
-                    <div className='flex items-center gap-2 mb-0.5'>
-                      <span className='text-[10px] font-semibold text-emerald-400/60'>RESPONSE</span>
-                      <CopyButton text={fmt(a.tool_response)} className='ml-auto' title='Copy response' />
-                    </div>
-                    <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
-                      {fmt(a.tool_response)}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+    <div className='max-h-96 overflow-y-auto font-mono text-xs'>
+      {[...data].reverse().map((a) => (
+        <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
+          <div className='flex items-center gap-2'>
+            <span className='text-blue-400 font-medium'>{a.tool_name}</span>
+            {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
+            <span className='text-muted-foreground ml-auto text-[10px]'>
+              {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
+            </span>
           </div>
-        )
-      })}
-      <div ref={bottomRef} />
-      </div>
+          {a.tool_input && (
+            <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
+              {a.tool_input.slice(0, 120)}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
