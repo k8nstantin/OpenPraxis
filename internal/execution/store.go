@@ -478,6 +478,26 @@ func (s *Store) HasCompleted(ctx context.Context, entityUID string) (bool, error
 	return event == EventCompleted, nil
 }
 
+// HasCompletedSince returns true if the entity has a 'completed' event
+// recorded after the given time. Used by DAG chain recovery to distinguish
+// chains interrupted mid-flight (completed seconds/minutes ago) from
+// manifests that merely have old completed tasks sitting next to new ones.
+func (s *Store) HasCompletedSince(ctx context.Context, entityUID string, since time.Time) (bool, error) {
+	if entityUID == "" {
+		return false, ErrEmptyEntityID
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM execution_log
+		  WHERE entity_uid = ? AND event = ? AND created_at >= ?`,
+		entityUID, EventCompleted, since.UTC().Format(time.RFC3339Nano),
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("execution: has completed since: %w", err)
+	}
+	return n > 0, nil
+}
+
 // InFlightRun holds the minimal fields needed for zombie-process detection.
 type InFlightRun struct {
 	RunUID    string

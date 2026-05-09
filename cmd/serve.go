@@ -254,24 +254,29 @@ var serveCmd = &cobra.Command{
 			if err != nil || len(manifests) == 0 {
 				return
 			}
+			// Only recover chains interrupted within the last hour.
+			// A crash between task-A completing and task-B dispatching takes
+			// seconds; anything older is not an interrupted chain.
+			recoverySince := time.Now().Add(-1 * time.Hour)
 			resumed := 0
 			for _, m := range manifests {
-				// Only resume manifests that have at least one completed task
-				// (chain was in progress) and at least one not-yet-completed task.
 				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
-				hasCompleted, hasPending := false, false
+				hasRecentlyCompleted, hasPending := false, false
 				for _, e := range edges {
 					if e.DstKind != relationships.KindTask {
 						continue
 					}
-					done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
-					if done {
-						hasCompleted = true
+					recent, _ := n.ExecutionLog.HasCompletedSince(ctx, e.DstID, recoverySince)
+					if recent {
+						hasRecentlyCompleted = true
 					} else {
-						hasPending = true
+						done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
+						if !done {
+							hasPending = true
+						}
 					}
 				}
-				if hasCompleted && hasPending && dispatchChainFn != nil {
+				if hasRecentlyCompleted && hasPending && dispatchChainFn != nil {
 					slog.Info("dag-chain: resuming interrupted chain on startup", "manifest", m.EntityUID[:12], "title", m.Title)
 					if err := dispatchChainFn(ctx, m.EntityUID, 0); err != nil {
 						slog.Info("dag-chain: resume dispatch", "manifest", m.EntityUID[:12], "note", err.Error())
