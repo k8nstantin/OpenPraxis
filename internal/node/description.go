@@ -69,9 +69,10 @@ func (n *Node) RecordDescriptionChange(
 	return c.ID, nil
 }
 
-// currentDescription reads the entity's current denormalised body + returns
-// the full UUID so callers (and the revision insert) operate on canonical
-// ids instead of short markers. Returns ("", "", nil) for missing rows.
+// currentDescription returns the latest prompt comment body for an entity plus
+// its canonical UUID. Used by RecordDescriptionChange to dedup writes — if the
+// incoming body matches the current latest revision, no new row is inserted.
+// Returns ("", fullID, nil) when no prompt revision exists yet (first write).
 func (n *Node) currentDescription(_ comments.TargetType, idOrMarker string) (body, fullID string, err error) {
 	if n.Entities == nil {
 		return "", "", nil
@@ -80,7 +81,18 @@ func (n *Node) currentDescription(_ comments.TargetType, idOrMarker string) (bod
 	if err != nil || e == nil {
 		return "", "", err
 	}
-	return e.Title, e.EntityUID, nil
+	if n.Comments == nil {
+		return "", e.EntityUID, nil
+	}
+	ct := comments.TypePrompt
+	rows, err := n.Comments.List(context.Background(), comments.TargetEntity, e.EntityUID, 1, &ct)
+	if err != nil {
+		return "", e.EntityUID, err
+	}
+	if len(rows) == 0 {
+		return "", e.EntityUID, nil
+	}
+	return rows[0].Body, e.EntityUID, nil
 }
 
 // RevisionEntry is a single prompt presented to API / MCP
