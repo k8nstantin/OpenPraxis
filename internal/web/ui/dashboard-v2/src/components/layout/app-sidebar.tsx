@@ -9,6 +9,7 @@ import {
   SidebarHeader,
   SidebarRail,
 } from '@/components/ui/sidebar'
+import { EntityTree } from '@/features/entity/tree/EntityTree'
 // import { AppTitle } from './app-title'
 import { sidebarData } from './data/sidebar-data'
 import { NavGroup } from './nav-group'
@@ -31,6 +32,14 @@ export function AppSidebar({ entityTree = null }: AppSidebarProps = {}) {
         {/* <AppTitle /> */}
       </SidebarHeader>
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Entities</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <div className='h-[420px] overflow-hidden'>
+              <EntityTree />
+            </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
         {sidebarData.navGroups.map((props) => (
           <NavGroup key={props.title} {...props} />
         ))}
