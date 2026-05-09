@@ -28,7 +28,7 @@ export const KIND = {
   task: 'task',
 } as const satisfies Record<EntityKind, EntityKind>
 
-const EDGE = {
+export const EDGE = {
   owns: 'owns',
   linksTo: 'links_to',
 } as const

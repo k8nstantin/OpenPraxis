@@ -13,7 +13,9 @@ import { MainTab } from './tabs/main'
 import { RunsTab } from './tabs/runs'
 
 // Tabs: Main · Execution · Runs · Comments · Dependencies · DAG
-const TAB_IDS = [
+// Exported so route validators (e.g. /entities/$uid) build their tab
+// schema from the same source of truth — adding a tab here propagates.
+export const TAB_IDS = [
   'main',
   'execution',
   'runs',
@@ -29,11 +31,13 @@ export function EntityDetailPane({
   entityId,
   tab,
   onTabChange,
+  breadcrumb,
 }: {
   kind: EntityKind
   entityId?: string
   tab: EntityTabId
   onTabChange: (tab: EntityTabId) => void
+  breadcrumb?: React.ReactNode
 }) {
   const entity = useEntity(kind, entityId)
   const iconMap: Record<string, React.ElementType> = {
@@ -60,11 +64,13 @@ export function EntityDetailPane({
     <div className='flex h-full min-h-0 flex-col'>
       <ScrollArea className='min-h-0 flex-1'>
         <div className='space-y-4 p-4'>
-          <EntityBreadcrumb
-            kind={kind}
-            entityId={entityId}
-            entityTitle={entity.data?.title}
-          />
+          {breadcrumb ?? (
+            <EntityBreadcrumb
+              kind={kind}
+              entityId={entityId}
+              entityTitle={entity.data?.title}
+            />
+          )}
 
           <div>
             {entity.isLoading ? (
