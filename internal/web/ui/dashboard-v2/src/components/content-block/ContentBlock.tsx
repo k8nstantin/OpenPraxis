@@ -4,11 +4,13 @@
  * Uses BlockNoteComposer which has native drag/drop/paste attachment support
  * via the uploadFile callback — no custom editor needed.
  *
- * All entity types use label="Prompt" for their description block.
-*/
+ * All entity types → label="Prompt"
+ * All entity types → label="Prompt"
+ 
+ 
+ */
 import { useRef, useState } from 'react'
 import { Pencil, ChevronDown, ChevronUp } from 'lucide-react'
-import { CopyButton } from '@/components/copy-button'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -92,16 +94,11 @@ export function ContentBlock({ entityId, kind, label = 'Prompt', placeholder }: 
         <div className='rounded-lg border bg-card'>
           <div className='flex items-center justify-between px-4 py-2 border-b'>
             <span className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>{label}</span>
-            <div className='flex items-center gap-1'>
-              {!editing && latest?.body && (
-                <CopyButton text={latest.body} title={`Copy ${label}`} />
-              )}
-              {!editing && (
-                <Button variant='ghost' size='sm' className='h-7 px-2 text-xs' onClick={startEdit}>
-                  <Pencil className='mr-1 h-3 w-3' />Edit
-                </Button>
-              )}
-            </div>
+            {!editing && (
+              <Button variant='ghost' size='sm' className='h-7 px-2 text-xs' onClick={startEdit}>
+                <Pencil className='mr-1 h-3 w-3' />Edit
+              </Button>
+            )}
           </div>
           {!editing && (
             <>
@@ -175,10 +172,7 @@ export function ContentBlock({ entityId, kind, label = 'Prompt', placeholder }: 
             <div className='mt-2 space-y-2'>
               {revisions.slice(1).map(rev => (
                 <div key={rev.id} className='rounded border border-dashed p-3 opacity-60'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    <span className='font-mono text-[10px] text-muted-foreground'>{rev.created_at}</span>
-                    {rev.body && <CopyButton text={rev.body} title='Copy revision' className='ml-auto' />}
-                  </div>
+                  <div className='mb-1 font-mono text-[10px] text-muted-foreground'>{rev.created_at}</div>
                   <BlockNoteReadView markdown={rev.body ?? ''} />
                 </div>
               ))}

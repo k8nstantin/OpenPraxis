@@ -11,7 +11,6 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { CopyButton } from '@/components/copy-button'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { Card, CardContent } from '@/components/ui/card'
@@ -431,9 +430,8 @@ function Pane({
         : 'border-zinc-700'
   return (
     <div className={cn('overflow-hidden rounded-md border', border)}>
-      <div className='flex items-center bg-zinc-900/50 px-2 py-1'>
-        <span className='text-[10px] uppercase tracking-wider text-muted-foreground flex-1'>{label}</span>
-        {content && content !== '—' && <CopyButton text={content} title={`Copy ${label}`} />}
+      <div className='bg-zinc-900/50 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground'>
+        {label}
       </div>
       <pre className='max-h-[40vh] overflow-auto bg-zinc-950 p-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-words'>
         {content || '—'}

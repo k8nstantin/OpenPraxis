@@ -1,6 +1,5 @@
 import { useEntity, type EntityKind } from '@/lib/queries/entity'
 import { Boxes, CheckSquare, FileText } from 'lucide-react'
-import { CopyButton } from '@/components/copy-button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -14,9 +13,7 @@ import { MainTab } from './tabs/main'
 import { RunsTab } from './tabs/runs'
 
 // Tabs: Main · Execution · Runs · Comments · Dependencies · DAG
-// Exported so route validators (e.g. /entities/$uid) build their tab
-// schema from the same source of truth — adding a tab here propagates.
-export const TAB_IDS = [
+const TAB_IDS = [
   'main',
   'execution',
   'runs',
@@ -32,13 +29,11 @@ export function EntityDetailPane({
   entityId,
   tab,
   onTabChange,
-  breadcrumb,
 }: {
   kind: EntityKind
   entityId?: string
   tab: EntityTabId
   onTabChange: (tab: EntityTabId) => void
-  breadcrumb?: React.ReactNode
 }) {
   const entity = useEntity(kind, entityId)
   const iconMap: Record<string, React.ElementType> = {
@@ -65,13 +60,11 @@ export function EntityDetailPane({
     <div className='flex h-full min-h-0 flex-col'>
       <ScrollArea className='min-h-0 flex-1'>
         <div className='space-y-4 p-4'>
-          {breadcrumb ?? (
-            <EntityBreadcrumb
-              kind={kind}
-              entityId={entityId}
-              entityTitle={entity.data?.title}
-            />
-          )}
+          <EntityBreadcrumb
+            kind={kind}
+            entityId={entityId}
+            entityTitle={entity.data?.title}
+          />
 
           <div>
             {entity.isLoading ? (
@@ -86,12 +79,9 @@ export function EntityDetailPane({
                   <h1 className='text-2xl font-bold tracking-tight'>
                     {entity.data.title}
                   </h1>
-                  <div className='flex items-center gap-1.5'>
-                    <code className='text-muted-foreground font-mono text-xs'>
-                      {entity.data.entity_uid}
-                    </code>
-                    <CopyButton text={entity.data.entity_uid} title='Copy UID' />
-                  </div>
+                  <code className='text-muted-foreground font-mono text-xs'>
+                    {entity.data.entity_uid}
+                  </code>
                 </div>
                 <EntityStatusControl
                   kind={kind}
