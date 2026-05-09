@@ -46,27 +46,52 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
     <div className='max-h-96 overflow-y-auto font-mono text-xs'>
       {data.map((a) => {
         const isExpanded = expanded.has(a.id)
-        const hasInput = !!a.tool_input
+        const hasContent = !!(a.tool_input || a.tool_response)
         return (
           <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
+            {/* Header row — click to expand */}
             <div
-              className={`flex items-center gap-2 ${hasInput ? 'cursor-pointer' : ''}`}
-              onClick={() => hasInput && toggle(a.id)}
+              className={`flex items-center gap-2 ${hasContent ? 'cursor-pointer select-none' : ''}`}
+              onClick={() => hasContent && toggle(a.id)}
             >
               <span className='text-blue-400 font-medium'>{a.tool_name}</span>
               {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
-              {hasInput && (
+              {hasContent && (
                 <span className='text-muted-foreground text-[10px]'>
-                  {isExpanded ? '▲ collapse' : '▼ expand'}
+                  {isExpanded ? '▲' : '▼'}
                 </span>
               )}
               <span className='text-muted-foreground ml-auto text-[10px]'>
                 {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
               </span>
             </div>
-            {hasInput && (
-              <div className={`text-muted-foreground mt-0.5 text-[10px] ${isExpanded ? 'whitespace-pre-wrap break-all' : 'truncate'}`}>
-                {isExpanded ? a.tool_input : a.tool_input.slice(0, 120)}
+
+            {/* Collapsed preview */}
+            {!isExpanded && a.tool_input && (
+              <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
+                {a.tool_input.slice(0, 120)}
+              </div>
+            )}
+
+            {/* Expanded: full input + response */}
+            {isExpanded && (
+              <div className='mt-1 space-y-1.5'>
+                {a.tool_input && (
+                  <div>
+                    <div className='text-[10px] font-semibold text-blue-400/60 mb-0.5'>INPUT</div>
+                    <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
+                      {a.tool_input}
+                    </div>
+                  </div>
+                )}
+                {a.tool_response && (
+                  <div>
+                    <div className='text-[10px] font-semibold text-emerald-400/60 mb-0.5'>RESPONSE</div>
+                    <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
+                      {a.tool_response}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
