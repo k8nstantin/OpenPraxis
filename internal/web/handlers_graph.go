@@ -150,23 +150,42 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// ── Step 3: render ALL edges between discovered nodes ─────────────────
-		// Use ListOutgoingForMany on the full node set — one query returns every
-		// edge whose src is in the set. Filter to those whose dst is also in the
-		// set. This renders owns AND depends_on edges correctly regardless of
-		// walk discovery order.
+		// ── Step 3: expand nodeSet with incoming neighbours ──────────────────
+		// The Walk CTE only follows outgoing edges. Pull in nodes that point
+		// TO anything already discovered so bidirectional links (links_to,
+		// reviews) appear regardless of which end the viewer starts from.
+		allNodeIDs := make([]string, 0, len(nodeSet))
+		for id := range nodeSet {
+			allNodeIDs = append(allNodeIDs, id)
+		}
+		incomingEdges, _ := n.Relationships.ListIncomingForMany(r.Context(), allNodeIDs, "")
+		for dstID, dstEdges := range incomingEdges {
+			_ = dstID
+			for _, e := range dstEdges {
+				if nodeSet[e.SrcID] {
+					continue
+				}
+				nodeSet[e.SrcID] = true
+				if src, _ := n.Entities.Get(e.SrcID); src != nil {
+					addNode(src.EntityUID, src.Type, src.Title, src.Status)
+				}
+			}
+		}
+
+		// Rebuild allNodeIDs after expansion.
+		allNodeIDs = allNodeIDs[:0]
+		for id := range nodeSet {
+			allNodeIDs = append(allNodeIDs, id)
+		}
+
+		// ── Step 4: render ALL edges between discovered nodes ─────────────────
 		type edgeOut struct {
 			ID     string `json:"id"`
 			Source string `json:"source"`
 			Target string `json:"target"`
 			Kind   string `json:"kind"`
 		}
-		edges := make([]edgeOut, 0, len(walkRows))
-
-		allNodeIDs := make([]string, 0, len(nodeSet))
-		for id := range nodeSet {
-			allNodeIDs = append(allNodeIDs, id)
-		}
+		edges := make([]edgeOut, 0, len(nodeSet)*2)
 
 		allEdges, _ := n.Relationships.ListOutgoingForMany(r.Context(), allNodeIDs, "")
 		seenEdges := make(map[string]bool)
