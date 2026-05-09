@@ -1,4 +1,5 @@
 import { useState, Fragment, useEffect, useRef } from 'react'
+import { CopyButton } from '@/components/copy-button'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
@@ -118,8 +119,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
                   <div>
                     <div className='flex items-center gap-2 mb-0.5'>
                       <span className='text-[10px] font-semibold text-blue-400/60'>INPUT</span>
-                      <button type='button' onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(fmt(a.tool_input)) }}
-                        className='text-[10px] text-muted-foreground hover:text-foreground ml-auto'>copy</button>
+                      <CopyButton text={fmt(a.tool_input)} className='ml-auto' title='Copy input' />
                     </div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
                       {fmt(a.tool_input)}
@@ -130,8 +130,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
                   <div>
                     <div className='flex items-center gap-2 mb-0.5'>
                       <span className='text-[10px] font-semibold text-emerald-400/60'>RESPONSE</span>
-                      <button type='button' onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(fmt(a.tool_response)) }}
-                        className='text-[10px] text-muted-foreground hover:text-foreground ml-auto'>copy</button>
+                      <CopyButton text={fmt(a.tool_response)} className='ml-auto' title='Copy response' />
                     </div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
                       {fmt(a.tool_response)}

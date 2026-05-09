@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { CopyButton } from '@/components/copy-button'
 import { useQueryClient } from '@tanstack/react-query'
 import { CommentAttachments } from '@/components/comment-attachments'
 import {
@@ -227,7 +228,10 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                         {TYPE_LABEL[c.type] ?? c.type}
                       </Badge>
                     </div>
-                    <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
+                    <div className='flex items-center gap-2'>
+                      <CopyButton text={c.body ?? ''} title='Copy body' />
+                      <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
+                    </div>
                   </div>
 
                   {rawMode ? (
