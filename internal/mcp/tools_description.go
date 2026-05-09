@@ -19,7 +19,7 @@ func (s *Server) registerDescriptionTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("description_history",
 			mcplib.WithDescription("List the description/content/instructions revision history for a product, manifest, or task. Revisions are append-only; the latest revision is always the current body. Returns newest-first."),
-			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, or task")),
+			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, task, idea, skill, or entity")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("Entity full UUID")),
 			mcplib.WithNumber("limit", mcplib.Description("Max revisions to return. Default 100, cap 1000.")),
 		),
@@ -29,7 +29,7 @@ func (s *Server) registerDescriptionTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("description_get_revision",
 			mcplib.WithDescription("Fetch a single prompt comment by id. Enforces that the revision belongs to the given target — you cannot read a revision from a sibling entity by guessing its id."),
-			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, or task")),
+			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, task, idea, skill, or entity")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("Entity full UUID")),
 			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The prompt comment UUID")),
 		),
@@ -39,7 +39,7 @@ func (s *Server) registerDescriptionTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("description_restore",
 			mcplib.WithDescription("Restore a prior description revision. Revisions are append-only; restore creates a new prompt whose body equals the historical revision's body and denormalises that body back onto the entity. The original revision row is untouched."),
-			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, or task")),
+			mcplib.WithString("target_type", mcplib.Required(), mcplib.Description("Entity type: product, manifest, task, idea, skill, or entity")),
 			mcplib.WithString("target_id", mcplib.Required(), mcplib.Description("Entity full UUID")),
 			mcplib.WithString("revision_id", mcplib.Required(), mcplib.Description("The historical prompt comment UUID to restore")),
 			mcplib.WithString("author", mcplib.Description("Optional author name for the new revision. Defaults to this peer's UUID.")),
@@ -48,20 +48,10 @@ func (s *Server) registerDescriptionTools() {
 	)
 }
 
-// parseTargetType canonicalises the target_type string to a comments
-// TargetType. Returns an error result when the value is unrecognised.
-func parseTargetType(raw string) (comments.TargetType, error) {
-	switch raw {
-	case "product":
-		return comments.TargetProduct, nil
-	case "manifest":
-		return comments.TargetManifest, nil
-	case "task":
-		return comments.TargetTask, nil
-	case "idea":
-		return comments.TargetIdea, nil
-	}
-	return "", fmt.Errorf("target_type must be one of: product, manifest, task, idea (got %q)", raw)
+// parseTargetType accepts any entity kind string (product, manifest, task, idea, skill, entity)
+// and always returns TargetEntity — all entities share one comments bucket.
+func parseTargetType(_ string) (comments.TargetType, error) {
+	return comments.TargetEntity, nil
 }
 
 func (s *Server) handleDescriptionHistory(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

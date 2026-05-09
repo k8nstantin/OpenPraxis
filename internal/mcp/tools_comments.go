@@ -58,32 +58,16 @@ func (s *Server) handleCommentAdd(ctx context.Context, req mcplib.CallToolReques
 //
 // When a store is not wired (e.g. tests with a minimal Node), the raw id is
 // returned unchanged so tool registration still works.
-func (s *Server) resolveCommentTarget(target comments.TargetType, raw string) (string, error) {
-	switch target {
-	case comments.TargetTask:
-		if s.node.Entities == nil {
-			return raw, nil
-		}
-		e, err := s.node.Entities.Get(raw)
-		if err != nil {
-			return "", fmt.Errorf("resolve target task %q: %w", raw, err)
-		}
-		if e == nil {
-			return "", fmt.Errorf("target task not found: %s", raw)
-		}
-		return e.EntityUID, nil
-	case comments.TargetManifest, comments.TargetProduct:
-		if s.node.Entities == nil {
-			return raw, nil
-		}
-		e, err := s.node.Entities.Get(raw)
-		if err != nil {
-			return "", fmt.Errorf("resolve target %s %q: %w", target, raw, err)
-		}
-		if e == nil {
-			return "", fmt.Errorf("target %s not found: %s", target, raw)
-		}
-		return e.EntityUID, nil
+func (s *Server) resolveCommentTarget(_ comments.TargetType, raw string) (string, error) {
+	if s.node.Entities == nil {
+		return raw, nil
 	}
-	return raw, nil
+	e, err := s.node.Entities.Get(raw)
+	if err != nil {
+		return "", fmt.Errorf("resolve entity %q: %w", raw, err)
+	}
+	if e == nil {
+		return "", fmt.Errorf("entity not found: %s", raw)
+	}
+	return e.EntityUID, nil
 }

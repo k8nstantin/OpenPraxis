@@ -53,11 +53,7 @@ func IsValidCommentType(s string) bool {
 }
 
 func IsValidTargetType(s string) bool {
-	switch TargetType(s) {
-	case TargetProduct, TargetManifest, TargetTask, TargetIdea, TargetEntity:
-		return true
-	}
-	return false
+	return TargetType(s) == TargetEntity
 }
 
 type CommentTypeInfo struct {

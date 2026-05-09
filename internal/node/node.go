@@ -1100,7 +1100,7 @@ type executionReviewCheckerAdapter struct{ s *comments.Store }
 
 func (a *executionReviewCheckerAdapter) HasAgentExecutionReview(ctx context.Context, taskID string) (bool, error) {
 	t := comments.TypeExecutionReview
-	rows, err := a.s.List(ctx, comments.TargetTask, taskID, 50, &t)
+	rows, err := a.s.List(ctx, comments.TargetEntity, taskID, 50, &t)
 	if err != nil {
 		return false, err
 	}

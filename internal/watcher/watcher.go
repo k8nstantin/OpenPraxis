@@ -154,7 +154,7 @@ func (w *Watcher) postFindings(taskID string, audit *Audit) {
 
 	for _, body := range bodies {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := w.comments.Add(ctx, comments.TargetTask, taskID, "watcher", comments.TypeWatcherFinding, body)
+		_, err := w.comments.Add(ctx, comments.TargetEntity, taskID, "watcher", comments.TypeWatcherFinding, body)
 		cancel()
 		if err != nil {
 			slog.Warn("watcher failed to post finding comment",

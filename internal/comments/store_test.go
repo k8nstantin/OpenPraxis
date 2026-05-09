@@ -103,23 +103,23 @@ func TestStore_List_TypeFilter(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.Add(ctx, TargetTask, "t1", "alice", TypeUserNote, "note"); err != nil {
+	if _, err := s.Add(ctx, TargetEntity, "e1", "alice", TypeComment, "comment-1"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if _, err := s.Add(ctx, TargetTask, "t1", "alice", TypeDecision, "decision"); err != nil {
+	if _, err := s.Add(ctx, TargetEntity, "e1", "alice", TypePrompt, "prompt-body"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if _, err := s.Add(ctx, TargetTask, "t1", "alice", TypeAgentNote, "agent"); err != nil {
+	if _, err := s.Add(ctx, TargetEntity, "e1", "alice", TypeComment, "comment-2"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	f := TypeDecision
-	got, err := s.List(ctx, TargetTask, "t1", 0, &f)
+	f := TypePrompt
+	got, err := s.List(ctx, TargetEntity, "e1", 0, &f)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != 1 || got[0].Type != TypeDecision {
-		t.Fatalf("expected only decision, got %+v", got)
+	if len(got) != 1 || got[0].Type != TypePrompt {
+		t.Fatalf("expected only prompt, got %+v", got)
 	}
 }
 
@@ -177,19 +177,27 @@ func TestStore_List_ScopeIsolation(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.Add(ctx, TargetProduct, "A", "alice", TypeUserNote, "prod-A"); err != nil {
-		t.Fatalf("add product: %v", err)
+	if _, err := s.Add(ctx, TargetEntity, "entity-A", "alice", TypeComment, "comment-A"); err != nil {
+		t.Fatalf("add entity-A: %v", err)
 	}
-	if _, err := s.Add(ctx, TargetManifest, "A", "alice", TypeUserNote, "man-A"); err != nil {
-		t.Fatalf("add manifest: %v", err)
+	if _, err := s.Add(ctx, TargetEntity, "entity-B", "alice", TypeComment, "comment-B"); err != nil {
+		t.Fatalf("add entity-B: %v", err)
 	}
 
-	got, err := s.List(ctx, TargetTask, "A", 0, nil)
+	got, err := s.List(ctx, TargetEntity, "entity-A", 0, nil)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].TargetID != "entity-A" {
+		t.Fatalf("expected 1 result for entity-A, got %d", len(got))
+	}
+
+	got, err = s.List(ctx, TargetEntity, "entity-C", 0, nil)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("expected 0 task-scoped results, got %d", len(got))
+		t.Fatalf("expected 0 results for unknown entity, got %d", len(got))
 	}
 }
 

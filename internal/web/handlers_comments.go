@@ -221,36 +221,19 @@ func passthroughResolver(_ comments.TargetType, raw string) (string, error) {
 }
 
 // nodeTargetResolver builds a TargetResolver backed by the node's entity store.
-// Each store's Get expects the full 36-char UUID (post marker rip-out).
 func nodeTargetResolver(n *node.Node) TargetResolver {
-	return func(target comments.TargetType, raw string) (string, error) {
-		switch target {
-		case comments.TargetTask:
-			if n.Entities == nil {
-				return raw, nil
-			}
-			e, err := n.Entities.Get(raw)
-			if err != nil {
-				return "", fmt.Errorf("resolve target task %q: %w", raw, err)
-			}
-			if e == nil {
-				return "", fmt.Errorf("target task not found: %s", raw)
-			}
-			return e.EntityUID, nil
-		case comments.TargetManifest, comments.TargetProduct, comments.TargetIdea:
-			if n.Entities == nil {
-				return raw, nil
-			}
-			e, err := n.Entities.Get(raw)
-			if err != nil {
-				return "", fmt.Errorf("resolve target %s %q: %w", target, raw, err)
-			}
-			if e == nil {
-				return "", fmt.Errorf("target %s not found: %s", target, raw)
-			}
-			return e.EntityUID, nil
+	return func(_ comments.TargetType, raw string) (string, error) {
+		if n.Entities == nil {
+			return raw, nil
 		}
-		return raw, nil
+		e, err := n.Entities.Get(raw)
+		if err != nil {
+			return "", fmt.Errorf("resolve entity %q: %w", raw, err)
+		}
+		if e == nil {
+			return "", fmt.Errorf("entity not found: %s", raw)
+		}
+		return e.EntityUID, nil
 	}
 }
 
@@ -402,29 +385,12 @@ func listCommentTypes() http.HandlerFunc {
 	}
 }
 
-// commentScopeRoutes pairs a URL-plural segment with its TargetType so the
-// registration loop stays declarative.
-var commentScopeRoutes = []struct {
-	segment string
-	target  comments.TargetType
-}{
-	{"products", comments.TargetProduct},
-	{"manifests", comments.TargetManifest},
-	{"tasks", comments.TargetTask},
-	{"ideas", comments.TargetIdea},
-}
-
-// registerCommentsRoutes attaches the 8 comment endpoints to /api using the
-// given TargetResolver. Tests pass passthroughResolver; production wires
-// nodeTargetResolver via registerCommentsRoutesFromNode.
+// registerCommentsRoutes attaches the comment PATCH/DELETE/types endpoints to /api.
+// Per-entity-type routes (/products/{id}/comments etc.) are removed — all
+// comments are accessed via /api/entities/{id}/comments (TargetEntity).
 func registerCommentsRoutes(api *mux.Router, store *comments.Store, resolve TargetResolver) {
 	if resolve == nil {
 		resolve = passthroughResolver
-	}
-	for _, s := range commentScopeRoutes {
-		path := "/" + s.segment + "/{id}/comments"
-		api.HandleFunc(path, listComments(store, s.target, resolve)).Methods("GET")
-		api.HandleFunc(path, addComment(store, s.target, resolve)).Methods("POST")
 	}
 	api.HandleFunc("/comments/types", listCommentTypes()).Methods("GET")
 	api.HandleFunc("/comments/{id}", editComment(store)).Methods("PATCH")

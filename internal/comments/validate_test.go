@@ -68,9 +68,9 @@ func TestRegistry(t *testing.T) {
 	reg := Registry()
 	all := AllCommentTypes()
 
-	// 6 original types + 2 review types added in #93 + description_revision (DV/M1).
-	if len(reg) != 9 {
-		t.Fatalf("Registry len = %d, want 9", len(reg))
+	// Two canonical types: prompt and comment.
+	if len(reg) != 2 {
+		t.Fatalf("Registry len = %d, want 2", len(reg))
 	}
 	if len(reg) != len(all) {
 		t.Fatalf("Registry (%d) and AllCommentTypes (%d) length mismatch", len(reg), len(all))
