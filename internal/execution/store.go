@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,14 @@ const (
 	EventCompleted = "completed"
 	EventFailed    = "failed"
 	EventTurn      = "turn" // one row per turn boundary; Turns field holds the turn number
+)
+
+// Terminal-reason values populated on terminal (completed/failed) rows.
+// Used for pass-rate classification — see PassRateByEntity.
+const (
+	TerminalReasonSuccess  = "success"
+	TerminalReasonMaxTurns = "max_turns"
+	TerminalReasonTimeout  = "timeout"
 )
 
 // Row is one append-only event row in execution_log.
@@ -96,6 +105,21 @@ type Row struct {
 	TestsPassed        int      `json:"tests_passed"`
 	TestsFailed        int      `json:"tests_failed"`
 	AgentPID           int      `json:"agent_pid"` // OS PID of the spawned agent process; 0 if unknown
+}
+
+// PassRateSummary aggregates terminal execution-log rows for one entity.
+// TotalRuns == 0 means the entity has never run — callers must check this
+// before treating PassRate as meaningful.
+type PassRateSummary struct {
+	EntityUID    string
+	TotalRuns    int
+	SuccessRuns  int
+	FailedRuns   int
+	MaxTurnsRuns int
+	TimeoutRuns  int
+	AvgTurns     float64
+	AvgCostUSD   float64
+	PassRate     float64 // SuccessRuns / TotalRuns; 0.0 when TotalRuns == 0
 }
 
 // OutputChunk is one live text chunk in execution_output.
@@ -496,6 +520,102 @@ func (s *Store) HasCompletedSince(ctx context.Context, entityUID string, since t
 		return false, fmt.Errorf("execution: has completed since: %w", err)
 	}
 	return n > 0, nil
+}
+
+// PassRateByEntity aggregates terminal execution-log rows for a single entity
+// over the trailing windowDays window (windowDays <= 0 disables the filter).
+// Returns a zero summary tagged with entityUID when the entity has never run.
+func (s *Store) PassRateByEntity(ctx context.Context, entityUID string, windowDays int) (PassRateSummary, error) {
+	if entityUID == "" {
+		return PassRateSummary{}, ErrEmptyEntityID
+	}
+	m, err := s.FrontierByManifest(ctx, []string{entityUID}, windowDays)
+	if err != nil {
+		return PassRateSummary{}, err
+	}
+	if sum, ok := m[entityUID]; ok {
+		return sum, nil
+	}
+	return PassRateSummary{EntityUID: entityUID}, nil
+}
+
+// FrontierByManifest aggregates terminal execution-log rows for the given
+// task IDs in a single SQL pass, classifying terminal_reason into the
+// success / max_turns / timeout / failed buckets. Tasks absent from the
+// returned map have no terminal runs in the window. Empty taskIDs returns
+// an empty (non-nil) map without querying.
+func (s *Store) FrontierByManifest(ctx context.Context, taskIDs []string, windowDays int) (map[string]PassRateSummary, error) {
+	out := make(map[string]PassRateSummary, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+
+	placeholders := make([]string, len(taskIDs))
+	for i := range taskIDs {
+		placeholders[i] = "?"
+	}
+
+	args := make([]any, 0, 6+len(taskIDs)+1)
+	// CASE WHEN args (must precede WHERE args in placeholder order).
+	args = append(args, TerminalReasonSuccess, "")
+	args = append(args, TerminalReasonMaxTurns)
+	args = append(args, TerminalReasonTimeout)
+	// WHERE entity_uid IN (...).
+	for _, id := range taskIDs {
+		args = append(args, id)
+	}
+	// WHERE event IN (?, ?).
+	args = append(args, EventCompleted, EventFailed)
+
+	windowClause := ""
+	if windowDays > 0 {
+		cutoff := time.Now().UTC().Add(-time.Duration(windowDays) * 24 * time.Hour).Format(time.RFC3339Nano)
+		windowClause = " AND created_at >= ?"
+		args = append(args, cutoff)
+	}
+
+	query := fmt.Sprintf(`SELECT entity_uid,
+			COUNT(*),
+			SUM(CASE WHEN terminal_reason IN (?, ?) THEN 1 ELSE 0 END),
+			SUM(CASE WHEN terminal_reason = ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN terminal_reason = ? THEN 1 ELSE 0 END),
+			AVG(turns),
+			AVG(cost_usd)
+		FROM execution_log
+		WHERE entity_uid IN (%s)
+			AND event IN (?, ?)%s
+		GROUP BY entity_uid`,
+		strings.Join(placeholders, ","), windowClause)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("execution: frontier by manifest: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sum PassRateSummary
+		if err := rows.Scan(
+			&sum.EntityUID,
+			&sum.TotalRuns,
+			&sum.SuccessRuns,
+			&sum.MaxTurnsRuns,
+			&sum.TimeoutRuns,
+			&sum.AvgTurns,
+			&sum.AvgCostUSD,
+		); err != nil {
+			return nil, fmt.Errorf("execution: frontier by manifest: scan: %w", err)
+		}
+		sum.FailedRuns = sum.TotalRuns - sum.SuccessRuns - sum.MaxTurnsRuns - sum.TimeoutRuns
+		if sum.TotalRuns > 0 {
+			sum.PassRate = float64(sum.SuccessRuns) / float64(sum.TotalRuns)
+		}
+		out[sum.EntityUID] = sum
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("execution: frontier by manifest: rows: %w", err)
+	}
+	return out, nil
 }
 
 // InFlightRun holds the minimal fields needed for zombie-process detection.
