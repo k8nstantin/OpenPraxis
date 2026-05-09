@@ -13,7 +13,9 @@ import { MainTab } from './tabs/main'
 import { RunsTab } from './tabs/runs'
 
 // Tabs: Main · Execution · Runs · Comments · Dependencies · DAG
-const TAB_IDS = [
+// Exported so route validators (e.g. /entities/$uid) build their tab
+// schema from the same source of truth — adding a tab here propagates.
+export const TAB_IDS = [
   'main',
   'execution',
   'runs',
