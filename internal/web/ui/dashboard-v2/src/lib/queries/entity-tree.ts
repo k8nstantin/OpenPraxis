@@ -273,6 +273,51 @@ async function fetchEntityTree(): Promise<EntityTree> {
   return { skills, lifecycle }
 }
 
+// ── Live status overlay ───────────────────────────────────────────────
+//
+// The tree is fetched on a 10s poll; useLiveRuns polls every 4s while
+// any agent is running. Overlaying the live set on top of the cached
+// tree gives 1–2s visual latency for state transitions without forcing
+// a full tree refetch on every poll.
+//
+// Walk depth-first: leaf-tasks whose id is in `liveTaskIds` flip to
+// running; internal nodes re-derive from their (possibly-overridden)
+// children via the same deriveStatus used at fetch time. The walk is
+// kind-agnostic — any internal node with children re-derives, so a new
+// entity kind would slot in for free.
+
+export function overlayLiveStatus(
+  tree: EntityTree,
+  liveTaskIds: ReadonlySet<string>,
+): EntityTree {
+  if (liveTaskIds.size === 0) return tree
+  return {
+    skills: tree.skills.map((n) => overlayNode(n, liveTaskIds)),
+    lifecycle: tree.lifecycle.map((n) => overlayNode(n, liveTaskIds)),
+  }
+}
+
+function overlayNode(
+  node: TreeNode,
+  liveTaskIds: ReadonlySet<string>,
+): TreeNode {
+  // A live run on the node itself is authoritative — overrides any
+  // derived child rollup. Otherwise, re-derive internal nodes from
+  // (possibly-overridden) children. Leaf nodes pass through unchanged.
+  const liveOverride: TreeStatus | null = liveTaskIds.has(node.id)
+    ? STATUS.running
+    : null
+  if (node.children && node.children.length > 0) {
+    const children = node.children.map((c) => overlayNode(c, liveTaskIds))
+    return {
+      ...node,
+      status: liveOverride ?? deriveStatus(children),
+      children,
+    }
+  }
+  return liveOverride ? { ...node, status: liveOverride } : node
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────
 
 export const entityTreeKeys = {
@@ -293,4 +338,4 @@ export { fetchEntityTree }
 
 // Test/dev helpers — exported so children-of-different-shapes tests can
 // assert the derivation rules without reaching into the closure.
-export const __test__ = { deriveStatus, normalizeStatus }
+export const __test__ = { deriveStatus, normalizeStatus, overlayLiveStatus }
