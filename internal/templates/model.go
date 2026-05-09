@@ -14,6 +14,7 @@ var Sections = []string{
 	SectionPreamble,
 	SectionVisceralRules,
 	SectionManifestSpec,
+	SectionPriorContext,
 	SectionTask,
 	SectionInstructions,
 	SectionGitWorkflow,
@@ -24,6 +25,7 @@ const (
 	SectionPreamble        = "preamble"
 	SectionVisceralRules   = "visceral_rules"
 	SectionManifestSpec    = "manifest_spec"
+	SectionPriorContext    = "prior_context"
 	SectionTask            = "task"
 	SectionInstructions    = "instructions"
 	SectionGitWorkflow     = "git_workflow"

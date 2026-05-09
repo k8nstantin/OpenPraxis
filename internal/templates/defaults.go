@@ -26,6 +26,13 @@ const defaultManifestSpec = `<manifest_spec title={{printf "%q" .Manifest.Title}
 
 `
 
+const defaultPriorContext = `{{if or .PriorRuns .OtherComments}}<prior_context>
+{{if .PriorRuns}}## Prior Runs
+{{range .PriorRuns}}{{.}}
+{{end}}{{end}}{{if .OtherComments}}## Related Comments
+{{range .OtherComments}}{{.}}
+{{end}}{{end}}</prior_context>{{end}}`
+
 const defaultTask = `<task title={{printf "%q" .Task.Title}} id={{printf "%q" .Task.ID}}>
 {{if .Task.Description}}{{.Task.Description}}
 {{end}}</task>
@@ -84,6 +91,7 @@ func SystemDefaults() map[string]string {
 		SectionPreamble:        defaultPreamble,
 		SectionVisceralRules:   defaultVisceralRules,
 		SectionManifestSpec:    defaultManifestSpec,
+		SectionPriorContext:    defaultPriorContext,
 		SectionTask:            defaultTask,
 		SectionInstructions:    defaultInstructions,
 		SectionGitWorkflow:     defaultGitWorkflow,
@@ -97,6 +105,7 @@ func SystemDefaultTitles() map[string]string {
 		SectionPreamble:        "System preamble",
 		SectionVisceralRules:   "Visceral rules block",
 		SectionManifestSpec:    "Manifest spec block",
+		SectionPriorContext:    "Prior context block",
 		SectionTask:            "Task block",
 		SectionInstructions:    "Instructions block",
 		SectionGitWorkflow:     "Git workflow block",
@@ -127,6 +136,13 @@ const markdownManifestSpec = `## Manifest: {{.Manifest.Title}}
 {{.Manifest.Content}}
 
 `
+
+const markdownPriorContext = `{{if or .PriorRuns .OtherComments}}## Prior Context
+{{if .PriorRuns}}### Prior Runs
+{{range .PriorRuns}}{{.}}
+{{end}}{{end}}{{if .OtherComments}}### Related Comments
+{{range .OtherComments}}{{.}}
+{{end}}{{end}}{{end}}`
 
 const markdownTask = `## Task: {{.Task.Title}} ({{.Task.ID}})
 
@@ -199,6 +215,7 @@ func AgentDefaults(agent string) map[string]string {
 		SectionPreamble:        preamble,
 		SectionVisceralRules:   markdownVisceralRules,
 		SectionManifestSpec:    markdownManifestSpec,
+		SectionPriorContext:    markdownPriorContext,
 		SectionTask:            markdownTask,
 		SectionInstructions:    markdownInstructions,
 		SectionGitWorkflow:     markdownGitWorkflow,
@@ -226,6 +243,7 @@ func AgentDefaultTitles(agent string) map[string]string {
 		SectionPreamble:        prefix + "preamble (markdown)",
 		SectionVisceralRules:   prefix + "visceral rules (markdown)",
 		SectionManifestSpec:    prefix + "manifest spec (markdown)",
+		SectionPriorContext:    prefix + "prior context (markdown)",
 		SectionTask:            prefix + "task block (markdown)",
 		SectionInstructions:    prefix + "instructions (markdown)",
 		SectionGitWorkflow:     prefix + "git workflow (markdown)",

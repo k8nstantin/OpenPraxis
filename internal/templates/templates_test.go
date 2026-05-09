@@ -44,12 +44,11 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// TestSeed_InsertsSevenSystemRows verifies acceptance #1 from RC/M1:
-// fresh DB → seed writes exactly seven active system rows, one per
-// section. With RC/M6 layered on top, the total row count is system(7)
-// + codex(7) + cursor(7) = 21, so this test scopes its count to the
-// system tier.
-func TestSeed_InsertsSevenSystemRows(t *testing.T) {
+// TestSeed_InsertsSystemRows verifies acceptance #1 from RC/M1:
+// fresh DB → seed writes one active system row per section. M1 adds
+// SectionPriorContext, raising the count to 8. With RC/M6 layered on
+// top, agent rows mirror the same set per seeded agent.
+func TestSeed_InsertsSystemRows(t *testing.T) {
 	db := openTestDB(t)
 	store := NewStore(db)
 	ctx := context.Background()
@@ -58,20 +57,21 @@ func TestSeed_InsertsSevenSystemRows(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	want := len(SystemDefaults())
 	var sys int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM prompt_templates WHERE scope='system'`).Scan(&sys); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if sys != 7 {
-		t.Fatalf("system row count = %d, want 7", sys)
+	if sys != want {
+		t.Fatalf("system row count = %d, want %d", sys, want)
 	}
 
 	rows, err := store.List(ctx, ScopeSystem, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(rows) != 7 {
-		t.Fatalf("system rows = %d, want 7", len(rows))
+	if len(rows) != want {
+		t.Fatalf("system rows = %d, want %d", len(rows), want)
 	}
 
 	seen := map[string]bool{}
@@ -114,19 +114,23 @@ func TestSeed_Idempotent(t *testing.T) {
 	_ = db.QueryRow(`SELECT COUNT(*) FROM prompt_templates`).Scan(&total)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM prompt_templates WHERE scope='system'`).Scan(&sys)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM prompt_templates WHERE scope='agent'`).Scan(&agent)
-	if sys != 7 {
-		t.Fatalf("after re-seed system count = %d, want 7", sys)
+	wantSys := len(SystemDefaults())
+	wantAgentEach := len(AgentDefaults(SeededAgents[0]))
+	wantAgent := wantAgentEach * len(SeededAgents)
+	wantTotal := wantSys + wantAgent
+	if sys != wantSys {
+		t.Fatalf("after re-seed system count = %d, want %d", sys, wantSys)
 	}
-	if agent != 14 {
-		t.Fatalf("after re-seed agent count = %d, want 14", agent)
+	if agent != wantAgent {
+		t.Fatalf("after re-seed agent count = %d, want %d", agent, wantAgent)
 	}
-	if total != 21 {
-		t.Fatalf("after re-seed total count = %d, want 21", total)
+	if total != wantTotal {
+		t.Fatalf("after re-seed total count = %d, want %d", total, wantTotal)
 	}
 }
 
 // TestSeed_InsertsAgentRows verifies RC/M6 acceptance #1: fresh seed
-// writes 14 active agent-scope rows (7 codex + 7 cursor).
+// writes one active agent-scope row per section, per seeded agent.
 func TestSeed_InsertsAgentRows(t *testing.T) {
 	db := openTestDB(t)
 	store := NewStore(db)
@@ -140,8 +144,10 @@ func TestSeed_InsertsAgentRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list agent: %v", err)
 	}
-	if len(rows) != 14 {
-		t.Fatalf("agent rows = %d, want 14", len(rows))
+	wantPerAgent := len(AgentDefaults(SeededAgents[0]))
+	wantTotal := wantPerAgent * len(SeededAgents)
+	if len(rows) != wantTotal {
+		t.Fatalf("agent rows = %d, want %d", len(rows), wantTotal)
 	}
 
 	byAgent := map[string]map[string]string{}
@@ -153,8 +159,8 @@ func TestSeed_InsertsAgentRows(t *testing.T) {
 	}
 	for _, agent := range SeededAgents {
 		sections := byAgent[agent]
-		if len(sections) != 7 {
-			t.Fatalf("%s rows = %d, want 7", agent, len(sections))
+		if len(sections) != wantPerAgent {
+			t.Fatalf("%s rows = %d, want %d", agent, len(sections), wantPerAgent)
 		}
 		for _, s := range Sections {
 			if sections[s] == "" {
@@ -195,8 +201,9 @@ func TestSeed_IdempotentPerBucket(t *testing.T) {
 	for _, agent := range SeededAgents {
 		var n int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM prompt_templates WHERE scope='agent' AND scope_id=?`, agent).Scan(&n)
-		if n != 7 {
-			t.Fatalf("agent %s rows = %d, want 7", agent, n)
+		want := len(AgentDefaults(agent))
+		if n != want {
+			t.Fatalf("agent %s rows = %d, want %d", agent, n, want)
 		}
 	}
 }
@@ -344,6 +351,48 @@ func TestResolver_AgentScope(t *testing.T) {
 	}
 	if !strings.Contains(pCursor, "Cursor") {
 		t.Errorf("cursor preamble missing Cursor identifier: %q", pCursor)
+	}
+}
+
+// TestRender_PriorContext verifies M1/T2 acceptance: the prior_context
+// section renders empty when both PriorRuns and OtherComments are nil
+// (first run — no regression) and renders a wrapped <prior_context>
+// block when either slice is populated.
+func TestRender_PriorContext(t *testing.T) {
+	body := SystemDefaults()[SectionPriorContext]
+
+	empty, err := Render(body, PromptData{})
+	if err != nil {
+		t.Fatalf("render empty: %v", err)
+	}
+	if empty != "" {
+		t.Errorf("empty render = %q, want empty string", empty)
+	}
+
+	full, err := Render(body, PromptData{
+		PriorRuns:     []string{"Run #1 — 5 turns, $0.10"},
+		OtherComments: []string{"prior agent finding"},
+	})
+	if err != nil {
+		t.Fatalf("render full: %v", err)
+	}
+	if !strings.Contains(full, "<prior_context>") || !strings.Contains(full, "</prior_context>") {
+		t.Errorf("populated render missing wrapper tags: %q", full)
+	}
+	if !strings.Contains(full, "Run #1 — 5 turns, $0.10") {
+		t.Errorf("populated render missing prior run line: %q", full)
+	}
+	if !strings.Contains(full, "prior agent finding") {
+		t.Errorf("populated render missing comment body: %q", full)
+	}
+
+	// Either slice alone is sufficient to emit the block.
+	runsOnly, err := Render(body, PromptData{PriorRuns: []string{"x"}})
+	if err != nil {
+		t.Fatalf("render runs-only: %v", err)
+	}
+	if !strings.Contains(runsOnly, "<prior_context>") {
+		t.Errorf("runs-only render missing wrapper: %q", runsOnly)
 	}
 }
 
