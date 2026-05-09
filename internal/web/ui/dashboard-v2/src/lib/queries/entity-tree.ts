@@ -18,8 +18,9 @@ import type { EntityKind } from './entity'
 
 // ── Single-point-of-change constants ─────────────────────────────────
 // Domain values that flow into URLs. Defined once here so a rename in
-// the backend requires changing exactly one line.
-const KIND = {
+// the backend requires changing exactly one line. Re-exported for any
+// consumer that branches on kind/status (renderers, navigation, etc.).
+export const KIND = {
   skill: 'skill',
   idea: 'idea',
   product: 'product',
@@ -32,7 +33,7 @@ const EDGE = {
   linksTo: 'links_to',
 } as const
 
-const STATUS = {
+export const STATUS = {
   draft: 'draft',
   active: 'active',
   running: 'running',
