@@ -135,6 +135,19 @@ export function useEntity(kind: EntityKind, id: string | undefined) {
   })
 }
 
+// Kind-agnostic lookup. The unified /api/entities/:uid endpoint resolves
+// any entity by its UUID and returns the row with `type` populated, so
+// callers that don't know the kind upfront (e.g. /entities/$uid route)
+// can resolve it before rendering.
+export function useEntityByUid(uid: string | undefined) {
+  return useQuery({
+    queryKey: ['entity', 'by-uid', uid ?? ''] as const,
+    queryFn: () => fetchJSON<Entity>(`/api/entities/${uid}`),
+    enabled: !!uid,
+    staleTime: 15 * 1000,
+  })
+}
+
 // Hierarchy is products-only — manifests don't expose recursive
 // descendants. For manifests we synthesize a minimal hierarchy from the
 // detail row + children + deps in the DAG tab; this hook just returns
