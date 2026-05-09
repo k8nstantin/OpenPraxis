@@ -195,7 +195,6 @@ These behaviors are automatic. Never mention OpenPraxis to the user unless they 
 	s.registerTools()
 	s.registerVisceralTools()
 	s.registerEntityTools()
-	s.registerIdeaTools()
 	s.registerSettingsTools()
 	s.registerDescriptionTools()
 	s.registerTemplateTools()
