@@ -212,10 +212,12 @@ var serveCmd = &cobra.Command{
 
 		runner := n.InitRunner(func(event string, data map[string]string) {
 			hub.Broadcast(web.Event{Type: event, Data: data})
-			// When a task completes, re-evaluate the owning manifest so the
-			// next depends_on-unblocked task fires automatically.
-			if event == "task_completed" {
-				taskID := data["task_id"]
+			// When a task completes successfully, re-evaluate the owning manifest
+			// so the next depends_on-unblocked task fires automatically.
+			// Only advance on status=completed — a failed or cancelled task must
+			// not re-trigger the chain or the manifest re-dispatches T1 in a loop.
+			if event == task.EventTaskCompleted && data[task.EventKeyStatus] == execution.EventCompleted {
+				taskID := data[task.EventKeyTaskID]
 				if taskID != "" && n.Relationships != nil && dispatchChainFn != nil {
 					edges, _ := n.Relationships.ListIncoming(ctx, taskID, relationships.EdgeOwns)
 					for _, e := range edges {
@@ -236,6 +238,51 @@ var serveCmd = &cobra.Command{
 		if err := runner.RecoverInFlight(ctx); err != nil {
 			slog.Warn("recover in-flight tasks failed", "error", err)
 		}
+
+		// DAG chain recovery: on startup, re-evaluate every active manifest so
+		// chains interrupted by a server restart resume from where they left off.
+		// dispatchChainFn is not wired yet at this point — schedule this after
+		// the runner and dispatcher are fully initialised by deferring into a
+		// short-lived goroutine that waits for the wiring to complete.
+		go func() {
+			// Brief pause to let dispatchChainFn get wired below.
+			time.Sleep(2 * time.Second)
+			if n.Relationships == nil || n.Entities == nil {
+				return
+			}
+			manifests, err := n.Entities.List("manifest", "active", 0)
+			if err != nil || len(manifests) == 0 {
+				return
+			}
+			resumed := 0
+			for _, m := range manifests {
+				// Only resume manifests that have at least one completed task
+				// (chain was in progress) and at least one not-yet-completed task.
+				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
+				hasCompleted, hasPending := false, false
+				for _, e := range edges {
+					if e.DstKind != relationships.KindTask {
+						continue
+					}
+					done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
+					if done {
+						hasCompleted = true
+					} else {
+						hasPending = true
+					}
+				}
+				if hasCompleted && hasPending && dispatchChainFn != nil {
+					slog.Info("dag-chain: resuming interrupted chain on startup", "manifest", m.EntityUID[:12], "title", m.Title)
+					if err := dispatchChainFn(ctx, m.EntityUID, 0); err != nil {
+						slog.Info("dag-chain: resume dispatch", "manifest", m.EntityUID[:12], "note", err.Error())
+					}
+					resumed++
+				}
+			}
+			if resumed > 0 {
+				slog.Info("dag-chain: resumed chains on startup", "count", resumed)
+			}
+		}()
 
 		// defaultSkillID is the fallback execution protocol used when an entity
 		// has no skill assigned via the DAG.
@@ -373,6 +420,12 @@ var serveCmd = &cobra.Command{
 								branchPrefix = bp
 							}
 						}
+						branchRemote := "github"
+						if brRes, err2 := n.SettingsResolver.Resolve(ctx, scope, "branch_remote"); err2 == nil {
+							if br, _ := brRes.Value.(string); br != "" {
+								branchRemote = br
+							}
+						}
 						if n.Relationships != nil {
 							// Walk up to find the entity whose title drives the branch name.
 							lookupID := entityID
@@ -411,10 +464,10 @@ var serveCmd = &cobra.Command{
 							prompt += fmt.Sprintf(
 								"\n\n## Shared Branch (branch_strategy=%s)\n"+
 									"Use branch `%s` — do NOT create a new branch or PR.\n"+
-									"```bash\ngit fetch github\n"+
-									"git checkout %s 2>/dev/null || git checkout -b %s --track github/%s\n```\n"+
+									"```bash\ngit fetch %s\n"+
+									"git checkout %s 2>/dev/null || git checkout -b %s --track %s/%s\n```\n"+
 									"Push all commits to `%s`.\n",
-								strategy, sharedBranch, sharedBranch, sharedBranch, sharedBranch, sharedBranch)
+								strategy, sharedBranch, branchRemote, sharedBranch, sharedBranch, branchRemote, sharedBranch, sharedBranch)
 							slog.Info("dispatch: shared branch", "entity_uid", entityID[:12], "branch", sharedBranch, "strategy", strategy)
 						}
 					}
@@ -488,22 +541,22 @@ var serveCmd = &cobra.Command{
 			var lastErr error
 			for _, taskID := range taskIDs {
 				// DAG gate: skip tasks whose depends_on edges point to tasks
-				// that have not yet completed. The depends_on edges in the
-				// relationships table are the source of truth — the scheduler
-				// must follow the DAG, not fire everything at once.
+				// that have not yet completed. Reads the relationships table
+				// (single source of truth) and uses HasCompleted — a targeted
+				// query for the completed event rather than the most-recent-row
+				// heuristic which could return a sample row and false-negative.
 				if n.Relationships != nil && n.ExecutionLog != nil {
+					// Skip tasks that already completed — prevents re-firing
+					// tasks with no deps (they'd pass the gate every time).
+					if done, _ := n.ExecutionLog.HasCompleted(ctx, taskID); done {
+						slog.Info("dag-chain: task already completed — skipping", "task_id", taskID[:12])
+						continue
+					}
 					deps, _ := n.Relationships.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
 					blocked := false
 					for _, dep := range deps {
-						rows, _ := n.ExecutionLog.ListByEntity(ctx, dep.DstID, 1)
-						completed := false
-						for _, row := range rows {
-							if row.Event == execution.EventCompleted {
-								completed = true
-								break
-							}
-						}
-						if !completed {
+						done, _ := n.ExecutionLog.HasCompleted(ctx, dep.DstID)
+						if !done {
 							blocked = true
 							break
 						}

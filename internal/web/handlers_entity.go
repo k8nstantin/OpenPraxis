@@ -69,6 +69,7 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 			Tags       []string `json:"tags"`
 			ProjectID  string   `json:"project_id"`   // manifest → parent product
 			ManifestID string   `json:"manifest_id"`  // task → parent manifest
+			Prompt     string   `json:"prompt"`       // optional initial prompt — posted as TypePrompt comment
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Type == "" || req.Title == "" {
 			http.Error(w, "type and title are required", 400)
@@ -104,6 +105,15 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 				}); err != nil {
 					slog.Error("entity create: wire owns edge failed", "src", req.ManifestID, "dst", e.EntityUID, "err", err)
 				}
+			}
+		}
+		// Persist optional prompt as a TypePrompt comment so it's versioned
+		// and never silently dropped. Before this fix the field was not in the
+		// request struct and Go's JSON decoder dropped it without error.
+		if req.Prompt != "" && n.Comments != nil {
+			if _, err := n.Comments.Add(r.Context(), comments.TargetEntity, e.EntityUID,
+				"http-api", comments.TypePrompt, req.Prompt); err != nil {
+				slog.Warn("entity create: failed to save prompt comment", "entity", e.EntityUID, "error", err)
 			}
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -783,5 +793,59 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 		}
 
 		writeJSON(w, actions)
+	}
+}
+
+// apiRelationshipsIncoming handles GET /api/relationships/incoming?dst_id=...&kind=...
+// Returns all current edges pointing TO dst_id with the given kind.
+// Agents use this to walk UP the DAG — find the manifest that owns a task, etc.
+func apiRelationshipsIncoming(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.Relationships == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		dstID := r.URL.Query().Get("dst_id")
+		kind := r.URL.Query().Get("kind")
+		if dstID == "" || kind == "" {
+			writeError(w, "dst_id and kind are required", http.StatusBadRequest)
+			return
+		}
+		edges, err := n.Relationships.ListIncoming(r.Context(), dstID, kind)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if edges == nil {
+			edges = []relationships.Edge{}
+		}
+		writeJSON(w, edges)
+	}
+}
+
+// apiRelationshipsOutgoing handles GET /api/relationships/outgoing?src_id=...&kind=...
+// Returns all current edges pointing FROM src_id with the given kind.
+// Agents use this to walk DOWN the DAG — list tasks owned by a manifest, etc.
+func apiRelationshipsOutgoing(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.Relationships == nil {
+			writeJSON(w, []any{})
+			return
+		}
+		srcID := r.URL.Query().Get("src_id")
+		kind := r.URL.Query().Get("kind")
+		if srcID == "" || kind == "" {
+			writeError(w, "src_id and kind are required", http.StatusBadRequest)
+			return
+		}
+		edges, err := n.Relationships.ListOutgoing(r.Context(), srcID, kind)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if edges == nil {
+			edges = []relationships.Edge{}
+		}
+		writeJSON(w, edges)
 	}
 }
