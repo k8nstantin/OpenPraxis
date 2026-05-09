@@ -66,6 +66,14 @@ var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty"
 var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea}
 var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn, EdgeReviews, EdgeLinksTo}
 
+// AllEdgeKinds returns all valid edge kinds. Use this instead of repeating
+// the list at call sites — adding a new kind here propagates everywhere.
+func AllEdgeKinds() []string {
+	out := make([]string, len(allEdgeKinds))
+	copy(out, allEdgeKinds)
+	return out
+}
+
 // validKind returns true if k is one of the enumerated entity kinds.
 // Iterates allEntityKinds so adding a new entity kind only requires
 // extending the slice — no validator edit needed.
