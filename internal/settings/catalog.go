@@ -76,6 +76,9 @@ func Catalog() []KnobDef {
 		// idea 019db6ba-ba0 and memory 019db6bb-a4e.
 		{Key: "prompt_max_comment_chars", Type: KnobInt, SliderMin: f(500), SliderMax: f(10000), SliderStep: f(500), Default: 2000, Description: "Max chars per comment when injected into the task-thread context block; longer comments are truncated with a pointer to the full text."},
 		{Key: "prompt_max_context_pct", Type: KnobFloat, SliderMin: f(0.1), SliderMax: f(0.9), SliderStep: f(0.05), Default: 0.4, Description: "Max fraction of the resolved model's context window that the prior-runs + other-comments block may consume; older comments drop first when over budget."},
+		{Key: "prompt_prior_runs_limit", Type: KnobInt, SliderMin: f(0), SliderMax: f(20), SliderStep: f(1), Default: 5, Description: "How many prior execution-log rows to inject into the prior_context prompt section. 0 disables."},
+		{Key: "prompt_prior_comments_limit", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 3, Description: "How many prior agent-authored comments (type=comment) to inject into the prior_context prompt section. 0 disables."},
+		{Key: "prompt_build_timeout_seconds", Type: KnobInt, SliderMin: f(1), SliderMax: f(30), SliderStep: f(1), Default: 5, Unit: "seconds", Description: "Deadline for prompt-build history queries. Prevents a slow DB from blocking task dispatch."},
 		{Key: "compliance_checks_enabled", Type: KnobEnum, EnumValues: []string{"true", "false"}, Default: "true", Description: "When true, PostToolUse hooks run visceral-compliance + manifest-delusion embedding checks per tool call. Disable for high-throughput agents — each tool call triggers up to N × M embedding calls (N rules, M open manifests) which can peg serve CPU. Defaults true; set false at product or task scope to opt out."},
 		// RC/M5 operator knobs — cadence, restart behavior, branch prefix,
 		// worktree base dir. All inherit via task → manifest → product →
