@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/k8nstantin/OpenPraxis/internal/comments"
 )
 
 func (s *Server) registerEntityTools() {
@@ -14,6 +16,7 @@ func (s *Server) registerEntityTools() {
 			mcplib.WithDescription("Create an entity — a generic SCD-2 versioned object. Types: skill, product, manifest, task, idea."),
 			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Entity type: skill, product, manifest, task, idea")),
 			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Entity title")),
+			mcplib.WithString("description", mcplib.Description("Initial prompt/instructions body (stored as first revision)")),
 			mcplib.WithString("status", mcplib.Description("draft, active, closed, archived. Default: draft")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -43,6 +46,7 @@ func (s *Server) registerEntityTools() {
 			mcplib.WithDescription("Update an entity — merges provided fields with current values."),
 			mcplib.WithString("id", mcplib.Required(), mcplib.Description("Entity UID")),
 			mcplib.WithString("title", mcplib.Description("New title")),
+			mcplib.WithString("description", mcplib.Description("New prompt/instructions body (append-only — creates a new revision)")),
 			mcplib.WithString("status", mcplib.Description("draft, active, closed, archived")),
 			mcplib.WithString("tags", mcplib.Description("Comma-separated tags")),
 		),
@@ -73,12 +77,19 @@ func (s *Server) handleEntityCreate(ctx context.Context, req mcplib.CallToolRequ
 	a := args(req)
 	entityType := argStr(a, "type")
 	title := argStr(a, "title")
+	desc := argStr(a, "description")
 	status := argStr(a, "status")
 	tags := splitCSV(argStr(a, "tags"))
 
 	e, err := s.node.Entities.Create(entityType, title, status, tags, s.sessionSource(ctx), "")
 	if err != nil {
 		return errResult("create entity: %v", err), nil
+	}
+
+	if desc != "" {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetEntity, e.EntityUID, desc, ""); err != nil {
+			return errResult("record description: %v", err), nil
+		}
 	}
 
 	return textResult(fmt.Sprintf("Entity created [%s]: %s (%s/%s)", e.EntityUID, e.Title, e.Type, e.Status)), nil
@@ -151,6 +162,13 @@ func (s *Server) handleEntityUpdate(ctx context.Context, req mcplib.CallToolRequ
 	tags := existing.Tags
 	if tagsStr != "" {
 		tags = splitCSV(tagsStr)
+	}
+	desc := argStr(a, "description")
+
+	if desc != "" {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetEntity, existing.EntityUID, desc, ""); err != nil {
+			return errResult("record description: %v", err), nil
+		}
 	}
 
 	if err := s.node.Entities.Update(existing.EntityUID, title, status, tags, s.sessionSource(ctx), ""); err != nil {
