@@ -25,11 +25,17 @@ const (
 )
 
 // Terminal-reason values populated on terminal (completed/failed) rows.
-// Used for pass-rate classification — see PassRateByEntity.
+// Used for pass-rate classification — see PassRateByEntity. ProcessError /
+// BuildFail / DeliverableMissing are referenced by the runner's retry and
+// proposer-trigger paths as classification inputs; expose them here so those
+// call sites read from the canonical constant rather than re-declaring strings.
 const (
-	TerminalReasonSuccess  = "success"
-	TerminalReasonMaxTurns = "max_turns"
-	TerminalReasonTimeout  = "timeout"
+	TerminalReasonSuccess            = "success"
+	TerminalReasonMaxTurns           = "max_turns"
+	TerminalReasonTimeout            = "timeout"
+	TerminalReasonProcessError       = "process_error"
+	TerminalReasonBuildFail          = "build_fail"
+	TerminalReasonDeliverableMissing = "deliverable_missing"
 )
 
 // Row is one append-only event row in execution_log.

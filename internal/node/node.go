@@ -443,6 +443,21 @@ func (n *Node) InitRunner(onEvent func(string, map[string]string)) *task.Runner 
 	if n.ExecutionLog != nil {
 		n.runner.SetExecutionLog(n.ExecutionLog)
 	}
+	// Wire the relationships store, schedules table, and entity store so
+	// the runner's proposer trigger path can walk UP from a finished task
+	// to its parent manifest, mint a proposer entity, and enqueue a
+	// one-shot schedule for it. All three are no-ops when the
+	// proposer_enabled knob is false (catalog default), so wiring them
+	// here costs nothing on the hot path.
+	if n.Relationships != nil {
+		n.runner.SetRelationships(n.Relationships)
+	}
+	if n.Schedules != nil {
+		n.runner.SetScheduleStore(n.Schedules)
+	}
+	if n.Entities != nil {
+		n.runner.SetEntityStore(n.Entities)
+	}
 	// Host-metrics sampler: polls the serve process's CPU/RSS every
 	// `host_sampler_tick_seconds` (system scope, catalog default 5s) and
 	// attributes each sample to every currently-running task. Data lands
