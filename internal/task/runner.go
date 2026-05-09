@@ -534,6 +534,16 @@ type runtimeKnobs struct {
 	AllowedTools    []string
 	BranchPrefix    string
 	WorktreeBaseDir string
+
+	// Prompt-context knobs — drive the prior_context section of the agent
+	// prompt. Limits and budget controls are catalog-driven so operators
+	// can dial the prior-runs / prior-comments injection per scope without
+	// a code change. See internal/settings/catalog.go for descriptions.
+	PromptMaxCommentChars    int
+	PromptMaxContextPct      float64
+	PromptPriorRunsLimit     int
+	PromptPriorCommentsLimit int
+	PromptBuildTimeoutSecs   int
 }
 
 // decodeRuntimeKnobs pulls the 11 execution-shaping knobs out of a
@@ -583,6 +593,21 @@ func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) 
 	}
 	if k.WorktreeBaseDir == "" {
 		k.WorktreeBaseDir = workspaceRoot
+	}
+	if k.PromptMaxCommentChars, err = resolvedInt(all["prompt_max_comment_chars"].Value); err != nil {
+		return k, fmt.Errorf("prompt_max_comment_chars: %w", err)
+	}
+	if k.PromptMaxContextPct, err = resolvedFloat(all["prompt_max_context_pct"].Value); err != nil {
+		return k, fmt.Errorf("prompt_max_context_pct: %w", err)
+	}
+	if k.PromptPriorRunsLimit, err = resolvedInt(all["prompt_prior_runs_limit"].Value); err != nil {
+		return k, fmt.Errorf("prompt_prior_runs_limit: %w", err)
+	}
+	if k.PromptPriorCommentsLimit, err = resolvedInt(all["prompt_prior_comments_limit"].Value); err != nil {
+		return k, fmt.Errorf("prompt_prior_comments_limit: %w", err)
+	}
+	if k.PromptBuildTimeoutSecs, err = resolvedInt(all["prompt_build_timeout_seconds"].Value); err != nil {
+		return k, fmt.Errorf("prompt_build_timeout_seconds: %w", err)
 	}
 	return k, nil
 }

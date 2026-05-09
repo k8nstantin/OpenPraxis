@@ -375,6 +375,45 @@ func TestRunner_Execute_UsesResolvedTimeout(t *testing.T) {
 	}
 }
 
+// TestRunner_Execute_PromptKnobsDecodeCatalogDefaults —
+// All five prompt-context fields on runtimeKnobs must decode cleanly when no
+// scope-specific overrides exist. The catalog defaults are the operator-facing
+// contract for first-run behavior — drift here breaks every task that relies on
+// inheritance falling through to the system tier.
+func TestRunner_Execute_PromptKnobsDecodeCatalogDefaults(t *testing.T) {
+	r, _, tasks, manifests := newRunnerHarness(t)
+	wireTask(tasks, manifests, "t-pk", "m-pk", "prod-pk")
+
+	ctx := context.Background()
+	scope, _, err := r.resolveMaxParallel(ctx, "t-pk")
+	if err != nil {
+		t.Fatalf("resolveMaxParallel: %v", err)
+	}
+	all, err := r.resolver.ResolveAll(ctx, scope)
+	if err != nil {
+		t.Fatalf("ResolveAll: %v", err)
+	}
+	knobs, err := decodeRuntimeKnobs(all)
+	if err != nil {
+		t.Fatalf("decodeRuntimeKnobs: %v", err)
+	}
+	if knobs.PromptMaxCommentChars != 2000 {
+		t.Errorf("PromptMaxCommentChars = %d, want 2000", knobs.PromptMaxCommentChars)
+	}
+	if knobs.PromptMaxContextPct != 0.4 {
+		t.Errorf("PromptMaxContextPct = %v, want 0.4", knobs.PromptMaxContextPct)
+	}
+	if knobs.PromptPriorRunsLimit != 5 {
+		t.Errorf("PromptPriorRunsLimit = %d, want 5", knobs.PromptPriorRunsLimit)
+	}
+	if knobs.PromptPriorCommentsLimit != 3 {
+		t.Errorf("PromptPriorCommentsLimit = %d, want 3", knobs.PromptPriorCommentsLimit)
+	}
+	if knobs.PromptBuildTimeoutSecs != 5 {
+		t.Errorf("PromptBuildTimeoutSecs = %d, want 5", knobs.PromptBuildTimeoutSecs)
+	}
+}
+
 // TestRunner_Execute_PerTaskAgentOverridesResolved —
 // The t.Agent column still wins over the resolver default. Tested via the
 // chooseAgent helper so the override rule is exercised without spawning a
