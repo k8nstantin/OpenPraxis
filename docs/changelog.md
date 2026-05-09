@@ -2,6 +2,61 @@
 
 Moved out of the main README to keep the landing page focused on what OpenPraxis **is** rather than what just changed. See the ["Changelog" link in the README](../README.md#deeper-references) to land here from the top of the repo.
 
+## v0.9.0 — May 2026
+
+### Trace-Grounded Feedback Loop (Meta-Harness Pattern)
+
+Three phases that close the retry loop — agents now see their own history, operators can query pass rates, and the system can improve its own prompt scaffold autonomously.
+
+#### Phase 1 — Prior Context Injection
+
+Every task prompt includes a `<prior_context>` block (between `<manifest_spec>` and `<task>`) with digests of prior runs and prior agent review comments. Agents stop repeating mistakes on retries.
+
+- 5 new **Prompt Context** knobs: `prompt_prior_runs_limit` (5), `prompt_prior_comments_limit` (3), `prompt_build_timeout_seconds` (5s), `prompt_max_comment_chars` (2000), `prompt_max_context_pct` (0.40)
+- Budget enforcement: oldest entries drop when context window limit approached
+- Bounded DB timeout on history queries — no dispatcher stalls
+
+#### Phase 2 — Frontier Queries and Pass-Rate API
+
+- `GET /api/execution/frontier?manifest_id=X` — per-task pass rates, avg cost, avg turns, best task
+- Single `GROUP BY` SQL query — no N+1 across large manifests
+- `cost_per_turn` and `cost_per_action` now in run detail responses
+- `frontier_window_days` knob controls lookback (default 30 days)
+
+#### Phase 3 — Proposer Loop
+
+Autonomous prompt scaffold evolution — **off by default** (`proposer_enabled=false`).
+
+- Monitors manifest failure streaks and per-run cost thresholds
+- Auto-fires a proposer agent; proposer reads frontier and changes one template section
+- Evaluator accepts or tombstones the change based on pass-rate delta
+- Full rollback via `template_tombstone` on regression
+- 5 new **Proposer Loop** knobs: `proposer_enabled`, `proposer_trigger_failure_streak` (3), `proposer_trigger_cost_usd` (0), `proposer_min_pass_rate_delta` (0.05), `proposer_max_candidates` (3)
+
+### DAG — Type-Agnostic and Bidirectional
+
+- Graph handler renders whatever is in the relationships table — no hardcoded entity type checks
+- Bidirectional: incoming edges expand the discovered node set, so `links_to` and `reviews` edges appear from either end
+- `AllEdgeKinds()` single source of truth for all edge kind enumerations
+- `rel_create` MCP tool now accepts `skill` and `idea` as valid `src_kind`/`dst_kind`
+
+### Entity Description Unified
+
+- `entity_create` and `entity_update` accept a `description` param for all entity types (product, manifest, task, skill, idea)
+- `idea_add` / `idea_update` MCP tools removed — superseded by unified `entity_*` path
+- All descriptions stored as append-only `type=prompt` comments with full revision history
+
+### DAG Chain Recovery Fix
+
+- Server restart no longer auto-fires tasks from manifests with old historical completions
+- `dag_chain_recovery_window_minutes` knob controls recovery window (default 60 min, 0 = disabled)
+
+### Visceral Rule — No Hardcoding
+
+Added system-enforced rule: no entity kinds, edge kinds, status values, or enumerated domain constants may appear as string literals in handler or business logic code. All sessions load this rule before any work.
+
+---
+
 ## v0.8.0 — May 2026
 
 ### ContentBlock — unified text + attachment element
