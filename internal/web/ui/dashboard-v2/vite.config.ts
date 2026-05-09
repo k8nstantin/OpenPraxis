@@ -27,20 +27,6 @@ export default defineConfig({
     // visible from this file too.
     outDir: 'dist',
     emptyOutDir: true,
-    // Force BlockNote and react-icons into isolated chunks. Without this,
-    // rolldown rc.17 can hoist BlockNote toolbar-icon defs into a lazy
-    // FloatingThreadController chunk that the eager index chunk also
-    // imports — producing a circular ESM import and a TDZ
-    // `require_react is not a function` blank-screen at runtime.
-    rolldownOptions: {
-      output: {
-        manualChunks: (id: string) => {
-          if (id.includes('node_modules/@blocknote/')) return 'blocknote'
-          if (id.includes('node_modules/react-icons/')) return 'react-icons'
-          return undefined
-        },
-      },
-    },
   },
   server: {
     // Dev-mode proxy. `npm run dev` hosts the React app on :5173 with

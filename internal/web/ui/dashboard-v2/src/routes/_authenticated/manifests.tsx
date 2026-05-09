@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { EntityPage } from '@/features/entity'
 
@@ -10,10 +10,5 @@ const manifestsSearch = z.object({
 
 export const Route = createFileRoute('/_authenticated/manifests')({
   validateSearch: manifestsSearch,
-  beforeLoad: ({ search }) => {
-    if (search.id) {
-      throw redirect({ to: '/entities/$uid', params: { uid: search.id } })
-    }
-  },
   component: () => <EntityPage kind='manifest' />,
 })

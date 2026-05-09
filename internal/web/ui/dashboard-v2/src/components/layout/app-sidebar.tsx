@@ -3,24 +3,16 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { EntityTree } from '@/features/entity/tree/EntityTree'
 // import { AppTitle } from './app-title'
 import { sidebarData } from './data/sidebar-data'
 import { NavGroup } from './nav-group'
 import { NavUser } from './nav-user'
 import { TeamSwitcher } from './team-switcher'
 
-type AppSidebarProps = {
-  entityTree?: React.ReactNode
-}
-
-export function AppSidebar({ entityTree = null }: AppSidebarProps = {}) {
+export function AppSidebar() {
   const { collapsible, variant } = useLayout()
   return (
     <Sidebar collapsible={collapsible} variant={variant}>
@@ -32,23 +24,9 @@ export function AppSidebar({ entityTree = null }: AppSidebarProps = {}) {
         {/* <AppTitle /> */}
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Entities</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <div className='h-[420px] overflow-hidden'>
-              <EntityTree />
-            </div>
-          </SidebarGroupContent>
-        </SidebarGroup>
         {sidebarData.navGroups.map((props) => (
           <NavGroup key={props.title} {...props} />
         ))}
-        {entityTree !== null && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Entities</SidebarGroupLabel>
-            <SidebarGroupContent>{entityTree}</SidebarGroupContent>
-          </SidebarGroup>
-        )}
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={sidebarData.user} />
