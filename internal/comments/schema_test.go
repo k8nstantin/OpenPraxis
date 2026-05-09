@@ -96,7 +96,7 @@ func TestInitSchema_PrimaryKeyEnforced(t *testing.T) {
 
 	_, err := db.Exec(
 		`INSERT INTO comments (id, target_type, target_id, author, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"id-1", "product", "p1", "alice", "user_note", "hello", 1000,
+		"id-1", "entity", "e1", "alice", "comment", "hello", 1000,
 	)
 	if err != nil {
 		t.Fatalf("first insert: %v", err)
@@ -104,7 +104,7 @@ func TestInitSchema_PrimaryKeyEnforced(t *testing.T) {
 
 	_, err = db.Exec(
 		`INSERT INTO comments (id, target_type, target_id, author, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"id-1", "product", "p1", "bob", "user_note", "world", 2000,
+		"id-1", "entity", "e1", "bob", "comment", "world", 2000,
 	)
 	if err == nil {
 		t.Fatal("expected duplicate primary key insert to fail, got nil error")
@@ -114,19 +114,17 @@ func TestInitSchema_PrimaryKeyEnforced(t *testing.T) {
 func TestInitSchema_TargetTypeCheckConstraint(t *testing.T) {
 	db := openTestDB(t)
 
-	for i, valid := range []string{"product", "manifest", "task"} {
-		_, err := db.Exec(
-			`INSERT INTO comments (id, target_type, target_id, author, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			valid+"-id", valid, "tid", "alice", "user_note", "x", int64(i+1),
-		)
-		if err != nil {
-			t.Errorf("valid target_type %q rejected: %v", valid, err)
-		}
-	}
-
 	_, err := db.Exec(
 		`INSERT INTO comments (id, target_type, target_id, author, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"bad-id", "foo", "tid", "alice", "user_note", "x", 1,
+		"valid-id", "entity", "e1", "alice", "comment", "x", 1,
+	)
+	if err != nil {
+		t.Errorf("valid target_type \"entity\" rejected: %v", err)
+	}
+
+	_, err = db.Exec(
+		`INSERT INTO comments (id, target_type, target_id, author, type, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"bad-id", "foo", "e1", "alice", "comment", "x", 2,
 	)
 	if err == nil {
 		t.Fatal("expected CHECK constraint to reject invalid target_type, got nil error")

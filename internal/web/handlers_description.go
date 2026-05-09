@@ -162,24 +162,13 @@ func descriptionErrStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// descriptionScopeRoutes pairs URL-plural segment with TargetType, mirroring
-// commentScopeRoutes so the loop stays declarative.
-var descriptionScopeRoutes = []struct {
-	segment string
-	target  comments.TargetType
-}{
-	{"products", comments.TargetProduct},
-	{"manifests", comments.TargetManifest},
-	{"tasks", comments.TargetTask},
-	{"ideas", comments.TargetIdea},
-}
-
-// registerDescriptionRoutes attaches the 9 DV/M3 endpoints to /api.
+// registerDescriptionRoutes attaches description history endpoints to /api.
+// All entity types (products, manifests, tasks, ideas, skills, entities) use TargetEntity.
 func registerDescriptionRoutes(api *mux.Router, n *node.Node) {
-	for _, s := range descriptionScopeRoutes {
-		base := "/" + s.segment + "/{id}/description"
-		api.HandleFunc(base+"/history", apiDescriptionHistory(n, s.target)).Methods("GET")
-		api.HandleFunc(base+"/revisions/{comment_id}", apiDescriptionGetRevision(n, s.target)).Methods("GET")
-		api.HandleFunc(base+"/restore/{comment_id}", apiDescriptionRestore(n, s.target)).Methods("POST")
+	for _, segment := range []string{"products", "manifests", "tasks", "ideas", "skills", "entities"} {
+		base := "/" + segment + "/{id}/description"
+		api.HandleFunc(base+"/history", apiDescriptionHistory(n, comments.TargetEntity)).Methods("GET")
+		api.HandleFunc(base+"/revisions/{comment_id}", apiDescriptionGetRevision(n, comments.TargetEntity)).Methods("GET")
+		api.HandleFunc(base+"/restore/{comment_id}", apiDescriptionRestore(n, comments.TargetEntity)).Methods("POST")
 	}
 }

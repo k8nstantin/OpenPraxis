@@ -72,21 +72,15 @@ func (n *Node) RecordDescriptionChange(
 // currentDescription reads the entity's current denormalised body + returns
 // the full UUID so callers (and the revision insert) operate on canonical
 // ids instead of short markers. Returns ("", "", nil) for missing rows.
-//
-// All entity types (task, product, manifest, idea, skill) resolve through the unified entity store.
-func (n *Node) currentDescription(target comments.TargetType, idOrMarker string) (body, fullID string, err error) {
-	switch target {
-	case comments.TargetTask, comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
-		if n.Entities == nil {
-			return "", "", nil
-		}
-		e, err := n.Entities.Get(idOrMarker)
-		if err != nil || e == nil {
-			return "", "", err
-		}
-		return e.Title, e.EntityUID, nil
+func (n *Node) currentDescription(_ comments.TargetType, idOrMarker string) (body, fullID string, err error) {
+	if n.Entities == nil {
+		return "", "", nil
 	}
-	return "", "", nil
+	e, err := n.Entities.Get(idOrMarker)
+	if err != nil || e == nil {
+		return "", "", err
+	}
+	return e.Title, e.EntityUID, nil
 }
 
 // RevisionEntry is a single prompt presented to API / MCP
@@ -241,17 +235,13 @@ func (n *Node) RestoreDescription(
 // column for the given entity, preserving all other fields. Used by
 // RestoreDescription so the HTTP/MCP restore path doesn't have to re-send
 // the whole PATCH payload.
-func (n *Node) writeEntityDescription(target comments.TargetType, fullID, body string) error {
-	switch target {
-	case comments.TargetTask, comments.TargetProduct, comments.TargetManifest, comments.TargetIdea, comments.TargetEntity:
-		if n.Entities == nil {
-			return fmt.Errorf("entities store not wired")
-		}
-		e, err := n.Entities.Get(fullID)
-		if err != nil || e == nil {
-			return fmt.Errorf("entity not found: %s", fullID)
-		}
-		return n.Entities.Update(e.EntityUID, e.Title, e.Status, e.Tags, "system", "description restore")
+func (n *Node) writeEntityDescription(_ comments.TargetType, fullID, body string) error {
+	if n.Entities == nil {
+		return fmt.Errorf("entities store not wired")
 	}
-	return fmt.Errorf("unsupported target type: %s", target)
+	e, err := n.Entities.Get(fullID)
+	if err != nil || e == nil {
+		return fmt.Errorf("entity not found: %s", fullID)
+	}
+	return n.Entities.Update(e.EntityUID, e.Title, e.Status, e.Tags, "system", "description restore")
 }

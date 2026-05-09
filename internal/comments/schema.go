@@ -19,7 +19,7 @@ import (
 func InitSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS comments (
 		id           TEXT NOT NULL PRIMARY KEY,
-		target_type  TEXT NOT NULL CHECK (target_type IN ('product','manifest','task','idea')),
+		target_type  TEXT NOT NULL CHECK (target_type IN ('entity')),
 		target_id    TEXT NOT NULL,
 		author       TEXT NOT NULL,
 		type         TEXT NOT NULL,
@@ -32,16 +32,10 @@ func InitSchema(db *sql.DB) error {
 		return fmt.Errorf("create comments table: %w", err)
 	}
 
-	// Migrate pre-existing DBs whose CHECK constraint still excludes 'idea'.
-	// SQLite can't ALTER a CHECK constraint in place; we detect the old
-	// constraint by probing an idea insert on a throwaway row and, if it
-	// rejects, rebuild the table with the new constraint.
-	if err := migrateTargetTypeCheck(db); err != nil {
-		return fmt.Errorf("migrate target_type check: %w", err)
-	}
-
-	if err := migrateTargetTypeAddEntity(db); err != nil {
-		return fmt.Errorf("migrate target_type add entity: %w", err)
+	// Migrate legacy per-type target_type values → 'entity'.
+	// Runs as a no-op on fresh DBs and on DBs already migrated.
+	if err := migrateTargetTypeToEntity(db); err != nil {
+		return fmt.Errorf("migrate target_type to entity: %w", err)
 	}
 
 	// Collapse legacy comment types → 'prompt' or 'comment'.
@@ -62,17 +56,17 @@ func InitSchema(db *sql.DB) error {
 	return nil
 }
 
-// migrateTargetTypeCheck rebuilds the comments table with the updated CHECK
-// constraint (including 'idea') when a legacy DB still has the old three-value
-// constraint. Idempotent — a no-op on new DBs since CREATE TABLE above ships
-// the new constraint directly.
-func migrateTargetTypeCheck(db *sql.DB) error {
+// migrateTargetTypeToEntity rewrites all legacy per-type target_type values
+// (product, manifest, task, idea) to 'entity' and rebuilds the table with a
+// tightened CHECK constraint. Idempotent — a no-op when the DDL already only
+// allows 'entity'.
+func migrateTargetTypeToEntity(db *sql.DB) error {
 	var ddl string
 	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='comments'`).Scan(&ddl); err != nil {
 		return fmt.Errorf("read table ddl: %w", err)
 	}
-	// Already on the new schema?
-	if strings.Contains(ddl, "'idea'") {
+	// Already on the clean schema?
+	if !strings.ContainsAny(ddl, "product") && strings.Contains(ddl, "'entity'") {
 		return nil
 	}
 
@@ -82,9 +76,10 @@ func migrateTargetTypeCheck(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
+	// Rebuild with legacy values coerced to 'entity' in one pass.
 	if _, err := tx.Exec(`CREATE TABLE comments_new (
 		id           TEXT NOT NULL PRIMARY KEY,
-		target_type  TEXT NOT NULL CHECK (target_type IN ('product','manifest','task','idea')),
+		target_type  TEXT NOT NULL CHECK (target_type IN ('entity')),
 		target_id    TEXT NOT NULL,
 		author       TEXT NOT NULL,
 		type         TEXT NOT NULL,
@@ -95,50 +90,9 @@ func migrateTargetTypeCheck(db *sql.DB) error {
 	)`); err != nil {
 		return fmt.Errorf("create comments_new: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO comments_new SELECT id, target_type, target_id, author, type, body, created_at, updated_at, parent_id FROM comments`); err != nil {
-		return fmt.Errorf("copy rows: %w", err)
-	}
-	if _, err := tx.Exec(`DROP TABLE comments`); err != nil {
-		return fmt.Errorf("drop old: %w", err)
-	}
-	if _, err := tx.Exec(`ALTER TABLE comments_new RENAME TO comments`); err != nil {
-		return fmt.Errorf("rename: %w", err)
-	}
-	return tx.Commit()
-}
-
-// migrateTargetTypeAddEntity rebuilds the comments table with 'entity' added
-// to the CHECK constraint. Idempotent — no-op when the constraint already
-// contains 'entity'.
-func migrateTargetTypeAddEntity(db *sql.DB) error {
-	var ddl string
-	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='comments'`).Scan(&ddl); err != nil {
-		return fmt.Errorf("read table ddl: %w", err)
-	}
-	if strings.Contains(ddl, "'entity'") {
-		return nil
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`CREATE TABLE comments_new (
-		id           TEXT NOT NULL PRIMARY KEY,
-		target_type  TEXT NOT NULL CHECK (target_type IN ('product','manifest','task','idea','entity')),
-		target_id    TEXT NOT NULL,
-		author       TEXT NOT NULL,
-		type         TEXT NOT NULL,
-		body         TEXT NOT NULL,
-		created_at   INTEGER NOT NULL,
-		updated_at   INTEGER,
-		parent_id    TEXT
-	)`); err != nil {
-		return fmt.Errorf("create comments_new: %w", err)
-	}
-	if _, err := tx.Exec(`INSERT INTO comments_new SELECT id, target_type, target_id, author, type, body, created_at, updated_at, parent_id FROM comments`); err != nil {
+	if _, err := tx.Exec(`INSERT INTO comments_new
+		SELECT id, 'entity', target_id, author, type, body, created_at, updated_at, parent_id
+		FROM comments`); err != nil {
 		return fmt.Errorf("copy rows: %w", err)
 	}
 	if _, err := tx.Exec(`DROP TABLE comments`); err != nil {

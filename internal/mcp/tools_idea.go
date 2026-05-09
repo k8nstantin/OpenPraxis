@@ -71,7 +71,7 @@ func (s *Server) handleIdeaAdd(ctx context.Context, req mcplib.CallToolRequest) 
 
 	// Record description as a prompt comment if provided.
 	if desc != "" {
-		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetIdea, e.EntityUID, desc, ""); err != nil {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetEntity, e.EntityUID, desc, ""); err != nil {
 			// Non-fatal — the idea row was saved; prompt can be
 			// added manually if the comment insert fails.
 			_ = err
@@ -147,7 +147,7 @@ func (s *Server) handleIdeaUpdate(ctx context.Context, req mcplib.CallToolReques
 	// DV consistency — append-only prompt before the
 	// denormalised UPDATE, same pattern as product / manifest / task.
 	if desc != "" {
-		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetIdea, existing.EntityUID, desc, ""); err != nil {
+		if _, err := s.node.RecordDescriptionChange(ctx, comments.TargetEntity, existing.EntityUID, desc, ""); err != nil {
 			return errResult("record revision: %v", err), nil
 		}
 	}

@@ -1,7 +1,5 @@
-// Package comments implements free-form comments attached to products,
-// manifests, and tasks. Comments are typed (see types.go) so the UI can
-// render execution reviews, user notes, agent notes, decisions, etc.
-// distinctly.
+// Package comments implements free-form comments attached to entities.
+// All comments use TargetEntity — one target type, two comment types (prompt/comment).
 package comments
 
 import "time"
@@ -9,11 +7,13 @@ import "time"
 type TargetType string
 
 const (
-	TargetProduct  TargetType = "product"
-	TargetManifest TargetType = "manifest"
-	TargetTask     TargetType = "task"
-	TargetIdea     TargetType = "idea"
-	TargetEntity   TargetType = "entity"
+	TargetEntity TargetType = "entity"
+
+	// Legacy aliases — kept so call sites compile during migration; all resolve to TargetEntity.
+	TargetProduct  = TargetEntity
+	TargetManifest = TargetEntity
+	TargetTask     = TargetEntity
+	TargetIdea     = TargetEntity
 )
 
 type Comment struct {
