@@ -1,5 +1,5 @@
 import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog } from 'lucide-react'
+import { Monitor, Bell, Palette, Wrench, UserCog, BookOpen, SlidersHorizontal, GitMerge } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { Header } from '@/components/layout/header'
@@ -10,6 +10,21 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { SidebarNav } from './components/sidebar-nav'
 
 const sidebarNavItems = [
+  {
+    title: 'Catalog',
+    href: '/settings/catalog',
+    icon: <BookOpen size={18} />,
+  },
+  {
+    title: 'Scope Editor',
+    href: '/settings/scope',
+    icon: <SlidersHorizontal size={18} />,
+  },
+  {
+    title: 'Resolution Chain',
+    href: '/settings/resolved',
+    icon: <GitMerge size={18} />,
+  },
   {
     title: 'Profile',
     href: '/settings',
@@ -54,7 +69,7 @@ export function Settings() {
             Settings
           </h1>
           <p className='text-muted-foreground'>
-            Manage your account settings and set e-mail preferences.
+            Manage execution controls, scope overrides, and resolution chains.
           </p>
         </div>
         <Separator className='my-4 lg:my-6' />
