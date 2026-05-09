@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Skeleton } from '@/components/ui/skeleton'
+import { UniversalBreadcrumb } from '@/features/entity/breadcrumb'
 import { EntityDetailPane, TAB_IDS } from '@/features/entity/detail-pane'
 import { useEntityByUid, type EntityKind } from '@/lib/queries/entity'
 
@@ -53,6 +54,7 @@ function EntityDetailRoute() {
           search: { tab: newTab },
         })
       }
+      breadcrumb={<UniversalBreadcrumb uid={entity.entity_uid} />}
     />
   )
 }
