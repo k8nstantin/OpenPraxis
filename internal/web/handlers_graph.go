@@ -48,7 +48,7 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 				depth = d
 			}
 		}
-		edgeKinds := []string{relationships.EdgeOwns, relationships.EdgeDependsOn}
+		edgeKinds := []string{relationships.EdgeOwns, relationships.EdgeDependsOn, relationships.EdgeLinksTo, relationships.EdgeReviews}
 		if v := r.URL.Query().Get("edge_kinds"); v != "" {
 			edgeKinds = splitCSV(v)
 		}
