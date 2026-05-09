@@ -47,9 +47,9 @@ func (s *Server) registerRelationshipsTools() {
 					"and a new current row is inserted in one transaction. Rows are NEVER deleted — every "+
 					"mutation is preserved in the SCD-2 audit trail.",
 			),
-			mcplib.WithString("src_kind", mcplib.Required(), mcplib.Description("Source entity kind: product | manifest | task")),
+			mcplib.WithString("src_kind", mcplib.Required(), mcplib.Description("Source entity kind: product | manifest | task | skill | idea")),
 			mcplib.WithString("src_id", mcplib.Required(), mcplib.Description("Source full UUID")),
-			mcplib.WithString("dst_kind", mcplib.Required(), mcplib.Description("Destination entity kind: product | manifest | task")),
+			mcplib.WithString("dst_kind", mcplib.Required(), mcplib.Description("Destination entity kind: product | manifest | task | skill | idea")),
 			mcplib.WithString("dst_id", mcplib.Required(), mcplib.Description("Destination full UUID")),
 			mcplib.WithString("kind", mcplib.Required(), mcplib.Description("Edge kind: owns | depends_on | reviews | links_to")),
 			mcplib.WithString("metadata", mcplib.Description("Optional JSON metadata blob")),

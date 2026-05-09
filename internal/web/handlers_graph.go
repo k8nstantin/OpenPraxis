@@ -8,24 +8,17 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
-// apiRelationshipsGraph returns a flat (nodes, edges) shape over the
-// unified relationships SCD-2 table — one canonical source for the
-// DAG tab.
+// apiRelationshipsGraph returns a flat (nodes, edges) shape rooted at any
+// entity. It does not care about entity types — it walks whatever is in the
+// relationships table and renders it.
 //
-// Node discovery: Walk() from the root, following edgeKinds.
-// Edge rendering: ListOutgoingForMany() on ALL discovered nodes — every
-// edge whose src AND dst are both in the discovered set is emitted.
-// This ensures depends_on edges between tasks render correctly regardless
-// of the order nodes were discovered during the walk.
-//
-// GET /api/relationships/graph?root_id=X&root_kind=product&depth=10
-//   ?edge_kinds=owns,depends_on   (default: both)
+// GET /api/relationships/graph?root_id=X&root_kind=Y&depth=10
 //
 // Response:
 //
 //	{
-//	  "nodes": [{"id":"...", "kind":"product", "title":"...", "status":"..."}],
-//	  "edges": [{"id":"src->dst:kind", "source":"...", "target":"...", "kind":"owns"}]
+//	  "nodes": [{"id":"...", "kind":"...", "title":"...", "status":"..."}],
+//	  "edges": [{"id":"src->dst:kind", "source":"...", "target":"...", "kind":"..."}]
 //	}
 func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -36,151 +29,101 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Skills are DAG roots governing many products. Cap depth at 1 so the
-		// graph shows only direct product children — not the entire sub-tree
-		// (which would be hundreds of manifests and tasks and unreadable).
 		depth := 10
-		if rootKind == relationships.KindSkill {
-			depth = 1
-		}
 		if v := r.URL.Query().Get("depth"); v != "" {
 			if d, err := strconv.Atoi(v); err == nil && d > 0 {
 				depth = d
 			}
 		}
-		edgeKinds := []string{relationships.EdgeOwns, relationships.EdgeDependsOn}
+
+		// All edge kinds by default — the DAG renders whatever is in the table.
+		edgeKinds := relationships.AllEdgeKinds()
 		if v := r.URL.Query().Get("edge_kinds"); v != "" {
 			edgeKinds = splitCSV(v)
 		}
 
-		// ── Step 1: discover all reachable nodes via Walk ────────────────────
+		// ── Step 1: walk outgoing edges from root ────────────────────────────
 		walkRows, err := n.Relationships.Walk(r.Context(), rootID, rootKind, edgeKinds, depth)
 		if err != nil {
 			writeError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Build the full set of discovered node IDs (root + all walk results).
 		nodeSet := make(map[string]bool, len(walkRows)+1)
 		nodeSet[rootID] = true
 		for _, row := range walkRows {
 			nodeSet[row.ID] = true
 		}
 
-		// Bucket node IDs by kind for entity title/status resolution.
-		skillIDs := []string{}
-		productIDs := []string{}
-		manifestIDs := []string{}
-		taskIDs := []string{}
-		otherIDs := []string{}
-		for _, row := range walkRows {
-			switch row.Kind {
-			case relationships.KindSkill:
-				skillIDs = append(skillIDs, row.ID)
-			case relationships.KindProduct:
-				productIDs = append(productIDs, row.ID)
-			case relationships.KindManifest:
-				manifestIDs = append(manifestIDs, row.ID)
-			case relationships.KindTask:
-				taskIDs = append(taskIDs, row.ID)
-			default:
-				otherIDs = append(otherIDs, row.ID)
-			}
-		}
-
-		// ── Step 2: resolve nodes ─────────────────────────────────────────────
+		// ── Step 2: resolve nodes — type-agnostic ────────────────────────────
 		type nodeOut struct {
 			ID     string `json:"id"`
 			Kind   string `json:"kind"`
 			Title  string `json:"title"`
 			Status string `json:"status"`
 		}
-		nodes := make([]nodeOut, 0, len(walkRows)+2)
+		nodes := make([]nodeOut, 0, len(nodeSet))
 		seenNodes := make(map[string]bool)
 
-		addNode := func(id, kind, title, status string) {
+		addNode := func(id string) {
 			if seenNodes[id] {
 				return
 			}
 			seenNodes[id] = true
-			nodes = append(nodes, nodeOut{ID: id, Kind: kind, Title: title, Status: status})
+			if e, _ := n.Entities.Get(id); e != nil {
+				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: e.Type, Title: e.Title, Status: e.Status})
+			}
 		}
 
-		// Root node itself.
-		if root, _ := n.Entities.Get(rootID); root != nil {
-			addNode(root.EntityUID, root.Type, root.Title, root.Status)
+		for id := range nodeSet {
+			addNode(id)
 		}
 
-		// For products: walk UP to find governing skills so they render above the product.
-		if rootKind == relationships.KindProduct && n.Relationships != nil {
-			parentEdges, _ := n.Relationships.ListIncoming(r.Context(), rootID, relationships.EdgeOwns)
-			for _, edge := range parentEdges {
-				if edge.SrcKind == relationships.KindSkill {
-					if skill, _ := n.Entities.Get(edge.SrcID); skill != nil {
-						addNode(skill.EntityUID, relationships.KindSkill, skill.Title, skill.Status)
-						nodeSet[skill.EntityUID] = true
-					}
+		// ── Step 3: expand with incoming neighbours ──────────────────────────
+		// Walk only follows outgoing edges. Pull in nodes that point TO any
+		// discovered node so the graph is bidirectional.
+		allNodeIDs := make([]string, 0, len(nodeSet))
+		for id := range nodeSet {
+			allNodeIDs = append(allNodeIDs, id)
+		}
+		incomingEdges, _ := n.Relationships.ListIncomingForMany(r.Context(), allNodeIDs, "")
+		for _, srcEdges := range incomingEdges {
+			for _, e := range srcEdges {
+				if nodeSet[e.SrcID] {
+					continue
 				}
+				nodeSet[e.SrcID] = true
+				addNode(e.SrcID)
 			}
 		}
 
-		for _, id := range skillIDs {
-			if e, _ := n.Entities.Get(id); e != nil {
-				addNode(e.EntityUID, relationships.KindSkill, e.Title, e.Status)
-			}
-		}
-		for _, id := range productIDs {
-			if e, _ := n.Entities.Get(id); e != nil {
-				addNode(e.EntityUID, relationships.KindProduct, e.Title, e.Status)
-			}
-		}
-		for _, id := range manifestIDs {
-			if e, _ := n.Entities.Get(id); e != nil {
-				addNode(e.EntityUID, relationships.KindManifest, e.Title, e.Status)
-			}
-		}
-		for _, id := range taskIDs {
-			if e, _ := n.Entities.Get(id); e != nil {
-				addNode(e.EntityUID, relationships.KindTask, e.Title, e.Status)
-			}
-		}
-		for _, id := range otherIDs {
-			if e, _ := n.Entities.Get(id); e != nil {
-				addNode(e.EntityUID, e.Type, e.Title, e.Status)
-			}
+		// ── Step 4: emit all edges between discovered nodes ──────────────────
+		allNodeIDs = allNodeIDs[:0]
+		for id := range nodeSet {
+			allNodeIDs = append(allNodeIDs, id)
 		}
 
-		// ── Step 3: render ALL edges between discovered nodes ─────────────────
-		// Use ListOutgoingForMany on the full node set — one query returns every
-		// edge whose src is in the set. Filter to those whose dst is also in the
-		// set. This renders owns AND depends_on edges correctly regardless of
-		// walk discovery order.
 		type edgeOut struct {
 			ID     string `json:"id"`
 			Source string `json:"source"`
 			Target string `json:"target"`
 			Kind   string `json:"kind"`
 		}
-		edges := make([]edgeOut, 0, len(walkRows))
-
-		allNodeIDs := make([]string, 0, len(nodeSet))
-		for id := range nodeSet {
-			allNodeIDs = append(allNodeIDs, id)
-		}
+		edges := make([]edgeOut, 0, len(nodeSet)*2)
+		seenEdges := make(map[string]bool)
 
 		allEdges, _ := n.Relationships.ListOutgoingForMany(r.Context(), allNodeIDs, "")
-		seenEdges := make(map[string]bool)
 		for srcID, srcEdges := range allEdges {
 			for _, e := range srcEdges {
 				if !nodeSet[e.DstID] {
 					continue
 				}
-				id := srcID + "->" + e.DstID + ":" + e.Kind
-				if seenEdges[id] {
+				eid := srcID + "->" + e.DstID + ":" + e.Kind
+				if seenEdges[eid] {
 					continue
 				}
-				seenEdges[id] = true
-				edges = append(edges, edgeOut{ID: id, Source: srcID, Target: e.DstID, Kind: e.Kind})
+				seenEdges[eid] = true
+				edges = append(edges, edgeOut{ID: eid, Source: srcID, Target: e.DstID, Kind: e.Kind})
 			}
 		}
 
