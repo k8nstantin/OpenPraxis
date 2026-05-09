@@ -30,17 +30,7 @@ const GROUP_ID = {
 
 const GROUP_ID_SET: ReadonlySet<string> = new Set(Object.values(GROUP_ID))
 
-// Where to navigate when the user selects an entity. The unified
-// `/entities/$uid` route is M3/T1's deliverable; until then, drop into
-// the kind-scoped page that already exists. Single map => one line to
-// flip when M3/T1 lands.
-const KIND_TO_PATH: Record<EntityKind, string> = {
-  [KIND.product]: '/products',
-  [KIND.manifest]: '/manifests',
-  [KIND.task]: '/tasks',
-  [KIND.skill]: '/skills',
-  [KIND.idea]: '/ideas',
-}
+// All entity types navigate to the unified /entities/$uid route.
 
 const OPEN_STATE_KEY = 'entity-tree-open'
 
@@ -152,10 +142,7 @@ export function EntityTree() {
     (nodes: { id: string; data: TreeNode }[]) => {
       const node = nodes[0]
       if (!node || GROUP_ID_SET.has(node.id)) return
-      const path = KIND_TO_PATH[node.data.kind]
-      if (!path) return
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      navigate({ to: path, search: { id: node.id, tab: 'main' } } as any)
+      navigate({ to: '/entities/$uid', params: { uid: node.id } } as any)
     },
     [navigate],
   )
