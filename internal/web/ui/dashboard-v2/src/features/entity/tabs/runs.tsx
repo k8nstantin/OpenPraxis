@@ -28,17 +28,31 @@ function prettifyJson(s: string): string {
 }
 
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
-  const { data, isLoading } = useEntityActions(entityId, runUid, true)
+  const [paused, setPaused] = useState(false)
+  const { data, isLoading } = useEntityActions(entityId, runUid, !paused)
+  const [frozen, setFrozen] = useState<typeof data>(undefined)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [rawMode, setRawMode] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // When pausing, freeze the current snapshot. When resuming, clear it.
+  const togglePause = () => {
+    setPaused(p => {
+      if (!p) setFrozen(data)   // freeze on pause
+      else setFrozen(undefined) // unfreeze on resume
+      return !p
+    })
+  }
+
+  // Auto-scroll only when not paused
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [data?.length])
+    if (!paused) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [data?.length, paused])
+
+  const display = paused ? frozen : data
 
   if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
-  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
+  if (!display?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
 
   const toggle = (id: string) => setExpanded(prev => {
     const next = new Set(prev)
@@ -54,6 +68,14 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
       <div className='flex items-center justify-end gap-2 border-b border-white/5 px-3 py-1'>
         <button
           type='button'
+          onClick={togglePause}
+          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${paused ? 'bg-rose-500/20 text-rose-300' : 'text-muted-foreground hover:text-foreground'}`}
+          title={paused ? 'Paused — click to resume' : 'Pause output'}
+        >
+          {paused ? '▶ RESUME' : '⏸ PAUSE'}
+        </button>
+        <button
+          type='button'
           onClick={() => setRawMode(r => !r)}
           className={`rounded px-2 py-0.5 text-[10px] transition-colors ${rawMode ? 'bg-amber-500/20 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}
         >
@@ -62,7 +84,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
       </div>
 
       <div className='max-h-96 overflow-y-auto'>
-      {data.map((a) => {
+      {display.map((a) => {
         const isExpanded = expanded.has(a.id)
         const hasContent = !!(a.tool_input || a.tool_response)
         return (
