@@ -67,6 +67,7 @@ func Catalog() []KnobDef {
 		        "gemini-2.0-pro-exp-02-05",
 		        "gemini-2.0-flash-exp",
 		}, Default: "", Description: "Model ID passed to the agent as --model. Empty = agent default."},		{Key: "retry_on_failure", Type: KnobInt, SliderMin: f(0), SliderMax: f(10), SliderStep: f(1), Default: 0, Description: "Auto-retry count"},
+		{Key: "dag_chain_recovery_window_minutes", Type: KnobInt, SliderMin: f(0), SliderMax: f(1440), SliderStep: f(5), Default: 60, Unit: "minutes", Description: "How far back to look for recently-completed tasks when recovering interrupted DAG chains on restart. 0 disables chain recovery entirely."},
 		{Key: "approval_mode", Type: KnobEnum, EnumValues: []string{"auto", "manual", "on-failure"}, Default: "auto", Description: "Codex approval mode"},
 		// Prompt-context knobs — resolve via the same task → manifest →
 		// product → system inheritance chain as every other knob. Defaults

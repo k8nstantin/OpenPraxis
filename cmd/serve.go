@@ -254,24 +254,39 @@ var serveCmd = &cobra.Command{
 			if err != nil || len(manifests) == 0 {
 				return
 			}
+			// Resolve recovery window from dag_chain_recovery_window_minutes (default 60).
+			// 0 disables chain recovery entirely.
+			windowMinutes := 60
+			if n.SettingsResolver != nil {
+				if resolved, err := n.SettingsResolver.Resolve(ctx, settings.Scope{}, "dag_chain_recovery_window_minutes"); err == nil {
+					if v, ok := resolved.Value.(int64); ok && v >= 0 {
+						windowMinutes = int(v)
+					}
+				}
+			}
+			if windowMinutes == 0 {
+				return
+			}
+			recoverySince := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
 			resumed := 0
 			for _, m := range manifests {
-				// Only resume manifests that have at least one completed task
-				// (chain was in progress) and at least one not-yet-completed task.
 				edges, _ := n.Relationships.ListOutgoing(ctx, m.EntityUID, relationships.EdgeOwns)
-				hasCompleted, hasPending := false, false
+				hasRecentlyCompleted, hasPending := false, false
 				for _, e := range edges {
 					if e.DstKind != relationships.KindTask {
 						continue
 					}
-					done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
-					if done {
-						hasCompleted = true
+					recent, _ := n.ExecutionLog.HasCompletedSince(ctx, e.DstID, recoverySince)
+					if recent {
+						hasRecentlyCompleted = true
 					} else {
-						hasPending = true
+						done, _ := n.ExecutionLog.HasCompleted(ctx, e.DstID)
+						if !done {
+							hasPending = true
+						}
 					}
 				}
-				if hasCompleted && hasPending && dispatchChainFn != nil {
+				if hasRecentlyCompleted && hasPending && dispatchChainFn != nil {
 					slog.Info("dag-chain: resuming interrupted chain on startup", "manifest", m.EntityUID[:12], "title", m.Title)
 					if err := dispatchChainFn(ctx, m.EntityUID, 0); err != nil {
 						slog.Info("dag-chain: resume dispatch", "manifest", m.EntityUID[:12], "note", err.Error())
