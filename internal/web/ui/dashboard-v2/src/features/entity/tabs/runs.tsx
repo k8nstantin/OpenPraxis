@@ -23,12 +23,16 @@ function useEntityActions(entityId: string, runUid: string, isLive: boolean) {
   })
 }
 
+function prettifyJson(s: string): string {
+  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
+}
+
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
   const { data, isLoading } = useEntityActions(entityId, runUid, true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [rawMode, setRawMode] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom as new actions arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [data?.length])
@@ -42,8 +46,22 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
     return next
   })
 
+  const fmt = (s: string) => rawMode ? s : prettifyJson(s)
+
   return (
-    <div className='max-h-96 overflow-y-auto font-mono text-xs'>
+    <div className='font-mono text-xs'>
+      {/* Global toolbar */}
+      <div className='flex items-center justify-end gap-2 border-b border-white/5 px-3 py-1'>
+        <button
+          type='button'
+          onClick={() => setRawMode(r => !r)}
+          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${rawMode ? 'bg-amber-500/20 text-amber-300' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          {rawMode ? 'RAW' : 'PARSED'}
+        </button>
+      </div>
+
+      <div className='max-h-96 overflow-y-auto'>
       {data.map((a) => {
         const isExpanded = expanded.has(a.id)
         const hasContent = !!(a.tool_input || a.tool_response)
@@ -57,9 +75,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
               <span className='text-blue-400 font-medium'>{a.tool_name}</span>
               {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
               {hasContent && (
-                <span className='text-muted-foreground text-[10px]'>
-                  {isExpanded ? '▲' : '▼'}
-                </span>
+                <span className='text-muted-foreground text-[10px]'>{isExpanded ? '▲' : '▼'}</span>
               )}
               <span className='text-muted-foreground ml-auto text-[10px]'>
                 {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
@@ -80,7 +96,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
                   <div>
                     <div className='text-[10px] font-semibold text-blue-400/60 mb-0.5'>INPUT</div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
-                      {a.tool_input}
+                      {fmt(a.tool_input)}
                     </div>
                   </div>
                 )}
@@ -88,7 +104,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
                   <div>
                     <div className='text-[10px] font-semibold text-emerald-400/60 mb-0.5'>RESPONSE</div>
                     <div className='whitespace-pre-wrap break-all rounded bg-white/5 p-2 text-[10px] text-muted-foreground'>
-                      {a.tool_response}
+                      {fmt(a.tool_response)}
                     </div>
                   </div>
                 )}
@@ -98,6 +114,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
         )
       })}
       <div ref={bottomRef} />
+      </div>
     </div>
   )
 }
