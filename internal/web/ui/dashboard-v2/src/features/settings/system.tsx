@@ -66,13 +66,29 @@ export function SettingsSystem() {
 
   // Templates
   const [selectedSection, setSelectedSection] = useState('git_workflow')
+  const [previewMode, setPreviewMode] = useState(false)
   const templateBody = useQuery({
     queryKey: ['template-system', selectedSection],
-    queryFn: () => fetchJSON<{ body: string }>(`/api/templates?section=${selectedSection}&scope=system`).then(d => d.body ?? ''),
+    queryFn: () => fetchJSON<Array<{ body: string }>>(`/api/templates?section=${selectedSection}&scope=system`)
+      .then(rows => rows[0]?.body ?? ''),
     staleTime: 10_000,
   })
   const [templateEdit, setTemplateEdit] = useState('')
-  useEffect(() => { setTemplateEdit(templateBody.data ?? '') }, [templateBody.data])
+  useEffect(() => { setTemplateEdit(templateBody.data ?? ''); setPreviewMode(false) }, [templateBody.data])
+
+  // Simple client-side preview — substitute known variables with sample values
+  const previewText = templateEdit
+    .replace(/\{\{\.BranchPrefix\}\}/g, 'openpraxis')
+    .replace(/\{\{\.BranchRemote\}\}/g, 'github')
+    .replace(/\{\{\.Branch\}\}/g, 'openpraxis/m1-sidebar-restructure-nav-cleanup')
+    .replace(/\{\{\.Task\.ID\}\}/g, '019e0e13-246d-7606-...')
+    .replace(/\{\{\.Task\.Title\}\}/g, 'M1/T1 — Add tree slot to AppSidebar')
+    .replace(/\{\{\.Task\.Agent\}\}/g, 'claude-code')
+    .replace(/\{\{\.Manifest\.Title\}\}/g, 'M1 — Sidebar Restructure + Nav Cleanup')
+    .replace(/\{\{\.Manifest\.Content\}\}/g, '(manifest description...)')
+    .replace(/\{\{\.VisceralRules\}\}/g, '(visceral rules content...)')
+    .replace(/\{\{if [^}]+\}\}/g, '').replace(/\{\{end\}\}/g, '')
+    .replace(/\{\{[^}]+\}\}/g, '(dynamic)')
 
   const saveTemplate = useMutation({
     mutationFn: () => fetch('/api/templates', {
@@ -137,25 +153,43 @@ export function SettingsSystem() {
             </Select>
             <span className='text-xs text-muted-foreground'>system scope · all agents</span>
           </div>
-          {templateBody.isLoading ? <Skeleton className='h-40 w-full' /> : (
-            <Textarea
-              value={templateEdit}
-              onChange={e => setTemplateEdit(e.target.value)}
-              className='font-mono text-xs min-h-[200px]'
-              placeholder='(using built-in default)'
-            />
-          )}
+          <div className='flex items-center gap-2 mb-1'>
+            <button type='button' onClick={() => setPreviewMode(false)}
+              className={`text-xs px-2 py-0.5 rounded ${!previewMode ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              Source
+            </button>
+            <button type='button' onClick={() => setPreviewMode(true)}
+              className={`text-xs px-2 py-0.5 rounded ${previewMode ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              Preview
+            </button>
+          </div>
+          {templateBody.isLoading ? <Skeleton className='h-40 w-full' /> :
+            previewMode ? (
+              <pre className='whitespace-pre-wrap font-mono text-xs min-h-[200px] rounded border border-white/10 bg-white/5 p-3 text-muted-foreground overflow-auto'>
+                {previewText || '(empty)'}
+              </pre>
+            ) : (
+              <Textarea
+                value={templateEdit}
+                onChange={e => setTemplateEdit(e.target.value)}
+                className='font-mono text-xs min-h-[200px]'
+                placeholder='(using built-in default — no system override set)'
+              />
+            )
+          }
           <div className='flex gap-2'>
-            <Button size='sm' onClick={() => saveTemplate.mutate()} disabled={saveTemplate.isPending}>
+            <Button size='sm' onClick={() => saveTemplate.mutate()} disabled={saveTemplate.isPending || previewMode}>
               {saveTemplate.isPending ? 'Saving…' : 'Save Override'}
             </Button>
             <Button size='sm' variant='outline' onClick={() => resetTemplate.mutate()} disabled={resetTemplate.isPending}>
               Reset to Default
             </Button>
           </div>
-          <p className='text-xs text-muted-foreground'>
-            Available variables: {'{{.BranchPrefix}}'} {'{{.BranchRemote}}'} {'{{.Branch}}'} {'{{.Task.ID}}'} {'{{.Task.Title}}'} {'{{.Manifest.Title}}'}
-          </p>
+          <div className='text-xs text-muted-foreground space-y-0.5'>
+            <p className='font-medium'>Available variables:</p>
+            <p className='font-mono'>{'{{.BranchPrefix}}'} {'{{.BranchRemote}}'} {'{{.Branch}}'} {'{{.Task.ID}}'} {'{{.Task.Title}}'} {'{{.Task.Description}}'}</p>
+            <p className='font-mono'>{'{{.Manifest.Title}}'} {'{{.Manifest.Content}}'} {'{{.VisceralRules}}'} {'{{.PriorRuns}}'} {'{{.OtherComments}}'}</p>
+          </div>
         </CardContent>
       </Card>
     </div>
