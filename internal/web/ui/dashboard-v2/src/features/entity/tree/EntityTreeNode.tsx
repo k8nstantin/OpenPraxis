@@ -104,7 +104,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
       >
         <span className='w-3 shrink-0' />
         <Icon className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-        <span className='flex-1 min-w-0 text-xs truncate'>{node.data.name}</span>
+        <span className='flex-1 min-w-0 text-sm truncate'>{node.data.name}</span>
       </div>
     )
   }
@@ -139,7 +139,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
         )}
       />
       <Icon className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-      <span className='flex-1 min-w-0 text-xs truncate'>{node.data.name}</span>
+      <span className='flex-1 min-w-0 text-sm truncate'>{node.data.name}</span>
       <span
         className={cn(
           'text-[10px] shrink-0 ml-1',

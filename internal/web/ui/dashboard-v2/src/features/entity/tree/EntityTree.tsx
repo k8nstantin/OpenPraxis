@@ -180,7 +180,7 @@ export function EntityTree() {
             width={width}
             height={height}
             indent={16}
-            rowHeight={24}
+            rowHeight={28}
             overscanCount={8}
             onSelect={onSelect}
             openByDefault={false}
