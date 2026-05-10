@@ -128,12 +128,15 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 
-		// Lifecycle: all non-skill, non-archived root entities (not owned by anything).
-		// Children expand via owns edges — hierarchy is whatever the relationship table says.
+		// Lifecycle roots: products + ideas that have no owns-parent.
+		// Orphan manifests/tasks (no product parent) are excluded from the nav tree —
+		// they're accessible via the Entities list but would clutter root-level navigation.
+		// TypeProduct and TypeIdea come from the entities table — not hardcoded strings.
+		rootTypes := map[string]bool{entity.TypeProduct: true, entity.TypeIdea: true}
 		lifecycle := make([]*treeNode, 0)
 		for _, items := range byKind {
 			for _, e := range items {
-				if e.Type == entity.TypeSkill || e.Status == entity.StatusArchived {
+				if !rootTypes[e.Type] || e.Status == entity.StatusArchived {
 					continue
 				}
 				if ownedByOwns[e.EntityUID] {

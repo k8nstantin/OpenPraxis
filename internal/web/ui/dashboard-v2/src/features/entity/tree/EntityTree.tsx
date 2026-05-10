@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useDeferredValue } from 'react'
 import { Search } from 'lucide-react'
 import { Tree } from 'react-arborist'
+import type { NodeApi } from 'react-arborist'
 import { useNavigate } from '@tanstack/react-router'
 import { useLiveRuns } from '@/lib/queries/entity'
 import {
@@ -15,7 +16,40 @@ import { EntityTreeNode } from './EntityTreeNode'
 // Synthetic root group ids — surfaced as sticky headers, not navigable.
 const GROUP_SKILLS = '__skills__'
 const GROUP_LIFECYCLE = '__lifecycle__'
-const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_SKILLS, GROUP_LIFECYCLE])
+const GROUP_PAGES = '__pages__'
+const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_SKILLS, GROUP_LIFECYCLE, GROUP_PAGES])
+
+// Page nav nodes injected into the tree so ALL navigation goes through arborist.
+const PAGE_URLS: Record<string, string> = {
+  __page_overview__: '/',
+  __page_actions__: '/actions',
+  __page_schedules__: '/schedules',
+  __page_inbox__: '/inbox',
+  __page_recall__: '/recall',
+  __page_stats__: '/stats',
+  __page_productivity__: '/productivity',
+  __page_audit__: '/audit',
+  __page_activity__: '/activity',
+  __page_settings__: '/settings',
+}
+
+const PAGE_NODES = Object.entries(PAGE_URLS).map(([id, _]) => ({
+  id,
+  name: {
+    __page_overview__: 'Overview',
+    __page_actions__: 'Actions Log',
+    __page_schedules__: 'Schedules',
+    __page_inbox__: 'Inbox',
+    __page_recall__: 'Recall',
+    __page_stats__: 'Stats',
+    __page_productivity__: 'Productivity',
+    __page_audit__: 'Audit',
+    __page_activity__: 'Activity',
+    __page_settings__: 'Settings',
+  }[id] ?? id,
+  kind: 'page',
+  status: '',
+}))
 
 // Live-runs sentinel for stdio sessions (no entity_uid). Filtered out so the
 // tree doesn't try to mark a non-existent node as running.
@@ -63,30 +97,48 @@ export function EntityTree() {
   )
   const overlaid = rawTree ? overlayLiveStatus(rawTree, liveIds) : null
 
-  const treeData: TreeNode[] = overlaid
-    ? [
-        {
-          id: GROUP_SKILLS,
-          name: 'Skills',
-          kind: 'skill',
-          status: TreeStatus.Active,
-          children: overlaid.skills,
-        },
-        {
-          id: GROUP_LIFECYCLE,
-          name: 'Entities',
-          kind: 'idea',
-          status: TreeStatus.Active,
-          children: overlaid.lifecycle,
-        },
-      ]
-    : []
+  const treeData: TreeNode[] = [
+    ...(overlaid
+      ? [
+          {
+            id: GROUP_SKILLS,
+            name: 'Skills',
+            kind: '__group__',
+            status: TreeStatus.Active,
+            children: overlaid.skills,
+          },
+          {
+            id: GROUP_LIFECYCLE,
+            name: 'Entities',
+            kind: '__group__',
+            status: TreeStatus.Active,
+            children: overlaid.lifecycle,
+          },
+        ]
+      : []),
+    {
+      id: GROUP_PAGES,
+      name: 'Navigation',
+      kind: '__group__',
+      status: '',
+      children: PAGE_NODES,
+    },
+  ]
 
   const onSelect = useCallback(
-    (nodes: { id: string }[]) => {
+    (nodes: NodeApi<TreeNode>[]) => {
       const node = nodes[0]
       if (!node || GROUP_IDS.has(node.id)) return
-      navigate({ to: '/entities/$uid', params: { uid: node.id } })
+      const url = PAGE_URLS[node.id]
+      if (url) {
+        navigate({ to: url })
+      } else {
+        navigate({
+          to: '/entities/$uid',
+          params: { uid: node.id },
+          search: { kind: node.data.kind, tab: 'main' },
+        })
+      }
     },
     [navigate],
   )

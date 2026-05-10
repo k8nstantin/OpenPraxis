@@ -1,24 +1,47 @@
 import type { ElementType } from 'react'
-import type { NodeRendererProps } from 'react-arborist'
+import type { NodeApi, NodeRendererProps } from 'react-arborist'
 import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
   Boxes,
+  Brain,
+  CalendarClock,
   CheckSquare,
   ChevronRight,
   FileText,
   GitBranch,
+  Inbox,
+  LayoutDashboard,
   Lightbulb,
+  ScrollText,
+  Settings,
+  TrendingUp,
   Wand2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { EntityKind } from '@/lib/queries/entity'
 import { TreeStatus, type TreeNode } from '@/lib/queries/entity-tree'
 
-export const KIND_ICON: Record<EntityKind, ElementType> = {
+export const KIND_ICON: Record<string, ElementType> = {
   skill: Wand2,
   idea: Lightbulb,
   product: Boxes,
   manifest: FileText,
   task: CheckSquare,
+}
+
+// Icons for synthetic page nav nodes — keyed by node ID.
+const PAGE_NAV_ICON: Record<string, ElementType> = {
+  __page_overview__: LayoutDashboard,
+  __page_actions__: ScrollText,
+  __page_schedules__: CalendarClock,
+  __page_inbox__: Inbox,
+  __page_recall__: Brain,
+  __page_stats__: BarChart3,
+  __page_productivity__: TrendingUp,
+  __page_audit__: AlertTriangle,
+  __page_activity__: Activity,
+  __page_settings__: Settings,
 }
 
 const STATUS_COLOR: Partial<Record<string, string>> = {
@@ -38,15 +61,20 @@ const STATUS_GLYPH: Partial<Record<string, string>> = {
   [TreeStatus.Archived]: '○',
 }
 
-// Sentinel prefix for synthetic group-header rows (e.g. __skills__, __lifecycle__).
-// The Tree data wrapper in EntityTree.tsx is the only place that creates these.
-const GROUP_PREFIX = '__'
+// Opens a node and recursively opens all its descendants so the full subtree
+// is visible in one click (product → manifests → tasks all revealed at once).
+function openSubtree(n: NodeApi<TreeNode>) {
+  n.open()
+  for (const child of n.children ?? []) {
+    openSubtree(child)
+  }
+}
 
 export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
-  // Group separator header. Render as a plain styled div — using
-  // SidebarGroupLabel here would target a sidebar wrapper ancestor that does
-  // not exist inside react-arborist's virtualized list DOM.
-  if (node.id.startsWith(GROUP_PREFIX)) {
+  // Group separator header (kind === '__group__').
+  // Plain div — SidebarGroupLabel targets a sidebar ancestor that doesn't exist
+  // inside react-arborist's virtualized list DOM.
+  if (node.data.kind === '__group__') {
     return (
       <div
         style={style}
@@ -60,6 +88,27 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
     )
   }
 
+  // Page nav leaf node — no status glyph, icon from PAGE_NAV_ICON map.
+  if (node.data.kind === 'page') {
+    const Icon = PAGE_NAV_ICON[node.id] ?? LayoutDashboard
+    return (
+      <div
+        ref={dragHandle}
+        style={style}
+        onClick={() => node.select()}
+        className={cn(
+          'flex items-center gap-1 px-1 rounded-sm cursor-pointer select-none',
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          node.isSelected && 'bg-sidebar-accent text-sidebar-accent-foreground',
+        )}
+      >
+        <span className='w-3 shrink-0' />
+        <Icon className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+        <span className='flex-1 min-w-0 text-xs truncate'>{node.data.name}</span>
+      </div>
+    )
+  }
+
   const Icon = KIND_ICON[node.data.kind] ?? GitBranch
   const glyph = STATUS_GLYPH[node.data.status] ?? '○'
   const color = STATUS_COLOR[node.data.status] ?? 'text-muted-foreground'
@@ -69,7 +118,13 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
     <div
       ref={dragHandle}
       style={style}
-      onClick={() => (node.isInternal ? node.toggle() : node.select())}
+      onClick={() => {
+        if (node.isInternal) {
+          node.isOpen ? node.close() : openSubtree(node)
+        } else {
+          node.select()
+        }
+      }}
       className={cn(
         'flex items-center gap-1 px-1 rounded-sm cursor-pointer select-none',
         'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',

@@ -8,7 +8,7 @@ import type { EntityKind } from './entity'
 export interface TreeNode {
   id: string
   name: string
-  kind: EntityKind
+  kind: string  // EntityKind for real entities; 'page' for synthetic nav nodes
   status: string
   children?: TreeNode[]
 }
