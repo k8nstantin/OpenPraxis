@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
 )
@@ -40,66 +39,11 @@ func MigrateMaxTurnsToSettings(db *sql.DB, store *settings.Store) (int, error) {
 	// The column may not exist on fresh installs that skipped past the
 	// pre-M4-T14 schema. Probe via pragma_table_info; absence is a success
 	// case that writes the marker and exits.
-	hasCol, err := hasMaxTurnsColumn(db)
-	if err != nil {
-		return 0, fmt.Errorf("probe max_turns column: %w", err)
-	}
-	if !hasCol {
-		if err := markMigrationDone(ctx, store); err != nil {
-			return 0, fmt.Errorf("mark migration done: %w", err)
-		}
-		return 0, nil
-	}
-
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, max_turns FROM tasks WHERE max_turns IS NOT NULL AND max_turns > 0`)
-	if err != nil {
-		return 0, fmt.Errorf("select tasks with max_turns: %w", err)
-	}
-	defer rows.Close()
-
-	type pair struct {
-		id       string
-		maxTurns int
-	}
-	var todo []pair
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.id, &p.maxTurns); err != nil {
-			return 0, fmt.Errorf("scan task row: %w", err)
-		}
-		todo = append(todo, p)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate tasks: %w", err)
-	}
-
-	migrated := 0
-	for _, p := range todo {
-		// ON CONFLICT DO NOTHING semantics: if the task already has an
-		// explicit settings row (e.g. from M2-T6 API write), do not clobber it.
-		if _, err := store.Get(ctx, settings.ScopeTask, p.id, "max_turns"); err == nil {
-			// row already exists — skip
-			continue
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return migrated, fmt.Errorf("get existing setting for task %s: %w", p.id, err)
-		}
-
-		raw := strconv.Itoa(p.maxTurns)
-		if err := store.Set(ctx, settings.ScopeTask, p.id, "max_turns", raw, "migration:m4-t14"); err != nil {
-			return migrated, fmt.Errorf("migrate task %s max_turns: %w", p.id, err)
-		}
-		migrated++
-	}
-
+	// The tasks table has been retired. Short-circuit: mark done and return.
 	if err := markMigrationDone(ctx, store); err != nil {
-		return migrated, fmt.Errorf("mark migration done: %w", err)
+		return 0, fmt.Errorf("mark migration done: %w", err)
 	}
-
-	if migrated > 0 {
-		slog.Info("migrated tasks.max_turns to settings table", "rows", migrated, "marker", migrationMarkerKey)
-	}
-	return migrated, nil
+	return 0, nil
 }
 
 // DropMaxTurnsColumn removes the tasks.max_turns column after migration has

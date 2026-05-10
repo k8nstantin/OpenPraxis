@@ -29,11 +29,8 @@ func (s *Store) MigrateFromLegacy(ctx context.Context) (migrated int, err error)
 	}
 	migrated += n
 
-	n, err = s.migrateTasks(ctx)
-	if err != nil {
-		return migrated, fmt.Errorf("entity: migrate tasks: %w", err)
-	}
-	migrated += n
+	// migrateTasks has been removed — the tasks table has been retired.
+	// All task data already lives in the entities table.
 
 	n, err = s.migrateIdeas(ctx)
 	if err != nil {
@@ -107,42 +104,6 @@ func (s *Store) migrateManifests(ctx context.Context) (int, error) {
 		}
 		if inserted {
 			count++
-		}
-	}
-	return count, rows.Err()
-}
-
-func (s *Store) migrateTasks(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, status, source_node, created_at
-		FROM tasks WHERE deleted_at = ''`)
-	if err != nil {
-		if isNoSuchTable(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		var id, title, status, sourceNode, createdAt string
-		if err := rows.Scan(&id, &title, &status, &sourceNode, &createdAt); err != nil {
-			continue
-		}
-		mappedStatus := mapTaskStatus(status)
-		validFrom := coalesceTimestamp(createdAt)
-
-		// Tasks don't carry a tags column in the legacy schema.
-		inserted, err := s.insertLegacyEntity(ctx, id, TypeTask, title, mappedStatus, "[]", validFrom)
-		if err != nil {
-			return count, err
-		}
-		if inserted {
-			count++
-		}
-
-		if sourceNode != "" {
-			_ = s.AddNodeEntity(ctx, sourceNode, id, "migration", "migrated from legacy table")
 		}
 	}
 	return count, rows.Err()

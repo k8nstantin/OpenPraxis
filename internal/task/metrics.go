@@ -236,15 +236,12 @@ func (s *Store) CostByPeriod(period string, days int, agent string) ([]CostAggre
 		groupExpr = `strftime('%Y-%m-%d', r.started_at)`
 	}
 
+	// Note: agent filter is no longer supported since the tasks table has been retired.
 	query := fmt.Sprintf(`SELECT %s as period, COUNT(DISTINCT r.task_id) as tasks, COUNT(*) as runs,
 		COALESCE(SUM(r.turns), 0) as turns, COALESCE(SUM(r.cost_usd), 0) as cost
-		FROM task_runs r LEFT JOIN tasks t ON r.task_id = t.id
+		FROM task_runs r
 		WHERE r.started_at >= ?`, groupExpr)
 	args := []any{since.Format(time.RFC3339)}
-	if agent != "" {
-		query += ` AND t.agent = ?`
-		args = append(args, agent)
-	}
 	query += ` GROUP BY period ORDER BY period DESC`
 
 	rows, err := s.db.Query(query, args...)
@@ -265,17 +262,14 @@ func (s *Store) CostByPeriod(period string, days int, agent string) ([]CostAggre
 }
 
 // CostDrillDown returns individual task runs for a specific date.
-// ManifestID is resolved via the relationships store after the SELECT
-// (PR/M3 dropped tasks.manifest_id from the schema).
+// ManifestID is resolved via the relationships store after the SELECT.
+// The tasks table has been retired; title and agent come from entities.
 func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, error) {
-	query := `SELECT r.id, r.task_id, t.title, t.agent, r.run_number, r.status, r.actions, r.cost_usd, r.turns, r.started_at, r.completed_at
-		FROM task_runs r LEFT JOIN tasks t ON r.task_id = t.id
+	// Note: agent filter is no longer supported since the tasks table has been retired.
+	query := `SELECT r.id, r.task_id, r.run_number, r.status, r.actions, r.cost_usd, r.turns, r.started_at, r.completed_at
+		FROM task_runs r
 		WHERE strftime('%Y-%m-%d', r.started_at) = ?`
 	args := []any{date}
-	if agent != "" {
-		query += ` AND t.agent = ?`
-		args = append(args, agent)
-	}
 	query += ` ORDER BY r.cost_usd DESC`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -288,16 +282,9 @@ func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, 
 	idxByTaskID := map[string][]int{}
 	for rows.Next() {
 		var e CostDrillDownEntry
-		var title, agentStr sql.NullString
 		var startedStr, completedStr string
-		if err := rows.Scan(&e.RunID, &e.TaskID, &title, &agentStr, &e.RunNumber, &e.Status, &e.Actions, &e.CostUSD, &e.Turns, &startedStr, &completedStr); err != nil {
+		if err := rows.Scan(&e.RunID, &e.TaskID, &e.RunNumber, &e.Status, &e.Actions, &e.CostUSD, &e.Turns, &startedStr, &completedStr); err != nil {
 			return nil, err
-		}
-		if title.Valid {
-			e.TaskTitle = title.String
-		}
-		if agentStr.Valid {
-			e.Agent = agentStr.String
 		}
 		e.StartedAt = startedStr
 		e.CompletedAt = completedStr
@@ -335,22 +322,10 @@ func (s *Store) CostDrillDown(date string, agent string) ([]CostDrillDownEntry, 
 	return results, nil
 }
 
-// DistinctAgents returns the list of distinct agent names that have task runs.
+// DistinctAgents returns an empty list. The tasks table has been retired;
+// agent information is now stored in the entities table.
 func (s *Store) DistinctAgents() ([]string, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT t.agent FROM task_runs r JOIN tasks t ON r.task_id = t.id WHERE t.agent != '' ORDER BY t.agent`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var agents []string
-	for rows.Next() {
-		var a string
-		if err := rows.Scan(&a); err != nil {
-			return nil, err
-		}
-		agents = append(agents, a)
-	}
-	return agents, rows.Err()
+	return nil, nil
 }
 
 // GetCostTrendSummary returns cost totals for today, this week, this month, and 30d average.
@@ -361,42 +336,28 @@ func (s *Store) GetCostTrendSummary(agent string) (*CostTrendSummary, error) {
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
 	days30 := now.AddDate(0, 0, -30).Format(time.RFC3339)
 
-	hasAgent := agent != ""
-	agentJoin := ""
-	agentWhere := ""
-	if hasAgent {
-		agentJoin = " JOIN tasks t ON r.task_id = t.id"
-		agentWhere = " AND t.agent = ?"
-	}
-
+	// Note: agent filter is no longer supported since the tasks table has been retired.
 	var ts CostTrendSummary
 
-	buildArgs := func(dateArg string) []any {
-		if hasAgent {
-			return []any{dateArg, agent}
-		}
-		return []any{dateArg}
-	}
-
-	q := fmt.Sprintf(`SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r%s WHERE strftime('%%Y-%%m-%%d', r.started_at) = ?%s`, agentJoin, agentWhere)
-	if err := s.db.QueryRow(q, buildArgs(today)...).Scan(&ts.Today); err != nil {
+	q := `SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r WHERE strftime('%Y-%m-%d', r.started_at) = ?`
+	if err := s.db.QueryRow(q, today).Scan(&ts.Today); err != nil {
 		slog.Warn("query cost failed", "period", "today", "error", err)
 	}
 
-	q = fmt.Sprintf(`SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r%s WHERE strftime('%%Y-%%m-%%d', r.started_at) >= ?%s`, agentJoin, agentWhere)
-	if err := s.db.QueryRow(q, buildArgs(weekStart)...).Scan(&ts.ThisWeek); err != nil {
+	q = `SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r WHERE strftime('%Y-%m-%d', r.started_at) >= ?`
+	if err := s.db.QueryRow(q, weekStart).Scan(&ts.ThisWeek); err != nil {
 		slog.Warn("query cost failed", "period", "this_week", "error", err)
 	}
 
-	q = fmt.Sprintf(`SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r%s WHERE strftime('%%Y-%%m-%%d', r.started_at) >= ?%s`, agentJoin, agentWhere)
-	if err := s.db.QueryRow(q, buildArgs(monthStart)...).Scan(&ts.ThisMonth); err != nil {
+	q = `SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r WHERE strftime('%Y-%m-%d', r.started_at) >= ?`
+	if err := s.db.QueryRow(q, monthStart).Scan(&ts.ThisMonth); err != nil {
 		slog.Warn("query cost failed", "period", "this_month", "error", err)
 	}
 
 	// 30-day average: total over 30 days / 30
 	var total30 float64
-	q = fmt.Sprintf(`SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r%s WHERE r.started_at >= ?%s`, agentJoin, agentWhere)
-	if err := s.db.QueryRow(q, buildArgs(days30)...).Scan(&total30); err != nil {
+	q = `SELECT COALESCE(SUM(r.cost_usd), 0) FROM task_runs r WHERE r.started_at >= ?`
+	if err := s.db.QueryRow(q, days30).Scan(&total30); err != nil {
 		slog.Warn("query cost failed", "period", "30d", "error", err)
 	}
 	ts.Avg30d = total30 / 30.0
@@ -617,20 +578,10 @@ func (s *Store) Productivity(db *sql.DB, period string) (*ProductivityMetrics, e
 		return nil, fmt.Errorf("query task_runs: %w", err)
 	}
 
-	// First-attempt pass: tasks where run_count = 1 and status = completed
-	s.db.QueryRow(fmt.Sprintf(`
-		SELECT COUNT(DISTINCT t.id) FROM tasks t
-		JOIN task_runs r ON r.task_id = t.id
-		WHERE t.status = 'completed' AND t.run_count = 1
-		AND r.status = 'completed' AND %s
-	`, dateFilter)).Scan(&m.FirstAttemptPass)
-
-	// Rework: tasks with run_count > 1
-	s.db.QueryRow(fmt.Sprintf(`
-		SELECT COUNT(DISTINCT task_id) FROM task_runs
-		WHERE %s
-		AND task_id IN (SELECT id FROM tasks WHERE run_count > 1)
-	`, dateFilter)).Scan(&m.ReworkRuns)
+	// First-attempt pass and rework metrics require the tasks table which has
+	// been retired. These fields remain 0.
+	m.FirstAttemptPass = 0
+	m.ReworkRuns = 0
 
 	// Lines committed + files changed from git_details JSON
 	rows, err := db.Query(`SELECT git_details FROM watcher_audits WHERE git_details != ''`)

@@ -145,58 +145,14 @@ func NewStore(db *sql.DB) (*Store, error) {
 func (s *Store) DB() *sql.DB { return s.db }
 
 func (s *Store) init() error {
-	// Schema after PR/M3: ownership lives in `relationships` (EdgeOwns
-	// manifest → task). The legacy `manifest_id` column is no longer
-	// part of CREATE TABLE; existing DBs get it dropped by
-	// relationships.DropOwnershipColumns at boot.
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS tasks (
-		id TEXT PRIMARY KEY,
-		title TEXT NOT NULL,
-		description TEXT NOT NULL DEFAULT '',
-		schedule TEXT NOT NULL DEFAULT 'once',
-		status TEXT NOT NULL DEFAULT 'pending',
-		agent TEXT NOT NULL DEFAULT 'claude-code',
-		source_node TEXT NOT NULL DEFAULT '',
-		created_by TEXT NOT NULL DEFAULT '',
-		run_count INTEGER NOT NULL DEFAULT 0,
-		last_run_at TEXT NOT NULL DEFAULT '',
-		next_run_at TEXT NOT NULL DEFAULT '',
-		last_output TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		deleted_at TEXT NOT NULL DEFAULT ''
-	)`)
-	if err != nil {
-		return fmt.Errorf("create tasks table: %w", err)
-	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`)
-	if err != nil {
-		return fmt.Errorf("create tasks status index: %w", err)
-	}
-
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON tasks(next_run_at)`)
-	if err != nil {
-		return err
-	}
-	s.db.Exec(`ALTER TABLE tasks ADD COLUMN deleted_at TEXT NOT NULL DEFAULT ''`)
-	// NOTE: max_turns column is retired in M4-T14. The migration routine
-	// (task.MigrateMaxTurnsToSettings + task.DropMaxTurnsColumn in
-	// node.New) copies prior column values into settings rows at task scope
-	// and then drops the column. No ADD COLUMN here — fresh installs never
-	// see the column, and upgrades have it removed before any Store query
-	// that references the new taskColumns list runs.
-	s.db.Exec(`ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE tasks ADD COLUMN block_reason TEXT NOT NULL DEFAULT ''`)
-	// Cross-process action signal: 'pause' | 'resume' | 'cancel'.
-	// MCP sets this; serve's runner watches and acts on the task process it owns.
-	s.db.Exec(`ALTER TABLE tasks ADD COLUMN action_request TEXT NOT NULL DEFAULT ''`)
+	// The tasks table has been retired — all task data lives in the
+	// entities table. No CREATE TABLE tasks here.
 
 	// system_host_samples — continuous capacity stream from the
 	// SystemSampler started in cmd/serve.go. One row per tick (default
 	// host_sampler_tick_seconds=5s). Independent of any task; powers the
 	// System Capacity panel on the Stats tab.
-	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS system_host_samples (
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS system_host_samples (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
 		ts            TEXT NOT NULL,
 		cpu_pct       REAL NOT NULL DEFAULT 0,
@@ -223,34 +179,6 @@ func (s *Store) init() error {
 
 	if err := s.initPricingSchema(); err != nil {
 		return fmt.Errorf("create model_pricing table: %w", err)
-	}
-
-	// Legacy tasks with a non-empty depends_on but no SCD row yet get
-	// one seeded here so the dep history stream isn't blank on
-	// upgrade. Idempotent — the NOT EXISTS guard in the backfill
-	// makes repeat runs a no-op.
-	// Idempotent migration: rewrite legacy block_reason prefixes to
-	// the canonical form. Rows written before #97 normalized
-	// node.go:615 carry "blocked by manifest <id> (<title>)".
-	// The activation walker's filter accepts both, but normalizing
-	// in place lets us drop the compatibility clause in a later
-	// release and keeps operator-visible text consistent.
-	//
-	// SQLite's REPLACE doesn't support prefix-rewrites directly;
-	// use a CASE expression gated on LIKE so rows without the
-	// legacy prefix aren't touched (idempotent on repeat boot).
-	if _, err := s.db.Exec(`
-		UPDATE tasks
-		SET block_reason = 'manifest not satisfied — blocked by: ' ||
-		    substr(block_reason, length('blocked by manifest ') + 1),
-		    updated_at = ?
-		WHERE block_reason LIKE 'blocked by manifest %'
-		  AND deleted_at = ''`, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		return fmt.Errorf("normalize legacy block_reason prefixes: %w", err)
-	}
-
-	if _, err := s.BackfillTaskDepSCD(); err != nil {
-		return fmt.Errorf("backfill task dep SCD: %w", err)
 	}
 
 	return nil
