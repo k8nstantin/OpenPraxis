@@ -22,8 +22,8 @@ export function AppSidebar() {
         <TeamSwitcher teams={sidebarData.teams} />
       </SidebarHeader>
       <SidebarContent className='overflow-x-hidden overflow-y-auto'>
-        <SidebarGroup className='flex flex-col min-h-0 p-0'>
-          <SidebarGroupContent className='flex flex-col min-h-0'>
+        <SidebarGroup className='shrink-0 p-0'>
+          <SidebarGroupContent>
             <EntityTree />
           </SidebarGroupContent>
         </SidebarGroup>
