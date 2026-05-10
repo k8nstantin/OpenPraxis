@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import type { EntityKind } from '@/lib/queries/entity'
 import { TreeStatus, type TreeNode } from '@/lib/queries/entity-tree'
 
-const KIND_ICON: Record<EntityKind, ElementType> = {
+export const KIND_ICON: Record<EntityKind, ElementType> = {
   skill: Wand2,
   idea: Lightbulb,
   product: Boxes,

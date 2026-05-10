@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router'
 import { ChevronRight, Home } from 'lucide-react'
 import {
+  KIND,
   useEntityHierarchy,
   type EntityKind,
 } from '@/lib/queries/entity'
-import { KIND } from '@/lib/queries/entity-tree'
 import type { HierarchyNode } from '@/lib/types'
 
 // Home path for the breadcrumb root crumb, keyed by entity kind. All

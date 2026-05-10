@@ -35,7 +35,19 @@ import type {
 //   /api/{kind}s/{id}/settings                               Execution/Main tabs knobs
 //   /api/{kind}s/{id}/description/history                    Main tab revisions
 
-export type EntityKind = 'product' | 'manifest' | 'task' | 'skill' | 'idea'
+// KIND is the single source of truth for entity-kind string values.
+// EntityKind below is derived from these so the type and the runtime
+// constants cannot drift. Add a new entity kind here and the type
+// (plus everything keyed by it) updates in one place.
+export const KIND = {
+  product: 'product',
+  manifest: 'manifest',
+  task: 'task',
+  skill: 'skill',
+  idea: 'idea',
+} as const
+
+export type EntityKind = (typeof KIND)[keyof typeof KIND]
 
 // EntityRecord is the unified entity shape returned by /api/entities.
 export type EntityRecord = Entity
