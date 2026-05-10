@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
-import { useTurnActivity } from '@/lib/queries/turns'
+import { useTurnActivity, } from '@/lib/queries/turns'
+import { useLiveRuns, type LiveRun, type EntityKind } from '@/lib/queries/entity'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -580,6 +582,86 @@ export function SystemStatsChart({ defaultRange = 1 }: { defaultRange?: Activity
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
+function fmtElapsed(sec: number) {
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
+}
+
+function RunningAgentCard({ run }: { run: LiveRun }) {
+  const navigate = useNavigate()
+  const handleClick = () => {
+    if (run.entity_uid && run.entity_uid !== 'stdio') {
+      navigate({ to: '/entities/$uid', params: { uid: run.entity_uid }, search: { kind: run.entity_type as EntityKind, tab: 'runs' } })
+    }
+  }
+  return (
+    <div
+      onClick={handleClick}
+      className={cn(
+        'rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3 cursor-pointer',
+        'hover:border-emerald-500/70 hover:bg-emerald-500/10 transition-colors',
+        'flex flex-col gap-2 min-w-0',
+      )}
+    >
+      <div className='flex items-center gap-2'>
+        <span className='relative flex h-2.5 w-2.5 shrink-0'>
+          <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75' />
+          <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
+        </span>
+        <span className='text-xs font-medium text-emerald-400 truncate flex-1'>
+          {run.entity_title || run.entity_uid?.slice(0, 12) || 'stdio'}
+        </span>
+      </div>
+      <div className='grid grid-cols-3 gap-1 text-center'>
+        <div>
+          <div className='font-mono text-sm font-bold tabular-nums'>{run.turns}</div>
+          <div className='text-[10px] text-muted-foreground uppercase tracking-wide'>turns</div>
+        </div>
+        <div>
+          <div className='font-mono text-sm font-bold tabular-nums'>{run.actions}</div>
+          <div className='text-[10px] text-muted-foreground uppercase tracking-wide'>actions</div>
+        </div>
+        <div>
+          <div className='font-mono text-sm font-bold tabular-nums'>{fmtElapsed(run.elapsed_sec)}</div>
+          <div className='text-[10px] text-muted-foreground uppercase tracking-wide'>elapsed</div>
+        </div>
+      </div>
+      {run.model && (
+        <div className='text-[10px] text-muted-foreground truncate'>{run.model}</div>
+      )}
+    </div>
+  )
+}
+
+function RunningAgents() {
+  const { data: runs } = useLiveRuns()
+  const active = (runs ?? []).filter(r => r.entity_uid && r.entity_uid !== 'stdio')
+  return (
+    <div>
+      <div className='flex items-center gap-2 mb-2'>
+        <h2 className='text-sm font-semibold tracking-tight'>Running Agents</h2>
+        {active.length > 0 ? (
+          <span className='rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-medium px-2 py-0.5'>
+            {active.length} active
+          </span>
+        ) : (
+          <span className='text-[10px] text-muted-foreground'>none running</span>
+        )}
+      </div>
+      {active.length > 0 ? (
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'>
+          {active.map(r => <RunningAgentCard key={r.run_uid} run={r} />)}
+        </div>
+      ) : (
+        <div className='rounded-lg border border-dashed border-white/10 p-4 text-center text-xs text-muted-foreground'>
+          No agents running — idle
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Overview() {
   const { data: s } = useOverviewStats()
   const { data: c } = useChartsData()
@@ -607,6 +689,9 @@ export function Overview() {
         </div>
 
         <div className='space-y-4'>
+
+          {/* Running Agents — live task cards, auto-refreshes */}
+          <RunningAgents />
 
           {/* Row 1 — headline stats */}
           <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8'>

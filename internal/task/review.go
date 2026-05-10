@@ -84,9 +84,9 @@ func (s *Store) SetReviewCommentsAPI(w ReviewWriter, r ReviewReader) {
 	s.reviewReader = r
 }
 
-// RejectCompletedTask records a review_rejection comment and transitions the
-// task back to scheduled so the agent re-runs. The state machine is honoured
-// via UpdateStatus — this will fail if completed→scheduled is ever removed.
+// RejectCompletedTask records a review_rejection comment. The tasks table
+// has been retired; status transitions are skipped. Only the comment is
+// written so the rejection audit trail is preserved.
 func (s *Store) RejectCompletedTask(ctx context.Context, taskID, reason, reviewer string) error {
 	if s.reviewWriter == nil {
 		return ErrReviewNotAvailable
@@ -94,30 +94,8 @@ func (s *Store) RejectCompletedTask(ctx context.Context, taskID, reason, reviewe
 	if strings.TrimSpace(reason) == "" {
 		return ErrEmptyReviewReason
 	}
-
-	var currentStatus string
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT status FROM tasks WHERE id = ? AND deleted_at = ''`, taskID,
-	).Scan(&currentStatus); err != nil {
-		return fmt.Errorf("read task status: %w", err)
-	}
-	if currentStatus != "completed" {
-		return fmt.Errorf("%w: current status is %q", ErrTaskNotCompleted, currentStatus)
-	}
-
 	if err := s.reviewWriter.AddReviewComment(ctx, taskID, reviewer, "review_rejection", reason); err != nil {
 		return fmt.Errorf("write rejection comment: %w", err)
-	}
-
-	// Go through the state machine — ValidateTransition enforces completed→scheduled.
-	if err := s.UpdateStatus(taskID, "scheduled"); err != nil {
-		return fmt.Errorf("transition to scheduled: %w", err)
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE tasks SET next_run_at = ?, updated_at = ? WHERE id = ?`, now, now, taskID,
-	); err != nil {
-		return fmt.Errorf("set next_run_at after rejection: %w", err)
 	}
 	return nil
 }

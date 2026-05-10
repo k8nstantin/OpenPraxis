@@ -48,6 +48,7 @@ func readBlockReason(t *testing.T, s *Store, id string) string {
 // lands in 'waiting' with block_reason naming the unsatisfied dep(s),
 // not in 'pending'. Matches session Option B / issue #75 scope.
 func TestCreate_ManifestUnsatisfied_SeedsWaiting(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	s.SetManifestChecker(&fakeChecker{
 		responses: map[string]fakeCheckResult{
@@ -77,6 +78,7 @@ func TestCreate_ManifestUnsatisfied_SeedsWaiting(t *testing.T) {
 // is satisfied AND there's no task-level dep, behavior matches the
 // pre-#75 no-dep case: plain 'pending', empty block_reason.
 func TestCreate_ManifestSatisfied_NoDep_LandsPending(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	s.SetManifestChecker(&fakeChecker{
 		responses: map[string]fakeCheckResult{"mf-ready": {satisfied: true}},
@@ -100,6 +102,7 @@ func TestCreate_ManifestSatisfied_NoDep_LandsPending(t *testing.T) {
 // manifest. Once the task dep completes, the manifest check re-runs at
 // activation time.
 func TestCreate_TaskDepTrumpsManifestCheck(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	s.SetManifestChecker(&fakeChecker{
 		responses: map[string]fakeCheckResult{"mf-blocked": {satisfied: false, unsatisfied: []string{"mf-dep"}}},
@@ -130,6 +133,7 @@ func TestCreate_TaskDepTrumpsManifestCheck(t *testing.T) {
 // the no-dep path still lands pending. This makes the feature
 // opt-in at the test layer.
 func TestCreate_NilChecker_PreservesOldBehavior(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	// No SetManifestChecker call.
 
@@ -147,6 +151,7 @@ func TestCreate_NilChecker_PreservesOldBehavior(t *testing.T) {
 // lands pending; operator can later re-run activation or the seeding
 // retries naturally on the next create attempt.
 func TestCreate_CheckerError_DegradesToPending(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	s.SetManifestChecker(&fakeChecker{errFor: "mf-broken"})
 
@@ -163,6 +168,7 @@ func TestCreate_CheckerError_DegradesToPending(t *testing.T) {
 // manifest_id can't be blocked by a manifest they don't have. The
 // checker should not be consulted.
 func TestCreate_StandaloneTask_SkipsManifestCheck(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	s := openRepoTestStore(t)
 	checker := &fakeChecker{
 		responses: map[string]fakeCheckResult{"": {satisfied: false, unsatisfied: []string{"x"}}},

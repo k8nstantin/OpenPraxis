@@ -1,37 +1,20 @@
-import { useLayout } from '@/context/layout-provider'
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarRail,
-} from '@/components/ui/sidebar'
-// import { AppTitle } from './app-title'
 import { sidebarData } from './data/sidebar-data'
-import { NavGroup } from './nav-group'
 import { NavUser } from './nav-user'
 import { TeamSwitcher } from './team-switcher'
+import { EntityTree } from '@/features/entity/tree/EntityTree'
 
 export function AppSidebar() {
-  const { collapsible, variant } = useLayout()
   return (
-    <Sidebar collapsible={collapsible} variant={variant}>
-      <SidebarHeader>
+    <div className='flex h-full w-full flex-col bg-sidebar text-sidebar-foreground border-r border-border overflow-hidden'>
+      <div className='shrink-0 p-2'>
         <TeamSwitcher teams={sidebarData.teams} />
-
-        {/* Replace <TeamSwitch /> with the following <AppTitle />
-         /* if you want to use the normal app title instead of TeamSwitch dropdown */}
-        {/* <AppTitle /> */}
-      </SidebarHeader>
-      <SidebarContent>
-        {sidebarData.navGroups.map((props) => (
-          <NavGroup key={props.title} {...props} />
-        ))}
-      </SidebarContent>
-      <SidebarFooter>
+      </div>
+      <div className='flex flex-col flex-1 min-h-0 overflow-hidden px-1 py-1'>
+        <EntityTree />
+      </div>
+      <div className='shrink-0 p-2'>
         <NavUser user={sidebarData.user} />
-      </SidebarFooter>
-      <SidebarRail />
-    </Sidebar>
+      </div>
+    </div>
   )
 }

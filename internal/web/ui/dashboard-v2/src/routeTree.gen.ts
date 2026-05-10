@@ -30,11 +30,15 @@ import { Route as errors404RouteImport } from './routes/(errors)/404'
 import { Route as errors403RouteImport } from './routes/(errors)/403'
 import { Route as errors401RouteImport } from './routes/(errors)/401'
 import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authenticated/settings/route'
+import { Route as AuthenticatedEntitiesRouteRouteImport } from './routes/_authenticated/entities/route'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedEntitiesIndexRouteImport } from './routes/_authenticated/entities/index'
+import { Route as AuthenticatedSettingsSystemRouteImport } from './routes/_authenticated/settings/system'
 import { Route as AuthenticatedSettingsNotificationsRouteImport } from './routes/_authenticated/settings/notifications'
 import { Route as AuthenticatedSettingsDisplayRouteImport } from './routes/_authenticated/settings/display'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAccountRouteImport } from './routes/_authenticated/settings/account'
+import { Route as AuthenticatedEntitiesUidRouteImport } from './routes/_authenticated/entities/$uid'
 
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
@@ -142,10 +146,28 @@ const AuthenticatedSettingsRouteRoute =
     path: '/settings',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedEntitiesRouteRoute =
+  AuthenticatedEntitiesRouteRouteImport.update({
+    id: '/entities',
+    path: '/entities',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSettingsIndexRoute =
   AuthenticatedSettingsIndexRouteImport.update({
     id: '/',
     path: '/',
+    getParentRoute: () => AuthenticatedSettingsRouteRoute,
+  } as any)
+const AuthenticatedEntitiesIndexRoute =
+  AuthenticatedEntitiesIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedEntitiesRouteRoute,
+  } as any)
+const AuthenticatedSettingsSystemRoute =
+  AuthenticatedSettingsSystemRouteImport.update({
+    id: '/system',
+    path: '/system',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
 const AuthenticatedSettingsNotificationsRoute =
@@ -172,9 +194,16 @@ const AuthenticatedSettingsAccountRoute =
     path: '/account',
     getParentRoute: () => AuthenticatedSettingsRouteRoute,
   } as any)
+const AuthenticatedEntitiesUidRoute =
+  AuthenticatedEntitiesUidRouteImport.update({
+    id: '/$uid',
+    path: '/$uid',
+    getParentRoute: () => AuthenticatedEntitiesRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
+  '/entities': typeof AuthenticatedEntitiesRouteRouteWithChildren
   '/settings': typeof AuthenticatedSettingsRouteRouteWithChildren
   '/401': typeof errors401Route
   '/403': typeof errors403Route
@@ -194,10 +223,13 @@ export interface FileRoutesByFullPath {
   '/skills': typeof AuthenticatedSkillsRoute
   '/stats': typeof AuthenticatedStatsRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/entities/$uid': typeof AuthenticatedEntitiesUidRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/system': typeof AuthenticatedSettingsSystemRoute
+  '/entities/': typeof AuthenticatedEntitiesIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -220,15 +252,19 @@ export interface FileRoutesByTo {
   '/stats': typeof AuthenticatedStatsRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/': typeof AuthenticatedIndexRoute
+  '/entities/$uid': typeof AuthenticatedEntitiesUidRoute
   '/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/settings/system': typeof AuthenticatedSettingsSystemRoute
+  '/entities': typeof AuthenticatedEntitiesIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/_authenticated/entities': typeof AuthenticatedEntitiesRouteRouteWithChildren
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteRouteWithChildren
   '/(errors)/401': typeof errors401Route
   '/(errors)/403': typeof errors403Route
@@ -249,16 +285,20 @@ export interface FileRoutesById {
   '/_authenticated/stats': typeof AuthenticatedStatsRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/entities/$uid': typeof AuthenticatedEntitiesUidRoute
   '/_authenticated/settings/account': typeof AuthenticatedSettingsAccountRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/display': typeof AuthenticatedSettingsDisplayRoute
   '/_authenticated/settings/notifications': typeof AuthenticatedSettingsNotificationsRoute
+  '/_authenticated/settings/system': typeof AuthenticatedSettingsSystemRoute
+  '/_authenticated/entities/': typeof AuthenticatedEntitiesIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/entities'
     | '/settings'
     | '/401'
     | '/403'
@@ -278,10 +318,13 @@ export interface FileRouteTypes {
     | '/skills'
     | '/stats'
     | '/tasks'
+    | '/entities/$uid'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/system'
+    | '/entities/'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -304,14 +347,18 @@ export interface FileRouteTypes {
     | '/stats'
     | '/tasks'
     | '/'
+    | '/entities/$uid'
     | '/settings/account'
     | '/settings/appearance'
     | '/settings/display'
     | '/settings/notifications'
+    | '/settings/system'
+    | '/entities'
     | '/settings'
   id:
     | '__root__'
     | '/_authenticated'
+    | '/_authenticated/entities'
     | '/_authenticated/settings'
     | '/(errors)/401'
     | '/(errors)/403'
@@ -332,10 +379,13 @@ export interface FileRouteTypes {
     | '/_authenticated/stats'
     | '/_authenticated/tasks'
     | '/_authenticated/'
+    | '/_authenticated/entities/$uid'
     | '/_authenticated/settings/account'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/display'
     | '/_authenticated/settings/notifications'
+    | '/_authenticated/settings/system'
+    | '/_authenticated/entities/'
     | '/_authenticated/settings/'
   fileRoutesById: FileRoutesById
 }
@@ -497,11 +547,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/entities': {
+      id: '/_authenticated/entities'
+      path: '/entities'
+      fullPath: '/entities'
+      preLoaderRoute: typeof AuthenticatedEntitiesRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/settings/': {
       id: '/_authenticated/settings/'
       path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedSettingsRouteRoute
+    }
+    '/_authenticated/entities/': {
+      id: '/_authenticated/entities/'
+      path: '/'
+      fullPath: '/entities/'
+      preLoaderRoute: typeof AuthenticatedEntitiesIndexRouteImport
+      parentRoute: typeof AuthenticatedEntitiesRouteRoute
+    }
+    '/_authenticated/settings/system': {
+      id: '/_authenticated/settings/system'
+      path: '/system'
+      fullPath: '/settings/system'
+      preLoaderRoute: typeof AuthenticatedSettingsSystemRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
     '/_authenticated/settings/notifications': {
@@ -532,14 +603,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAccountRouteImport
       parentRoute: typeof AuthenticatedSettingsRouteRoute
     }
+    '/_authenticated/entities/$uid': {
+      id: '/_authenticated/entities/$uid'
+      path: '/$uid'
+      fullPath: '/entities/$uid'
+      preLoaderRoute: typeof AuthenticatedEntitiesUidRouteImport
+      parentRoute: typeof AuthenticatedEntitiesRouteRoute
+    }
   }
 }
+
+interface AuthenticatedEntitiesRouteRouteChildren {
+  AuthenticatedEntitiesUidRoute: typeof AuthenticatedEntitiesUidRoute
+  AuthenticatedEntitiesIndexRoute: typeof AuthenticatedEntitiesIndexRoute
+}
+
+const AuthenticatedEntitiesRouteRouteChildren: AuthenticatedEntitiesRouteRouteChildren =
+  {
+    AuthenticatedEntitiesUidRoute: AuthenticatedEntitiesUidRoute,
+    AuthenticatedEntitiesIndexRoute: AuthenticatedEntitiesIndexRoute,
+  }
+
+const AuthenticatedEntitiesRouteRouteWithChildren =
+  AuthenticatedEntitiesRouteRoute._addFileChildren(
+    AuthenticatedEntitiesRouteRouteChildren,
+  )
 
 interface AuthenticatedSettingsRouteRouteChildren {
   AuthenticatedSettingsAccountRoute: typeof AuthenticatedSettingsAccountRoute
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsDisplayRoute: typeof AuthenticatedSettingsDisplayRoute
   AuthenticatedSettingsNotificationsRoute: typeof AuthenticatedSettingsNotificationsRoute
+  AuthenticatedSettingsSystemRoute: typeof AuthenticatedSettingsSystemRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -550,6 +645,7 @@ const AuthenticatedSettingsRouteRouteChildren: AuthenticatedSettingsRouteRouteCh
     AuthenticatedSettingsDisplayRoute: AuthenticatedSettingsDisplayRoute,
     AuthenticatedSettingsNotificationsRoute:
       AuthenticatedSettingsNotificationsRoute,
+    AuthenticatedSettingsSystemRoute: AuthenticatedSettingsSystemRoute,
     AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   }
 
@@ -559,6 +655,7 @@ const AuthenticatedSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedEntitiesRouteRoute: typeof AuthenticatedEntitiesRouteRouteWithChildren
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedActionsRoute: typeof AuthenticatedActionsRoute
   AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
@@ -577,6 +674,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedEntitiesRouteRoute: AuthenticatedEntitiesRouteRouteWithChildren,
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedActionsRoute: AuthenticatedActionsRoute,
   AuthenticatedActivityRoute: AuthenticatedActivityRoute,

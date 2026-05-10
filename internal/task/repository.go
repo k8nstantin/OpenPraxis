@@ -2,13 +2,9 @@ package task
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
@@ -34,148 +30,11 @@ func (s *Store) SetManifestChecker(c ManifestReadinessChecker) {
 	s.manifestChecker = c
 }
 
-// Create stores a new task. Per-task max_turns is set via the settings
-// resolver (PUT /api/tasks/:id/settings) after creation — the legacy
-// max_turns column was retired in M4-T14, so callers that still want to
-// pin a value must write a settings row.
+// Create is a no-op stub. The tasks table has been retired; all task
+// data lives in the entities table. Returns an error to surface
+// misconfigured callers.
 func (s *Store) Create(manifestID, title, description, schedule, agent, sourceNode, createdBy, dependsOn string) (*Task, error) {
-	if schedule == "" {
-		schedule = "once"
-	}
-	if agent == "" {
-		agent = "claude-code"
-	}
-
-	id := uuid.Must(uuid.NewV7()).String()
-	now := time.Now().UTC()
-
-	// Initial status derives from the presence + state of depends_on.
-	//
-	//   - no dep                             → pending  (manual-only, won't auto-fire)
-	//   - dep set, parent not yet completed  → waiting  (ActivateDependents will flip to scheduled)
-	//   - dep set, parent already completed  → pending  (caller can schedule or manually start;
-	//                                                    we don't auto-schedule on create because
-	//                                                    there's no next_run_at to honor yet)
-	//
-	// This is the half of the state-machine fix that #67 couldn't reach:
-	// #67 loosened ActivateDependents to also match 'pending' children as
-	// a safety net, but the correct invariant is that dep-bearing tasks
-	// start in 'waiting' so the sort order + UI filters tell the truth.
-	initialStatus := StatusPending
-	blockReason := ""
-
-	// Task-level dep wins as the first blocker: if the parent task isn't
-	// completed, the task is waiting regardless of manifest state.
-	if dependsOn != "" {
-		var parentStatus string
-		err := s.db.QueryRow(`SELECT status FROM tasks WHERE id = ? AND deleted_at = ''`,
-			dependsOn).Scan(&parentStatus)
-		if err == nil && parentStatus != string(StatusCompleted) {
-			initialStatus = StatusWaiting
-			blockReason = fmt.Sprintf("task %s not completed", dependsOn)
-		}
-		// sql.ErrNoRows or any other lookup failure: keep pending, operator
-		// can correct by attaching the dep later via Edit.
-	}
-
-	// Manifest-level dep check only runs when the task-level gate is
-	// already clear. Reason: if both blockers apply, the operator cares
-	// about the closer one (task dep) first — once that clears, the
-	// manifest-level check re-runs at activation time.
-	if initialStatus == StatusPending && manifestID != "" && s.manifestChecker != nil {
-		ok, unsatisfied, err := s.manifestChecker.IsSatisfied(context.Background(), manifestID)
-		if err != nil {
-			// Lookup failure shouldn't block task creation. Log via the
-			// caller's slog (we don't have one here) by returning the
-			// task normally; operator can re-trigger activation later.
-			// Keep pending.
-		} else if !ok {
-			initialStatus = StatusWaiting
-			blockReason = fmt.Sprintf("manifest not satisfied — blocked by: %s",
-				joinIDs(unsatisfied))
-		}
-	}
-
-	// Product-level dep check runs only if task-level + manifest-level
-	// gates are both clear. Same precedence as the manifest check:
-	// innermost blocker is named in block_reason; outer checks re-run
-	// at activation time as inner blockers clear.
-	//
-	// productID is resolved through the relationships store. The
-	// legacy `manifests.project_id` column was dropped in PR/M3 — we
-	// look up the manifest's parent product via ListIncoming(EdgeOwns)
-	// instead.
-	if initialStatus == StatusPending && manifestID != "" && s.productChecker != nil && s.rels != nil {
-		var productID string
-		if edges, err := s.rels.ListIncoming(context.Background(), manifestID, relationships.EdgeOwns); err == nil {
-			for _, e := range edges {
-				if e.SrcKind == relationships.KindProduct {
-					productID = e.SrcID
-					break
-				}
-			}
-		}
-		if productID != "" {
-			ok, unsatisfied, err := s.productChecker.IsSatisfied(context.Background(), productID)
-			if err == nil && !ok {
-				initialStatus = StatusWaiting
-				blockReason = fmt.Sprintf("product not satisfied — blocked by: %s",
-					joinIDs(unsatisfied))
-			}
-		}
-	}
-
-	_, err := s.db.Exec(`INSERT INTO tasks (id, title, description, schedule, status, agent, source_node, created_by, depends_on, block_reason, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, title, description, schedule, string(initialStatus), agent, sourceNode, createdBy, dependsOn, blockReason,
-		now.Format(time.RFC3339), now.Format(time.RFC3339))
-	if err != nil {
-		return nil, err
-	}
-
-	// Ownership wiring (PR/M3): the EdgeOwns(manifest → task) row IS
-	// the canonical ownership record. The legacy manifest_id column
-	// was dropped in this PR — every reader that needs the parent
-	// looks it up via relationships.ListIncoming.
-	if manifestID != "" && s.rels != nil {
-		if err := s.rels.Create(context.Background(), relationships.Edge{
-			SrcKind:   relationships.KindManifest,
-			SrcID:     manifestID,
-			DstKind:   relationships.KindTask,
-			DstID:     id,
-			Kind:      relationships.EdgeOwns,
-			CreatedBy: createdBy,
-			Reason:    "task created under manifest",
-		}); err != nil {
-			return nil, fmt.Errorf("task created but relationships row failed: %w", err)
-		}
-	}
-
-	// task-level depends_on edge (when set): write the EdgeDependsOn
-	// row at create time as well. SetDependency() handles updates after
-	// create; but a fresh task with depends_on still needs the edge to
-	// land so the activation walker sees the gate.
-	if dependsOn != "" && s.rels != nil {
-		if err := s.rels.Create(context.Background(), relationships.Edge{
-			SrcKind:   relationships.KindTask,
-			SrcID:     id,
-			DstKind:   relationships.KindTask,
-			DstID:     dependsOn,
-			Kind:      relationships.EdgeDependsOn,
-			CreatedBy: createdBy,
-			Reason:    "initial depends_on at create",
-		}); err != nil {
-			return nil, fmt.Errorf("task created but depends_on edge failed: %w", err)
-		}
-	}
-
-	return &Task{
-		ID: id, ManifestID: manifestID,
-		Title: title, Description: description, Schedule: schedule,
-		Status: string(initialStatus), Agent: agent, SourceNode: sourceNode,
-		CreatedBy: createdBy, DependsOn: dependsOn, BlockReason: blockReason,
-		CreatedAt: now, UpdatedAt: now,
-	}, nil
+	return nil, fmt.Errorf("task.Store.Create: tasks table has been retired; use entity.Store instead")
 }
 
 // joinIDs formats a list of full UUIDs as comma-separated for inclusion
@@ -188,396 +47,82 @@ func joinIDs(ids []string) string {
 	return strings.Join(ids, ", ")
 }
 
-// Get retrieves a task by full UUID.
+// Get is a no-op stub. The tasks table has been retired.
 func (s *Store) Get(id string) (*Task, error) {
-	row := s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ? AND deleted_at = ''`, id)
-	t, err := scanTask(row)
-	if err == nil && t != nil {
-		s.populateOwnership([]*Task{t})
-		s.enrichWithCosts([]*Task{t})
-	}
-	return t, err
+	return nil, fmt.Errorf("task.Store.Get: tasks table has been retired; use entity.Store instead")
 }
 
-// ListByManifest returns tasks owned by a manifest. Reads ownership
-// from the relationships store (legacy tasks.manifest_id column was
-// dropped in PR/M3).
+// ListByManifest returns tasks owned by a manifest via the relationships
+// store. The tasks table has been retired; this reads ownership edges
+// but cannot hydrate task rows.
 func (s *Store) ListByManifest(manifestID string, limit int) ([]*Task, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if s.rels == nil {
-		return nil, fmt.Errorf("task.ListByManifest: relationships backend not wired")
-	}
-	ctx := context.Background()
-	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
-	if err != nil {
-		return nil, err
-	}
-	taskIDs := make([]string, 0, len(edges))
-	for _, e := range edges {
-		if e.DstKind == relationships.KindTask {
-			taskIDs = append(taskIDs, e.DstID)
-		}
-	}
-	if len(taskIDs) == 0 {
-		return nil, nil
-	}
-	placeholders := strings.Repeat("?,", len(taskIDs))
-	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(taskIDs)+1)
-	for _, id := range taskIDs {
-		args = append(args, id)
-	}
-	args = append(args, limit)
-	rows, err := s.db.Query(`SELECT `+taskColumns+`
-		FROM tasks WHERE id IN (`+placeholders+`) AND deleted_at = ''
-		ORDER BY created_at DESC LIMIT ?`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks, err := scanTasks(rows)
-	if err != nil {
-		return nil, err
-	}
-	// Caller already knows the manifest — short-circuit the rels
-	// lookup that populateOwnership would otherwise do.
-	for _, t := range tasks {
-		t.ManifestID = manifestID
-	}
-	s.enrichWithCosts(tasks)
-	return tasks, nil
+	return nil, nil
 }
 
-// List returns all tasks.
-//
-// limit semantics:
-//   - limit > 0  → cap at that many rows
-//   - limit == 0 → UNBOUNDED (return every matching row). Used by the
-//     v2 dashboard list pane which paginates client-side at
-//     PAGE_SIZE=10 with "Load more" — the backend MUST return all rows.
-//   - limit < 0  → defensively treated as 50 (likely a caller bug)
+// List is a no-op stub. The tasks table has been retired.
 func (s *Store) List(status string, limit int) ([]*Task, error) {
-	if limit < 0 {
-		limit = 50
-	}
-	query := `SELECT ` + taskColumns + ` FROM tasks WHERE deleted_at = ''`
-	var args []any
-	if status != "" {
-		query += ` AND status = ?`
-		args = append(args, status)
-	}
-	// Sort: most-recent activity first. For never-run tasks, "activity"
-	// is the create event — collapse to created_at via COALESCE/NULLIF
-	// so a freshly-created task sorts above completed tasks that finished
-	// hours ago. Tiebreak on created_at DESC for two rows with identical
-	// last_run_at (rare but possible with sub-second creates).
-	query += ` ORDER BY COALESCE(NULLIF(last_run_at,''), created_at) DESC, created_at DESC`
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
-
-	rows, err := s.db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks, err := scanTasks(rows)
-	if err == nil {
-		s.populateOwnership(tasks)
-		s.enrichWithCosts(tasks)
-	}
-	return tasks, err
+	return nil, nil
 }
 
-// Update modifies optional fields on a task (title, description). Only
-// non-nil fields are updated. Per-task max_turns is no longer a task-row
-// field — callers who want to set it go through the settings resolver
-// (PUT /api/tasks/:id/settings). Retired in M4-T14.
+// Update is a no-op stub. The tasks table has been retired.
 func (s *Store) Update(id string, title, description *string) (*Task, error) {
-	var sets []string
-	var args []any
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	if title != nil {
-		sets = append(sets, "title = ?")
-		args = append(args, *title)
-	}
-	if description != nil {
-		sets = append(sets, "description = ?")
-		args = append(args, *description)
-	}
-	if len(sets) == 0 {
-		return s.Get(id)
-	}
-
-	sets = append(sets, "updated_at = ?")
-	args = append(args, now)
-	args = append(args, id)
-
-	query := fmt.Sprintf("UPDATE tasks SET %s WHERE id = ? AND deleted_at = ''", strings.Join(sets, ", "))
-	_, err := s.db.Exec(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	return s.Get(id)
+	return nil, fmt.Errorf("task.Store.Update: tasks table has been retired; use entity.Store instead")
 }
 
-// SetManifest swaps a task's primary manifest. Used to re-home a task
-// when an operator splits / restructures manifests after the task was
-// originally created. Post-PR/M3 the canonical manifest pointer is the
-// EdgeOwns(manifest → task) row in the relationships store; this
-// closes the prior edge (if any) and opens a new one.
-//
-// Returns the task as it stands after the update.
+// SetManifest is a no-op stub. The tasks table has been retired.
 func (s *Store) SetManifest(taskID, manifestID string) (*Task, error) {
-	if s.rels == nil {
-		return nil, fmt.Errorf("set manifest: relationships backend not wired")
-	}
-	ctx := context.Background()
-	prior := s.lookupOwner(ctx, taskID)
-	if prior != manifestID {
-		if prior != "" {
-			if err := s.rels.Remove(ctx, prior, taskID, relationships.EdgeOwns,
-				"task.Store.SetManifest", "task reparented"); err != nil {
-				return nil, fmt.Errorf("set manifest: close prior owner: %w", err)
-			}
-		}
-		if manifestID != "" {
-			if err := s.rels.Create(ctx, relationships.Edge{
-				SrcKind:   relationships.KindManifest,
-				SrcID:     manifestID,
-				DstKind:   relationships.KindTask,
-				DstID:     taskID,
-				Kind:      relationships.EdgeOwns,
-				CreatedBy: "task.Store.SetManifest",
-				Reason:    "task reparented",
-			}); err != nil {
-				return nil, fmt.Errorf("set manifest: open new owner: %w", err)
-			}
-		}
-	}
-	// Bump updated_at so list sorts move the task to the top after a
-	// re-home, mirroring pre-M3 behaviour.
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.Exec(
-		"UPDATE tasks SET updated_at = ? WHERE id = ? AND deleted_at = ''",
-		now, taskID,
-	); err != nil {
-		return nil, fmt.Errorf("set manifest: bump updated_at: %w", err)
-	}
-	return s.Get(taskID)
+	return nil, fmt.Errorf("task.Store.SetManifest: tasks table has been retired")
 }
 
-// UpdateStatus changes a task's status, validating the transition against
-// the canonical state machine in status.go. Returns the same validation
-// error surface ValidateTransition produces when the move is illegal — the
-// caller gets the exact reason and which next states would have been
-// legal. A no-op (current == target) is silently allowed so idempotent
-// writers don't see spurious errors.
+// UpdateStatus is a no-op stub. The tasks table has been retired.
 func (s *Store) UpdateStatus(id, status string) error {
-	// Resolve the row so we can read the current status for the
-	// transition check.
-	var current string
-	if err := s.db.QueryRow(`SELECT status FROM tasks WHERE id = ? AND deleted_at = ''`,
-		id).Scan(&current); err != nil {
-		return err
-	}
-	if err := ValidateTransition(Status(current), Status(status)); err != nil {
-		return err
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`, status, now, id)
-	return err
+	return nil
 }
 
-// Delete soft-deletes a task.
+// Delete is a no-op stub. The tasks table has been retired.
 func (s *Store) Delete(id string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = ? WHERE id = ? AND deleted_at = ''`, now, id)
-	return err
+	return nil
 }
 
-// ListDeleted returns soft-deleted tasks.
+// ListDeleted is a no-op stub. The tasks table has been retired.
 func (s *Store) ListDeleted(limit int) ([]*Task, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks, err := scanTasks(rows)
-	if err != nil {
-		return nil, err
-	}
-	s.populateOwnership(tasks)
-	return tasks, nil
+	return nil, nil
 }
 
-// Restore un-deletes a soft-deleted task.
+// Restore is a no-op stub. The tasks table has been retired.
 func (s *Store) Restore(id string) error {
-	_, err := s.db.Exec(`UPDATE tasks SET deleted_at = '' WHERE id = ? AND deleted_at != ''`, id)
-	return err
+	return nil
 }
 
-// SetBlockReason sets or clears the block_reason field for a task.
+// SetBlockReason is a no-op stub. The tasks table has been retired.
 func (s *Store) SetBlockReason(id, reason string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET block_reason = ?, updated_at = ? WHERE id = ? AND deleted_at = ''`,
-		reason, now, id)
-	return err
+	return nil
 }
 
 // ErrTaskDepCycle is returned when SetDependency would create a cycle in
-// the task dependency graph. Handlers translate this to HTTP 409 / an
-// MCP tool error.
-var ErrTaskDepCycle = errors.New("task dependency: cycle detected")
+// the task dependency graph.
+var ErrTaskDepCycle = fmt.Errorf("task dependency: cycle detected")
 
 // ErrTaskDepSelfLoop is returned when a task is asked to depend on itself.
-var ErrTaskDepSelfLoop = errors.New("task dependency: a task cannot depend on itself")
+var ErrTaskDepSelfLoop = fmt.Errorf("task dependency: a task cannot depend on itself")
 
-// SetDependency sets or clears the depends_on field for a task, and
-// transitions the task's status + block_reason to match the new
-// dependency state. Centralizes the four invariants that previously
-// leaked into the HTTP handler at handlers_task.go:
-//
-//   1. Cycle detection. DFS from the proposed parent following the
-//      single-parent depends_on column; if we ever hit taskID, reject.
-//      Single-parent makes this O(depth), effectively O(1) for real
-//      graphs.
-//   2. Self-loop rejection with ErrTaskDepSelfLoop, so the HTTP / MCP
-//      surfaces can surface a 400 rather than raw storage error text.
-//   3. Parent-status-aware seeding. If the parent is already
-//      StatusCompleted the dep is already satisfied — status flips
-//      to Scheduled (ready to fire), not Waiting. Matches the
-//      post-#77 invariant for Create so both paths agree.
-//   4. block_reason is populated when parking in Waiting and cleared
-//      on every other transition. The #85 UI renders a "Blocked:"
-//      bar from this field; leaving it stale or empty breaks that
-//      signal.
-//
-// Clearing the dep (dependsOn=="") is symmetric: column blanked, and
-// if the task was Waiting on a task-level block, it flips to Pending
-// with block_reason cleared (Option B symmetry with manifest-dep
-// removal from #79 — operator arms explicitly).
+// SetDependency is a no-op stub. The tasks table has been retired.
 func (s *Store) SetDependency(id, dependsOn string) error {
 	return s.SetDependencyWithAudit(id, dependsOn, "", "")
 }
 
-// SetDependencyWithAudit writes the new dep via SCD Type 2 semantics.
-//
-//   - The currently-active row (valid_to='') in task_dependency is
-//     closed by stamping valid_to=now.
-//   - A fresh row is inserted with valid_from=now, valid_to='', the
-//     new depends_on value, changedBy + reason for attribution.
-//   - tasks.depends_on is updated as a cache of the new active value
-//     so existing queries (scanTask, the scheduler) don't need an
-//     SCD join on every read.
-//
-// Result: the dep history for a task is just the rows in
-// task_dependency ordered by valid_from. No separate audit log —
-// history and current state share one table.
-//
-// changedBy identifies the caller ("http-api", session id, operator
-// name, etc.); reason is free-form. Both are optional but worth
-// populating on every write because the table can't be purged without
-// losing the decision trail.
-//
-// Cycle / self-loop rejection happens before any write so a refused
-// change never produces an SCD row.
+// SetDependencyWithAudit is a no-op stub. The tasks table has been retired.
 func (s *Store) SetDependencyWithAudit(id, dependsOn, changedBy, reason string) error {
-	// Resolve the full row so prefix inputs still work + we see the
-	// current status for the state transition.
-	var (
-		fullID, currentStatus string
-	)
-	if err := s.db.QueryRow(
-		`SELECT id, status FROM tasks WHERE id = ? AND deleted_at = ''`,
-		id).Scan(&fullID, &currentStatus); err != nil {
-		return err
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Clear-path: no dep. Writes an SCD row with depends_on=''
-	// so "dep cleared" is visible in the history stream.
-	if dependsOn == "" {
-		nextStatus := currentStatus
-		if currentStatus == string(StatusWaiting) {
-			nextStatus = string(StatusPending)
-		}
-		if err := s.writeSCDDepRow(fullID, "", now, changedBy, reason); err != nil {
-			return err
-		}
-		_, err := s.db.Exec(
-			`UPDATE tasks SET depends_on = '', block_reason = '', status = ?, updated_at = ? WHERE id = ?`,
-			nextStatus, now, fullID)
-		return err
-	}
-
-	// Resolve + validate the proposed parent.
-	var parentID, parentStatus string
-	if err := s.db.QueryRow(
-		`SELECT id, status FROM tasks WHERE id = ? AND deleted_at = ''`,
-		dependsOn).Scan(&parentID, &parentStatus); err != nil {
-		return err
-	}
-	if parentID == fullID {
-		return ErrTaskDepSelfLoop
-	}
-	if reaches, err := s.taskDepPathExists(parentID, fullID); err != nil {
-		return fmt.Errorf("cycle check: %w", err)
-	} else if reaches {
-		return fmt.Errorf("%w: %s → %s would close a cycle",
-			ErrTaskDepCycle, fullID, parentID)
-	}
-
-	nextStatus, blockReason := deriveDepState(currentStatus, parentStatus, parentID)
-
-	if err := s.writeSCDDepRow(fullID, parentID, now, changedBy, reason); err != nil {
-		return err
-	}
-	// When deriveDepState returns StatusScheduled (parent already
-	// completed), set next_run_at too — the scheduler's dequeue query
-	// requires next_run_at != ''. Bug #114: previously this UPDATE
-	// wrote only the status column, leaving the task armed-but-
-	// uncallable ("scheduled but never picked up").
-	nextRunAt := ""
-	if nextStatus == string(StatusScheduled) {
-		nextRunAt = now
-	}
-	_, err := s.db.Exec(
-		`UPDATE tasks SET depends_on = ?, status = ?, block_reason = ?, next_run_at = ?, updated_at = ? WHERE id = ?`,
-		parentID, nextStatus, blockReason, nextRunAt, now, fullID)
-	return err
+	return nil
 }
 
-// writeSCDDepRow lands a new dependency revision in the unified
-// relationships SCD-2 store. Direction: src=task (depender),
-// dst=parent (dependee).
-//
-//   - dependsOn=="" represents "dep cleared" — the prior current edge
-//     (if any) is closed via Remove and no new edge is opened.
-//   - dependsOn!="" closes any prior current edge for this task and
-//     opens a fresh one via Create. relationships.Create runs the
-//     close + insert in one transaction so audit history is intact.
-//
-// The legacy task_dependency table is no longer written to. The
-// migration already copied historical rows into relationships, and
-// every new revision lands here directly.
+// writeSCDDepRow writes a dependency revision using the unified
+// relationships SCD-2 store.
 func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string) error {
 	if s.rels == nil {
 		return fmt.Errorf("task_dependency: relationships backend not wired")
 	}
 	ctx := context.Background()
-	// Close any prior current edge for this task. We have to enumerate
-	// because relationships keys edges on (src, dst, kind, valid_from)
-	// not just src — a task can have at most one current parent dep at
-	// a time but the prior dep could have been a different parent.
 	prior, err := s.rels.ListOutgoing(ctx, taskID, relationships.EdgeDependsOn)
 	if err != nil {
 		return fmt.Errorf("read prior dep: %w", err)
@@ -592,7 +137,7 @@ func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string)
 		}
 	}
 	if dependsOn == "" {
-		return nil // clear path — no new edge opened
+		return nil
 	}
 	if err := s.rels.Create(ctx, relationships.Edge{
 		SrcKind:   relationships.KindTask,
@@ -609,36 +154,25 @@ func (s *Store) writeSCDDepRow(taskID, dependsOn, now, changedBy, reason string)
 }
 
 // DepHistoryEntry is one row of the SCD Type 2 task_dependency table.
-// Rows are the full history of the task's dep relationship in
-// chronological order. The current/active row has ValidTo == "".
 type DepHistoryEntry struct {
 	ID         int    `json:"id"`
 	TaskID     string `json:"task_id"`
-	DependsOn  string `json:"depends_on"` // empty = dep cleared in this revision
+	DependsOn  string `json:"depends_on"`
 	ValidFrom  string `json:"valid_from"`
-	ValidTo    string `json:"valid_to"`   // empty = currently active
+	ValidTo    string `json:"valid_to"`
 	ChangedBy  string `json:"changed_by"`
 	Reason     string `json:"reason"`
 }
 
-// ListDepHistory returns every dep revision for a task, newest
-// valid_from first. limit<=0 defaults to 50. Reads the unified
-// relationships table — all task→task EdgeDependsOn rows where
-// src_id = taskID, current + closed history together.
+// ListDepHistory returns every dep revision for a task from the unified
+// relationships table.
 func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if s.rels == nil {
-		// Legacy tests that don't wire the relationships backend get an
-		// empty history rather than an error so the dep-related test
-		// suite that doesn't assert history still runs cleanly.
 		return nil, nil
 	}
-	// Pull every revision (current + closed) ordered by valid_from DESC
-	// directly from the relationships table. The unified store doesn't
-	// expose a "history for src=any dst" reader, so we issue a custom
-	// query against the same DB handle.
 	rows, err := s.db.Query(
 		`SELECT src_id, dst_id, valid_from, valid_to, created_by, reason
 		 FROM relationships
@@ -661,141 +195,34 @@ func (s *Store) ListDepHistory(taskID string, limit int) ([]DepHistoryEntry, err
 	return out, rows.Err()
 }
 
-// BackfillTaskDepSCD seeds the unified relationships store from the
-// legacy tasks.depends_on cache column for tasks that have a parent
-// dep but no current relationships row yet. Idempotent — the Get
-// probe + composite PK keep re-runs at zero rows. Legacy rows land
-// with valid_from = the task's updated_at so the history doesn't all
-// collapse to "now".
-//
-// Called on store init; nil rels backend is treated as "skip" (test
-// stores that don't wire the relationships backend keep working).
+// BackfillTaskDepSCD is a no-op. The tasks table has been retired;
+// dependency history lives in the relationships table.
 func (s *Store) BackfillTaskDepSCD() (int, error) {
-	if s.rels == nil {
-		return 0, nil
-	}
-	ctx := context.Background()
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.depends_on, t.updated_at
-		FROM tasks t
-		WHERE t.depends_on != '' AND t.deleted_at = ''`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	type pair struct{ id, dep, when string }
-	var pending []pair
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.id, &p.dep, &p.when); err != nil {
-			return 0, err
-		}
-		pending = append(pending, p)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, p := range pending {
-		if p.id == p.dep {
-			continue
-		}
-		if _, found, err := s.rels.Get(ctx, p.id, p.dep, relationships.EdgeDependsOn); err != nil {
-			return n, err
-		} else if found {
-			continue
-		}
-		if err := s.rels.BackfillRow(ctx, relationships.Edge{
-			SrcKind:   relationships.KindTask,
-			SrcID:     p.id,
-			DstKind:   relationships.KindTask,
-			DstID:     p.dep,
-			Kind:      relationships.EdgeDependsOn,
-			ValidFrom: p.when,
-			ValidTo:   "",
-			CreatedBy: "scd-backfill",
-			Reason:    "seeded from legacy tasks.depends_on column",
-		}); err == nil {
-			n++
-		}
-	}
-	return n, nil
+	return 0, nil
 }
 
 // deriveDepState picks the status + block_reason for a task whose dep is
-// being set. Extracted so tests can exercise the classification without
-// touching the DB.
+// being set.
 func deriveDepState(currentStatus, parentStatus, parentID string) (string, string) {
-	// If the current status is Running or Paused we leave it alone —
-	// the task is mid-flight, changing its dep shouldn't derail it.
-	// block_reason stays whatever it was.
 	if currentStatus == string(StatusRunning) || currentStatus == string(StatusPaused) ||
 		currentStatus == string(StatusCompleted) || currentStatus == string(StatusFailed) ||
 		currentStatus == string(StatusCancelled) {
-		return currentStatus, "" // block_reason cleared; dep is recorded but status stays
+		return currentStatus, ""
 	}
 	if parentStatus == string(StatusCompleted) {
-		// Parent is already done — task is armed.
 		return string(StatusScheduled), ""
 	}
-	// Parent is in some non-terminal state — task parks in Waiting
-	// with a populated block_reason that the UI surfaces.
 	return string(StatusWaiting), fmt.Sprintf("task %s not completed (is %s)",
 		parentID, parentStatus)
 }
 
-// taskDepPathExists runs a bounded DFS from src following single-parent
-// depends_on edges. Returns true if dst is reachable. O(chain depth) in
-// a well-formed graph; visited set caps work if the data contains a
-// pre-existing cycle.
-func (s *Store) taskDepPathExists(src, dst string) (bool, error) {
-	visited := map[string]bool{}
-	cur := src
-	for cur != "" {
-		if cur == dst {
-			return true, nil
-		}
-		if visited[cur] {
-			return false, nil // pre-existing cycle — treat as no-reach
-		}
-		visited[cur] = true
-		var next string
-		err := s.db.QueryRow(
-			`SELECT depends_on FROM tasks WHERE id = ? AND deleted_at = ''`, cur).Scan(&next)
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		cur = next
-	}
-	return false, nil
-}
-
-// ActivateDependents finds tasks that depend on the given task ID and
-// schedules them. Historically the WHERE matched only status='waiting', but
-// the task create path sets initial status='pending' even when depends_on
-// is non-empty — so no dependent has ever auto-activated in production, and
-// the whole dependency chain had to be fired by hand. Accepting both
-// statuses fixes that without regressing any path that currently relies on
-// 'waiting' (which remains valid and is still flipped here). The
-// depends_on = ? filter guarantees we only touch direct children of the
-// completed task, so loosening the status predicate is safe.
+// ActivateDependents is a no-op stub. The tasks table has been retired.
 func (s *Store) ActivateDependents(completedTaskID string) (int, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', next_run_at = ?, updated_at = ?
-		WHERE depends_on = ? AND status IN ('waiting', 'pending') AND deleted_at = ''`, now, now, completedTaskID)
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	return 0, nil
 }
 
 // TaskDep is the denormalised row the dashboard renders for both
-// directions of /api/tasks/{id}/dependencies. Same {id, marker, title,
-// status} contract products + manifests use.
+// directions of /api/tasks/{id}/dependencies.
 type TaskDep struct {
 	ID     string `json:"id"`
 	Marker string `json:"marker"`
@@ -803,40 +230,14 @@ type TaskDep struct {
 	Status string `json:"status"`
 }
 
-// ListDependents returns every task whose `depends_on` is taskID.
-// Mirrors manifest.Store.ListDependents — used by the portal-v2
-// Dependencies tab when the operator clicks "in" direction. Marker is
-// the 12-char ID prefix per project convention.
+// ListDependents is a no-op stub. The tasks table has been retired.
 func (s *Store) ListDependents(ctx context.Context, taskID string) ([]TaskDep, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, status FROM tasks WHERE depends_on = ? AND deleted_at = ''
-		 ORDER BY created_at ASC`, taskID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []TaskDep{}
-	for rows.Next() {
-		var d TaskDep
-		if err := rows.Scan(&d.ID, &d.Title, &d.Status); err != nil {
-			return nil, err
-		}
-		if len(d.ID) >= 12 {
-			d.Marker = d.ID[:12]
-		}
-		out = append(out, d)
-	}
-	return out, rows.Err()
+	return nil, nil
 }
 
-// RequestAction writes a cross-process action signal on the task row.
-// The runner that owns the task's process (serve) polls this column and acts.
-// action must be one of: "pause", "resume", "cancel".
+// RequestAction is a no-op stub. The tasks table has been retired.
 func (s *Store) RequestAction(id, action string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET action_request = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		action, now, id, id+"%")
-	return err
+	return nil
 }
 
 // PendingActionRequest holds a task ID + requested action.
@@ -845,67 +246,33 @@ type PendingActionRequest struct {
 	Action string
 }
 
-// ListActionRequests returns all tasks with a non-empty action_request.
-// Used by the runner's watcher loop.
+// ListActionRequests is a no-op stub. The tasks table has been retired.
 func (s *Store) ListActionRequests() ([]PendingActionRequest, error) {
-	rows, err := s.db.Query(`SELECT id, action_request FROM tasks WHERE action_request != '' AND deleted_at = ''`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []PendingActionRequest
-	for rows.Next() {
-		var p PendingActionRequest
-		if err := rows.Scan(&p.TaskID, &p.Action); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, nil
+	return nil, nil
 }
 
-// ClearActionRequest clears the action_request field after the runner has acted.
+// ClearActionRequest is a no-op stub. The tasks table has been retired.
 func (s *Store) ClearActionRequest(id string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET action_request = '', updated_at = ? WHERE id = ?`, now, id)
-	return err
+	return nil
 }
 
-// PricingVersion stamps the pricing table identity used to compute cost_usd
-// for a task_runs row. Increment whenever internal/task/pricing.go's rate
-// table changes so the future Unified Cost Tracking product (019dab45-d8f)
-// can re-cost historical rows under the right table — or flag drift when
-// today's rates differ from when the row was originally written.
+// PricingVersion stamps the pricing table identity used to compute cost_usd.
 const PricingVersion = "v1-2026-04"
 
-// updateTaskRunStats updates the tasks row counters after a completed run.
-// Called by the runner goroutine immediately before writing to execution_log.
-// Does NOT write to task_runs — run history lives in execution_log.
-func (s *Store) updateTaskRunStats(id, output, status string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	s.db.Exec(`UPDATE tasks SET run_count = run_count + 1, last_run_at = ?, last_output = ?, status = ?, updated_at = ? WHERE id = ?`,
-		now, output, status, now, id)
-}
+// updateTaskRunStats is a no-op. The tasks table has been retired.
+func (s *Store) updateTaskRunStats(id, output, status string) {}
 
-// RecordRun is retained for backward-compatibility with external callers and
-// tests. It updates the tasks row only — run history is now written to
-// execution_log by the runner goroutine directly. Returns 0, nil.
+// RecordRun is a no-op stub retained for backward-compatibility.
 func (s *Store) RecordRun(id, output, status string, actions, lines int, costUSD float64, turns int, startedAt time.Time, usage Usage, model string) (int64, error) {
-	s.updateTaskRunStats(id, output, status)
 	return 0, nil
 }
 
-// RecordHostMetrics is a no-op. Host-metric samples are now written to
-// execution_log as EventSample rows by the runner goroutine directly.
+// RecordHostMetrics is a no-op.
 func (s *Store) RecordHostMetrics(runID int64, samples []HostMetricsSample, metrics HostMetrics) error {
 	return nil
 }
 
 // ListHostSamples returns the time-series host samples for a run.
-// Ordered by ts ASC so the frontend can render left-to-right directly.
-// Reads all 5 metrics captured at each sample: host CPU/RSS + live task
-// counters (cost/turns/actions) — they share the same time axis so the
-// Run Stats card can overlay all 5 sparklines aligned.
 func (s *Store) ListHostSamples(runID int64) ([]HostMetricsSample, error) {
 	rows, err := s.db.Query(
 		`SELECT ts, cpu_pct, rss_mb, cost_usd, turns, actions, disk_used_gb, disk_total_gb
@@ -978,14 +345,12 @@ func (s *Store) ListAllRuns(since time.Time, limit int) ([]TaskRun, error) {
 	return scanRuns(rows)
 }
 
-// LinkManifest creates a manifest→task EdgeOwns edge in the relationships
-// store. The legacy task_manifests table is no longer written to.
+// LinkManifest creates a manifest→task EdgeOwns edge in the relationships store.
 func (s *Store) LinkManifest(taskID, manifestID string) error {
 	if s.rels == nil {
 		return fmt.Errorf("link manifest: relationships backend not wired")
 	}
 	ctx := context.Background()
-	// Idempotent: check if the edge already exists before creating.
 	_, found, err := s.rels.Get(ctx, manifestID, taskID, relationships.EdgeOwns)
 	if err != nil {
 		return fmt.Errorf("link manifest: check existing edge: %w", err)
@@ -1004,8 +369,7 @@ func (s *Store) LinkManifest(taskID, manifestID string) error {
 	})
 }
 
-// UnlinkManifest removes the manifest→task EdgeOwns edge from the
-// relationships store. The legacy task_manifests table is no longer used.
+// UnlinkManifest removes the manifest→task EdgeOwns edge.
 func (s *Store) UnlinkManifest(taskID, manifestID string) error {
 	if s.rels == nil {
 		return fmt.Errorf("unlink manifest: relationships backend not wired")
@@ -1014,8 +378,7 @@ func (s *Store) UnlinkManifest(taskID, manifestID string) error {
 		relationships.EdgeOwns, "task.Store.UnlinkManifest", "task unlinked from manifest")
 }
 
-// ListLinkedManifests returns manifest IDs that own a task, resolved via
-// the relationships store. Replaces the legacy task_manifests JOIN.
+// ListLinkedManifests returns manifest IDs that own a task.
 func (s *Store) ListLinkedManifests(taskID string) ([]string, error) {
 	if s.rels == nil {
 		return nil, nil
@@ -1034,7 +397,7 @@ func (s *Store) ListLinkedManifests(taskID string) ([]string, error) {
 }
 
 // ListTasksByLinkedManifest returns tasks owned by a manifest via the
-// relationships store. Replaces the legacy task_manifests JOIN.
+// relationships store.
 func (s *Store) ListTasksByLinkedManifest(manifestID string, limit int) ([]*Task, error) {
 	return s.ListByManifest(manifestID, limit)
 }

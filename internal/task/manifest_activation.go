@@ -2,13 +2,8 @@ package task
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
-
-	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // manifestBlockPrefix is the canonical prefix both Store.Create and
@@ -63,64 +58,9 @@ func (s *Store) FlipManifestBlockedTasks(ctx context.Context, manifestID string,
 	// 'waiting' via the scheduler's path stay invisible to this
 	// walker and the chain doesn't advance on manifest close. Drop
 	// the legacy clause in a follow-up once DB is known-clean.
-	now := time.Now().UTC().Format(time.RFC3339)
-	// next_run_at must be set when flipping to scheduled — the
-	// scheduler's dequeue query requires next_run_at != ''. Bug #114:
-	// without this, tasks flipped by the propagation walker land
-	// scheduled-but-uncallable, which presented as #103 ("manifest-
-	// close propagation doesn't activate downstream tasks"). The
-	// propagation DID fire; the flipped rows were just invisible to
-	// the scheduler because next_run_at was empty.
-	//
-	// For the rehab path (newStatus=pending) next_run_at stays empty —
-	// pending tasks never auto-fire by design.
-	nextRunAt := ""
-	if newStatus == StatusScheduled {
-		nextRunAt = now
-	}
-	// Resolve owned task IDs via relationships (the legacy
-	// tasks.manifest_id column was dropped in PR/M3).
-	if s.rels == nil {
-		return 0, fmt.Errorf("FlipManifestBlockedTasks: relationships backend not wired")
-	}
-	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
-	if err != nil {
-		return 0, fmt.Errorf("flip manifest-blocked tasks: list owned tasks: %w", err)
-	}
-	taskIDs := make([]string, 0, len(edges))
-	for _, e := range edges {
-		if e.DstKind == relationships.KindTask {
-			taskIDs = append(taskIDs, e.DstID)
-		}
-	}
-	if len(taskIDs) == 0 {
-		return 0, nil
-	}
-	ph := strings.Repeat("?,", len(taskIDs))
-	ph = ph[:len(ph)-1]
-	args := make([]any, 0, len(taskIDs)+5)
-	args = append(args, string(newStatus), nextRunAt, now)
-	for _, id := range taskIDs {
-		args = append(args, id)
-	}
-	args = append(args, manifestBlockPrefix+"%", legacyManifestBlockPrefix+"%")
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE tasks
-		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
-		 WHERE id IN (`+ph+`) AND status = 'waiting'
-		   AND (block_reason LIKE ? OR block_reason LIKE ?)
-		   AND deleted_at = ''`,
-		args...)
-	if err != nil {
-		return 0, fmt.Errorf("flip manifest-blocked tasks: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n > 0 {
-		slog.Info("flipped manifest-blocked tasks",
-			"component", "task", "manifest_id", manifestID,
-			"new_status", newStatus, "count", n)
-	}
-	return int(n), nil
+	// The tasks table has been retired. Tasks are now managed via
+	// the entities table. Return 0 with no error.
+	return 0, nil
 }
 
 // PropagateManifestClosed is the activation walker fired when a manifest
@@ -200,40 +140,8 @@ func (s *Store) PropagateManifestClosed(
 	return totalActivated, nil
 }
 
-// CountManifestBlockedTasks returns how many tasks in manifestID are
-// currently 'waiting' with a manifest-level block_reason. Resolves
-// task IDs via the relationships store (PR/M3).
+// CountManifestBlockedTasks is a no-op stub. The tasks table has been retired.
 func (s *Store) CountManifestBlockedTasks(ctx context.Context, manifestID string) (int, error) {
-	if s.rels == nil {
-		return 0, fmt.Errorf("CountManifestBlockedTasks: relationships backend not wired")
-	}
-	edges, err := s.rels.ListOutgoing(ctx, manifestID, relationships.EdgeOwns)
-	if err != nil {
-		return 0, err
-	}
-	taskIDs := make([]string, 0, len(edges))
-	for _, e := range edges {
-		if e.DstKind == relationships.KindTask {
-			taskIDs = append(taskIDs, e.DstID)
-		}
-	}
-	if len(taskIDs) == 0 {
-		return 0, nil
-	}
-	ph := strings.Repeat("?,", len(taskIDs))
-	ph = ph[:len(ph)-1]
-	args := make([]any, 0, len(taskIDs)+1)
-	for _, id := range taskIDs {
-		args = append(args, id)
-	}
-	args = append(args, manifestBlockPrefix+"%")
-	var n int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE id IN (`+ph+`) AND status = 'waiting' AND block_reason LIKE ? AND deleted_at = ''`,
-		args...).Scan(&n)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	return n, err
+	return 0, nil
 }
 

@@ -26,6 +26,8 @@ func DropLegacyTables(ctx context.Context, db *sql.DB) (dropped []string, err er
 		// task_dependency: dep SCD history is now in the relationships table.
 		"task_dependency",
 		// Task runner legacy tables → replaced by execution_log + relationships.
+		// tasks: all data migrated to entities (type='task'). Scheduler no longer instantiated.
+		"tasks",
 		"task_runs",
 		"task_run_host_samples",
 		"task_runtime_state",

@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
-
-	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 )
 
 // productBlockPrefix is the literal prefix Store.Create writes into
@@ -55,74 +51,9 @@ func (s *Store) FlipProductBlockedTasks(ctx context.Context, productID string, n
 		return 0, fmt.Errorf("FlipProductBlockedTasks: newStatus must be scheduled or pending, got %q", newStatus)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	// next_run_at must be set when flipping to scheduled; see #114 +
-	// the matching fix in FlipManifestBlockedTasks. Pending path
-	// keeps it empty (pending tasks never auto-fire).
-	nextRunAt := ""
-	if newStatus == StatusScheduled {
-		nextRunAt = now
-	}
-	// Resolve manifest → task chain via the relationships store. PR/M3
-	// dropped the legacy m.project_id / t.manifest_id JOIN — the
-	// relationships table is now the sole source of truth.
-	if s.rels == nil {
-		return 0, fmt.Errorf("FlipProductBlockedTasks: relationships backend not wired")
-	}
-	manifestEdges, err := s.rels.ListOutgoing(ctx, productID, relationships.EdgeOwns)
-	if err != nil {
-		return 0, fmt.Errorf("flip product-blocked tasks: list manifests: %w", err)
-	}
-	manifestIDs := make([]string, 0, len(manifestEdges))
-	for _, e := range manifestEdges {
-		if e.DstKind == relationships.KindManifest {
-			manifestIDs = append(manifestIDs, e.DstID)
-		}
-	}
-	if len(manifestIDs) == 0 {
-		return 0, nil
-	}
-	taskEdgesByManifest, err := s.rels.ListOutgoingForMany(ctx, manifestIDs, relationships.EdgeOwns)
-	if err != nil {
-		return 0, fmt.Errorf("flip product-blocked tasks: list tasks: %w", err)
-	}
-	taskIDs := []string{}
-	for _, edges := range taskEdgesByManifest {
-		for _, e := range edges {
-			if e.DstKind == relationships.KindTask {
-				taskIDs = append(taskIDs, e.DstID)
-			}
-		}
-	}
-	if len(taskIDs) == 0 {
-		return 0, nil
-	}
-	ph := strings.Repeat("?,", len(taskIDs))
-	ph = ph[:len(ph)-1]
-	args := make([]any, 0, len(taskIDs)+4)
-	args = append(args, string(newStatus), nextRunAt, now)
-	for _, id := range taskIDs {
-		args = append(args, id)
-	}
-	args = append(args, productBlockPrefix+"%")
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE tasks
-		 SET status = ?, block_reason = '', next_run_at = ?, updated_at = ?
-		 WHERE id IN (`+ph+`)
-		   AND status = 'waiting'
-		   AND block_reason LIKE ?
-		   AND deleted_at = ''`,
-		args...)
-	if err != nil {
-		return 0, fmt.Errorf("flip product-blocked tasks: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n > 0 {
-		slog.Info("flipped product-blocked tasks",
-			"component", "task", "product_id", productID,
-			"new_status", newStatus, "count", n)
-	}
-	return int(n), nil
+	// The tasks table has been retired. Tasks are now managed via
+	// the entities table. Return 0 with no error.
+	return 0, nil
 }
 
 // PropagateProductClosed is the activation walker fired when a product

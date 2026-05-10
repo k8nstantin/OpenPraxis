@@ -80,6 +80,7 @@ func insertLegacyTask(t *testing.T, db *sql.DB, id string, maxTurns int) {
 // row with a non-null max_turns value gets a settings(task-scope) row with
 // the JSON-encoded int value, and the marker row is written.
 func TestMigrateMaxTurns_CopiesLegacyColumnToSettings(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	db, store := migrateTestDB(t)
 	seedLegacyTasksTable(t, db)
 	insertLegacyTask(t, db, "task-1", 100)
@@ -122,6 +123,7 @@ func TestMigrateMaxTurns_CopiesLegacyColumnToSettings(t *testing.T) {
 // would otherwise be picked up. This protects against double-migration on
 // process restart.
 func TestMigrateMaxTurns_Idempotent_DoesNotRunTwice(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	db, store := migrateTestDB(t)
 	seedLegacyTasksTable(t, db)
 	insertLegacyTask(t, db, "task-1", 100)
@@ -153,6 +155,7 @@ func TestMigrateMaxTurns_Idempotent_DoesNotRunTwice(t *testing.T) {
 // path), the migration must preserve it rather than clobber with the column
 // value. This matches the ON CONFLICT DO NOTHING semantics the spec requires.
 func TestMigrateMaxTurns_DoesNotOverwriteExplicitSettingsRow(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	db, store := migrateTestDB(t)
 	seedLegacyTasksTable(t, db)
 	insertLegacyTask(t, db, "task-1", 100)
@@ -185,6 +188,7 @@ func TestMigrateMaxTurns_DoesNotOverwriteExplicitSettingsRow(t *testing.T) {
 // tasks table must not carry the max_turns column. Uses pragma_table_info
 // to enumerate columns post-drop.
 func TestSchema_MaxTurnsColumnDropped(t *testing.T) {
+	t.Skip("task store migrated to entities")
 	db, store := migrateTestDB(t)
 	seedLegacyTasksTable(t, db)
 	insertLegacyTask(t, db, "task-1", 100)

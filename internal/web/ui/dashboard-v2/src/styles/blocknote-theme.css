@@ -34,10 +34,30 @@
 .bn-root .bn-editor {
   background-color: var(--card) !important;
   padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem !important;
+  line-height: 1.6 !important;
 }
 
 /* Match focus rings to shadcn --ring. */
 .bn-root [class*="mantine-"]:focus-visible,
 .bn-root [class*="mantine-"][data-focused="true"] {
   outline-color: var(--ring) !important;
+}
+
+/* Scale heading sizes down — BlockNote defaults are page-hero large,
+ * too big for the compact detail pane. */
+.bn-root .bn-editor [data-content-type="heading"][data-level="1"] {
+  font-size: 1.2rem !important;
+  line-height: 1.4 !important;
+  font-weight: 700 !important;
+}
+.bn-root .bn-editor [data-content-type="heading"][data-level="2"] {
+  font-size: 1.05rem !important;
+  line-height: 1.4 !important;
+  font-weight: 600 !important;
+}
+.bn-root .bn-editor [data-content-type="heading"][data-level="3"] {
+  font-size: 0.95rem !important;
+  line-height: 1.4 !important;
+  font-weight: 600 !important;
 }

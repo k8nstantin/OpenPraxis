@@ -1,50 +1,122 @@
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useEntityRuns, useLiveRuns, type EntityKind, type LiveRun } from '@/lib/queries/entity'
 import type { ExecutionRow } from '@/lib/types'
 import { TurnAnalyticsBlock } from '@/features/entity/turn-charts'
 import { Skeleton } from '@/components/ui/skeleton'
+import { CopyButton } from '@/components/copy-button'
 
 interface ActionRow {
   id: string; task_id: string; tool_name: string
   tool_input: string; tool_response: string; turn_number: number; created_at: string
 }
 
-// Live output: poll entity actions while run is active (every 3s), static otherwise.
-// run_uid scopes actions to the current run only — no historical bleed.
 function useEntityActions(entityId: string, runUid: string, isLive: boolean) {
   return useQuery({
     queryKey: ['entity-actions', entityId, runUid, isLive],
     queryFn: (): Promise<ActionRow[]> =>
-      fetch(`/api/entities/${entityId}/actions?limit=200&run_uid=${runUid}`).then(r => r.json()),
+      fetch(`/api/entities/${entityId}/actions?limit=500&run_uid=${runUid}`).then(r => r.json()),
     enabled: !!entityId,
-    refetchInterval: isLive ? 3000 : false,
+    refetchInterval: isLive ? 2000 : false,
     staleTime: isLive ? 0 : 60_000,
   })
 }
 
+function prettify(s: string) {
+  if (!s) return ''
+  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
+}
+
+function exportJSON(data: ActionRow[], runUid: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `run-${runUid.slice(0, 12)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
   const { data, isLoading } = useEntityActions(entityId, runUid, true)
-  if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading output…</div>
-  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs'>Waiting for agent to make tool calls…</div>
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+
+  // Auto-scroll to bottom when new rows arrive (unless user scrolled up).
+  // Use scrollTop directly — scrollIntoView scrolls the page, not the container.
+  useEffect(() => {
+    if (autoScroll && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    }
+  }, [data?.length, autoScroll])
+
+  const handleScroll = () => {
+    const el = containerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    setAutoScroll(atBottom)
+  }
+
+  if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading…</div>
+  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs animate-pulse'>Waiting for agent output…</div>
+
   return (
-    <div className='max-h-96 overflow-y-auto font-mono text-xs'>
-      {[...data].reverse().map((a) => (
-        <div key={a.id} className='border-b border-white/5 px-3 py-1.5'>
-          <div className='flex items-center gap-2'>
-            <span className='text-blue-400 font-medium'>{a.tool_name}</span>
-            {a.turn_number > 0 && <span className='text-muted-foreground text-[10px]'>turn {a.turn_number}</span>}
+    <div>
+      {/* Toolbar */}
+      <div className='flex items-center gap-2 px-3 py-1.5 border-b border-white/5 bg-white/2'>
+        <span className='text-[10px] text-muted-foreground'>{data.length} actions</span>
+        <div className='ml-auto flex items-center gap-1'>
+          <CopyButton text={JSON.stringify(data, null, 2)} className='text-[10px]' />
+          <button
+            type='button'
+            onClick={() => exportJSON(data, runUid)}
+            className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors'
+          >
+            ↓ export json
+          </button>
+        </div>
+      </div>
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className='max-h-[480px] overflow-y-auto font-mono text-xs scrollbar-thin'
+    >
+      {data.map((a) => (
+        <div key={a.id} className='border-b border-white/5 px-3 py-2 hover:bg-white/3'>
+          <div className='flex items-center gap-2 mb-1'>
+            <span className='text-blue-400 font-semibold'>{a.tool_name}</span>
+            {a.turn_number > 0 && (
+              <span className='bg-white/10 rounded px-1 text-[10px] text-muted-foreground'>turn {a.turn_number}</span>
+            )}
             <span className='text-muted-foreground ml-auto text-[10px]'>
               {new Date(Date.parse(a.created_at)).toLocaleTimeString()}
             </span>
+            <CopyButton text={JSON.stringify(a, null, 2)} />
           </div>
           {a.tool_input && (
-            <div className='text-muted-foreground mt-0.5 truncate text-[10px]'>
-              {a.tool_input.slice(0, 120)}
-            </div>
+            <pre className='text-muted-foreground whitespace-pre-wrap break-all text-[10px] max-h-40 overflow-y-auto rounded bg-white/5 px-2 py-1.5 mb-1'>
+              {prettify(a.tool_input)}
+            </pre>
+          )}
+          {a.tool_response && (
+            <pre className='text-emerald-400/80 whitespace-pre-wrap break-all text-[10px] max-h-40 overflow-y-auto rounded bg-emerald-500/5 px-2 py-1.5'>
+              {prettify(a.tool_response)}
+            </pre>
           )}
         </div>
       ))}
+      <div ref={bottomRef} />
+      {!autoScroll && (
+        <button
+          type='button'
+          onClick={() => { setAutoScroll(true); if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight }}
+          className='sticky bottom-2 ml-2 rounded bg-primary/80 px-2 py-1 text-[10px] text-primary-foreground hover:bg-primary'
+        >
+          ↓ scroll to latest
+        </button>
+      )}
+    </div>
     </div>
   )
 }
@@ -79,7 +151,12 @@ function RunRow({ run, entityId, selectedRunUid, onSelect, onSelectHistory }: {
           run.event === 'completed' ? 'text-emerald-400' :
           run.event === 'failed' ? 'text-rose-400' : 'text-amber-400'
         }>{run.event}</span></td>
-        <td className={`${tdCls} font-mono text-[10px] opacity-50`}>{run.run_uid.slice(0,12)}</td>
+        <td className={`${tdCls} font-mono text-[10px] opacity-50`}>
+          <span className='flex items-center gap-1'>
+            {run.run_uid.slice(0,12)}
+            <CopyButton text={run.run_uid} />
+          </span>
+        </td>
         <td className={tdCls}>{run.turns || '—'}</td>
         <td className={tdCls}>{run.actions || '—'}</td>
         <td className={tdCls}>{fmtCost(run.cost_usd)}</td>
@@ -166,7 +243,10 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
             <span className='font-bold text-emerald-400'>{liveRun.turns} turns</span>
             <span className='text-blue-400'>{liveRun.actions} actions</span>
             {liveRun.model && <span className='text-muted-foreground text-[10px]'>{liveRun.model}</span>}
-            <span className='text-muted-foreground ml-auto font-mono text-[10px]'>{liveRun.run_uid.slice(0,12)}</span>
+            <span className='text-muted-foreground ml-auto font-mono text-[10px] flex items-center gap-1'>
+              {liveRun.run_uid.slice(0,12)}
+              <CopyButton text={liveRun.run_uid} />
+            </span>
           </div>
           {/* Live output — polls actions every 3s */}
           <div className='border-t border-emerald-500/20'>

@@ -1,9 +1,8 @@
 import { Outlet } from '@tanstack/react-router'
-import { getCookie } from '@/lib/cookies'
-import { cn } from '@/lib/utils'
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarProvider } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { SkipToMain } from '@/components/skip-to-main'
 
@@ -12,29 +11,28 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
-  const defaultOpen = getCookie('sidebar_state') !== 'false'
   return (
     <SearchProvider>
       <LayoutProvider>
-        <SidebarProvider defaultOpen={defaultOpen}>
+        <SidebarProvider>
           <SkipToMain />
-          <AppSidebar />
-          <SidebarInset
-            className={cn(
-              // Set content container, so we can use container queries
-              '@container/content',
-
-              // If layout is fixed, set the height
-              // to 100svh to prevent overflow
-              'has-data-[layout=fixed]:h-svh',
-
-              // If layout is fixed and sidebar is inset,
-              // set the height to 100svh - spacing (total margins) to prevent overflow
-              'peer-data-[variant=inset]:has-data-[layout=fixed]:h-[calc(100svh-(var(--spacing)*4))]'
-            )}
-          >
-            {children ?? <Outlet />}
-          </SidebarInset>
+          <div className='flex h-svh w-full overflow-hidden bg-background'>
+            <PanelGroup direction='horizontal' autoSaveId='op-layout' className='h-full'>
+              <Panel defaultSize={18} minSize={12} maxSize={40} className='flex flex-col'>
+                <AppSidebar />
+              </Panel>
+              <PanelResizeHandle className='group bg-border hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary relative w-1 cursor-col-resize transition-colors'>
+                <div className='absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'>
+                  <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                  <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                  <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                </div>
+              </PanelResizeHandle>
+              <Panel className='flex flex-col overflow-hidden @container/content' data-layout='fixed'>
+                {children ?? <Outlet />}
+              </Panel>
+            </PanelGroup>
+          </div>
         </SidebarProvider>
       </LayoutProvider>
     </SearchProvider>
