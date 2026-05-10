@@ -35,22 +35,42 @@ func Seed(ctx context.Context, store *Store, peerID string) error {
 	return nil
 }
 
-// seedBucket inserts one row per Section for (scope, scopeID) unless any
-// row already exists in that bucket. Missing bodies/titles fall back to
-// the section name.
+// seedBucket inserts missing section rows for (scope, scopeID). It inserts
+// only sections that don't already have an active row — so adding a new
+// default section to defaults.go is picked up on the next server start
+// without duplicating existing rows.
 func seedBucket(ctx context.Context, store *Store, scope, scopeID string, bodies, titles map[string]string, peerID string) error {
 	if len(bodies) == 0 {
 		return nil
 	}
 
-	var count int
-	if err := store.DB().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM prompt_templates WHERE scope = ? AND scope_id = ?`,
+	// Collect sections that already exist so we can skip them.
+	rows, err := store.DB().QueryContext(ctx,
+		`SELECT section FROM prompt_templates WHERE scope = ? AND scope_id = ? AND valid_to = ''`,
 		scope, scopeID,
-	).Scan(&count); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("templates.Seed check (%s/%s): %w", scope, scopeID, err)
 	}
-	if count > 0 {
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var section string
+		if err := rows.Scan(&section); err == nil {
+			existing[section] = true
+		}
+	}
+	rows.Close()
+
+	// Filter bodies/titles to only the missing sections.
+	missingBodies := make(map[string]string)
+	missingTitles := make(map[string]string)
+	for section, body := range bodies {
+		if !existing[section] {
+			missingBodies[section] = body
+			missingTitles[section] = titles[section]
+		}
+	}
+	if len(missingBodies) == 0 {
 		return nil
 	}
 
@@ -62,7 +82,7 @@ func seedBucket(ctx context.Context, store *Store, scope, scopeID string, bodies
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := insertBucket(ctx, tx, scope, scopeID, bodies, titles, peerID, now); err != nil {
+	if err := insertBucket(ctx, tx, scope, scopeID, missingBodies, missingTitles, peerID, now); err != nil {
 		return err
 	}
 
