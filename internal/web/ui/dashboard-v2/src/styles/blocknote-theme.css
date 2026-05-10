@@ -34,6 +34,8 @@
 .bn-root .bn-editor {
   background-color: var(--card) !important;
   padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem !important;
+  line-height: 1.6 !important;
 }
 
 /* Match focus rings to shadcn --ring. */
