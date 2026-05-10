@@ -27,6 +27,16 @@ function prettify(s: string) {
   try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
 }
 
+function exportJSON(data: ActionRow[], runUid: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `run-${runUid.slice(0, 12)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
   const { data, isLoading } = useEntityActions(entityId, runUid, true)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -51,6 +61,21 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
   if (!data?.length) return <div className='text-muted-foreground p-3 text-xs animate-pulse'>Waiting for agent output…</div>
 
   return (
+    <div>
+      {/* Toolbar */}
+      <div className='flex items-center gap-2 px-3 py-1.5 border-b border-white/5 bg-white/2'>
+        <span className='text-[10px] text-muted-foreground'>{data.length} actions</span>
+        <div className='ml-auto flex items-center gap-1'>
+          <CopyButton text={JSON.stringify(data, null, 2)} className='text-[10px]' />
+          <button
+            type='button'
+            onClick={() => exportJSON(data, runUid)}
+            className='flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors'
+          >
+            ↓ export json
+          </button>
+        </div>
+      </div>
     <div
       ref={containerRef}
       onScroll={handleScroll}
@@ -90,6 +115,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
           ↓ scroll to latest
         </button>
       )}
+    </div>
     </div>
   )
 }
