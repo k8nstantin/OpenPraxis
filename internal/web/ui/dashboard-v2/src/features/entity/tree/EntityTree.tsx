@@ -173,7 +173,7 @@ export function EntityTree() {
             overscanCount={8}
             onSelect={onSelect}
             openByDefault={false}
-            initialOpenState={{ [GROUP_PAGES]: true }}
+            initialOpenState={{ [GROUP_ENTITIES]: true, [GROUP_PAGES]: true }}
             searchTerm={filter}
             searchMatch={(node, term) => {
               const t = term.toLowerCase()
