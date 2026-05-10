@@ -29,10 +29,6 @@ const (
 	treeStatusDraft     = entity.StatusDraft
 )
 
-// unlinkedBucketID is the synthetic id used for the "Unlinked Products"
-// container that holds products without an idea parent.
-const unlinkedBucketID = "unlinked"
-
 func apiEntityTree(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -78,35 +74,35 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 
 		allEdges, _ := n.Relationships.ListOutgoingForMany(ctx, allIDs, "")
-		type adjEdge struct{ dst, dstKind, kind string }
+		type adjEdge struct{ dst, kind string }
 		adj := make(map[string][]adjEdge)
+		// ownedByOwns tracks IDs that have a parent via owns — used to find roots.
+		ownedByOwns := make(map[string]bool)
 		for srcID, edges := range allEdges {
 			for _, e := range edges {
-				adj[srcID] = append(adj[srcID], adjEdge{e.DstID, e.DstKind, e.Kind})
+				adj[srcID] = append(adj[srcID], adjEdge{e.DstID, e.Kind})
+				if e.Kind == relationships.EdgeOwns {
+					ownedByOwns[e.DstID] = true
+				}
 			}
 		}
 
-		var buildTask func(string) *treeNode
-		var buildManifest func(string) *treeNode
-		var buildProduct func(string) *treeNode
-		var buildIdea func(string, map[string]bool) *treeNode
-
-		buildTask = func(id string) *treeNode {
-			e := entityByID[id]
-			if e == nil {
+		// Generic recursive builder — follows owns edges from the relationship table.
+		// No hardcoded kind hierarchy: whatever owns what is what the tree shows.
+		var buildNode func(id string, visited map[string]bool) *treeNode
+		buildNode = func(id string, visited map[string]bool) *treeNode {
+			if visited[id] {
 				return nil
 			}
-			return &treeNode{ID: e.EntityUID, Name: e.Title, Kind: entity.TypeTask, Status: e.Status}
-		}
-		buildManifest = func(id string) *treeNode {
+			visited[id] = true
 			e := entityByID[id]
 			if e == nil {
 				return nil
 			}
 			var children []*treeNode
 			for _, ed := range adj[id] {
-				if ed.kind == relationships.EdgeOwns && ed.dstKind == entity.TypeTask {
-					if cn := buildTask(ed.dst); cn != nil {
+				if ed.kind == relationships.EdgeOwns {
+					if cn := buildNode(ed.dst, visited); cn != nil {
 						children = append(children, cn)
 					}
 				}
@@ -116,89 +112,40 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			if len(children) > 0 {
 				st = deriveTreeStatus(children)
 			}
-			return &treeNode{ID: e.EntityUID, Name: e.Title, Kind: entity.TypeManifest, Status: st, Children: children}
-		}
-		buildProduct = func(id string) *treeNode {
-			e := entityByID[id]
-			if e == nil {
-				return nil
-			}
-			var children []*treeNode
-			for _, ed := range adj[id] {
-				if ed.kind == relationships.EdgeOwns && ed.dstKind == entity.TypeManifest {
-					if cn := buildManifest(ed.dst); cn != nil {
-						children = append(children, cn)
-					}
-				}
-			}
-			sort.Slice(children, func(i, j int) bool { return children[i].Name < children[j].Name })
-			st := e.Status
-			if len(children) > 0 {
-				st = deriveTreeStatus(children)
-			}
-			return &treeNode{ID: e.EntityUID, Name: e.Title, Kind: entity.TypeProduct, Status: st, Children: children}
-		}
-		buildIdea = func(id string, linked map[string]bool) *treeNode {
-			e := entityByID[id]
-			if e == nil {
-				return nil
-			}
-			var children []*treeNode
-			for _, ed := range adj[id] {
-				if ed.kind == relationships.EdgeLinksTo && ed.dstKind == entity.TypeProduct {
-					linked[ed.dst] = true
-					if cn := buildProduct(ed.dst); cn != nil {
-						children = append(children, cn)
-					}
-				}
-			}
-			sort.Slice(children, func(i, j int) bool { return children[i].Name < children[j].Name })
-			st := e.Status
-			if len(children) > 0 {
-				st = deriveTreeStatus(children)
-			}
-			nd := &treeNode{ID: e.EntityUID, Name: e.Title, Kind: entity.TypeIdea, Status: st}
+			nd := &treeNode{ID: e.EntityUID, Name: e.Title, Kind: e.Type, Status: st}
 			if len(children) > 0 {
 				nd.Children = children
 			}
 			return nd
 		}
 
+		// Skills: flat governance section — not part of the lifecycle hierarchy.
 		skills := make([]*treeNode, 0)
 		for _, s := range byKind[entity.TypeSkill] {
 			if s.Status != entity.StatusArchived {
-				skills = append(skills, &treeNode{ID: s.EntityUID, Name: s.Title, Kind: entity.TypeSkill, Status: s.Status})
+				skills = append(skills, &treeNode{ID: s.EntityUID, Name: s.Title, Kind: s.Type, Status: s.Status})
 			}
 		}
 		sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 
-		linked := make(map[string]bool)
+		// Lifecycle: all non-skill, non-archived root entities (not owned by anything).
+		// Children expand via owns edges — hierarchy is whatever the relationship table says.
 		lifecycle := make([]*treeNode, 0)
-		for _, i := range byKind[entity.TypeIdea] {
-			if nd := buildIdea(i.EntityUID, linked); nd != nil {
-				lifecycle = append(lifecycle, nd)
+		for _, items := range byKind {
+			for _, e := range items {
+				if e.Type == entity.TypeSkill || e.Status == entity.StatusArchived {
+					continue
+				}
+				if ownedByOwns[e.EntityUID] {
+					continue
+				}
+				if nd := buildNode(e.EntityUID, make(map[string]bool)); nd != nil {
+					lifecycle = append(lifecycle, nd)
+				}
 			}
 		}
 		sort.Slice(lifecycle, func(i, j int) bool { return lifecycle[i].Name < lifecycle[j].Name })
 
-		var unlinked []*treeNode
-		for _, p := range byKind[entity.TypeProduct] {
-			if !linked[p.EntityUID] && p.Status != entity.StatusArchived {
-				if nd := buildProduct(p.EntityUID); nd != nil {
-					unlinked = append(unlinked, nd)
-				}
-			}
-		}
-		sort.Slice(unlinked, func(i, j int) bool { return unlinked[i].Name < unlinked[j].Name })
-		if len(unlinked) > 0 {
-			lifecycle = append(lifecycle, &treeNode{
-				ID:       unlinkedBucketID,
-				Name:     "Unlinked Products",
-				Kind:     entity.TypeIdea,
-				Status:   deriveTreeStatus(unlinked),
-				Children: unlinked,
-			})
-		}
 		writeJSON(w, map[string]any{"skills": skills, "lifecycle": lifecycle})
 	}
 }
