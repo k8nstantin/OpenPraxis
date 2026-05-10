@@ -28,8 +28,10 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
                   <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
                 </div>
               </PanelResizeHandle>
-              <Panel className='flex flex-col overflow-y-auto @container/content'>
-                {children ?? <Outlet />}
+              <Panel className='flex flex-col min-h-0 @container/content'>
+                <div className='flex flex-col flex-1 min-h-0 overflow-y-auto'>
+                  {children ?? <Outlet />}
+                </div>
               </Panel>
             </PanelGroup>
           </div>
