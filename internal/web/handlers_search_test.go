@@ -12,13 +12,12 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/action"
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 // newSearchNode wires the store types exercised by the search handlers
-// (tasks, actions) over an isolated SQLite file.
+// (actions) over an isolated SQLite file.
 func newSearchNode(t *testing.T) *node.Node {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "search.db")
@@ -31,17 +30,12 @@ func newSearchNode(t *testing.T) *node.Node {
 		t.Fatalf("set WAL: %v", err)
 	}
 
-	tasks, err := task.NewStore(db)
-	if err != nil {
-		t.Fatalf("task.NewStore: %v", err)
-	}
 	actions, err := action.NewStore(db)
 	if err != nil {
 		t.Fatalf("action.NewStore: %v", err)
 	}
 	return &node.Node{
 		Config:  &config.Config{Node: config.NodeConfig{UUID: "test-peer-uuid"}},
-		Tasks:   tasks,
 		Actions: actions,
 	}
 }
@@ -55,45 +49,11 @@ func doGET(t *testing.T, h http.HandlerFunc, target string) *httptest.ResponseRe
 }
 
 func TestTasksSearch_KeywordAndID(t *testing.T) {
-	n := newSearchNode(t)
-	a, _ := n.Tasks.Create("", "alpha-task", "desc", "once", "claude-code", n.PeerID(), "test", "")
-	_, _ = n.Tasks.Create("", "beta-task", "desc", "once", "claude-code", n.PeerID(), "test", "")
-
-	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=alpha")
-	if rec.Code != 200 {
-		t.Fatalf("status %d body=%s", rec.Code, rec.Body.String())
-	}
-	var got []task.Task
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(got) != 1 || got[0].ID != a.ID {
-		t.Fatalf("keyword: want [%s], got %+v", a.ID, got)
-	}
-
-	// id-exact
-	rec = doGET(t, apiTasksSearch(n), "/api/tasks/search?q="+a.ID)
-	if rec.Code != 200 {
-		t.Fatalf("status %d", rec.Code)
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got) != 1 || got[0].ID != a.ID {
-		t.Fatalf("id-exact: want [%s], got %+v", a.ID, got)
-	}
+	t.Skip("task search migrated to entity search")
 }
 
 func TestTasksSearch_EmptyQuery(t *testing.T) {
-	n := newSearchNode(t)
-	_, _ = n.Tasks.Create("", "alpha", "", "once", "claude-code", n.PeerID(), "test", "")
-	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=")
-	if rec.Code != 200 {
-		t.Fatalf("status %d", rec.Code)
-	}
-	var got []task.Task
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got) != 0 {
-		t.Fatalf("empty q should yield empty, got %+v", got)
-	}
+	t.Skip("task search migrated to entity search")
 }
 
 func TestActionsSearch_Keyword(t *testing.T) {
@@ -136,14 +96,7 @@ func TestActionsSearch_Keyword(t *testing.T) {
 // can't distinguish those without guarding every caller.
 
 func TestTasksSearch_EmptyResultIsArrayNotNull(t *testing.T) {
-	n := newSearchNode(t)
-	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=zzz_no_such_task")
-	if rec.Code != 200 {
-		t.Fatalf("status %d", rec.Code)
-	}
-	if body := rec.Body.String(); body != "[]" && body != "[]\n" {
-		t.Fatalf("want `[]`, got %q", body)
-	}
+	t.Skip("task search migrated to entity search")
 }
 
 func TestActionsSearch_EmptyResultIsEnvelope(t *testing.T) {
@@ -171,29 +124,9 @@ func TestActionsSearch_EmptyResultIsEnvelope(t *testing.T) {
 	}
 }
 
-// TestTasksSearch_ShapeMatchesListEndpoint asserts that a successful task
-// search returns entities flat (no outer {task: ...} wrapper), so that the
-// frontend can render `r.id`/`r.title` directly.
+// TestTasksSearch_ShapeMatchesListEndpoint — task search migrated to entity search.
 func TestTasksSearch_ShapeMatchesListEndpoint(t *testing.T) {
-	n := newSearchNode(t)
-	a, _ := n.Tasks.Create("", "shape-alpha", "desc", "once", "claude-code", n.PeerID(), "test", "")
-	rec := doGET(t, apiTasksSearch(n), "/api/tasks/search?q=shape-alpha")
-	if rec.Code != 200 {
-		t.Fatalf("status %d", rec.Code)
-	}
-	var raw []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
-		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
-	}
-	if len(raw) != 1 {
-		t.Fatalf("want 1 result, got %d", len(raw))
-	}
-	if _, wrapped := raw[0]["task"]; wrapped {
-		t.Fatalf("search result is wrapped under 'task' key; want flat: %+v", raw[0])
-	}
-	if id, _ := raw[0]["id"].(string); id != a.ID {
-		t.Fatalf("want id=%s, got %+v", a.ID, raw[0])
-	}
+	t.Skip("task search migrated to entity search")
 }
 
 func TestParseSearchParams_LimitAndAlias(t *testing.T) {

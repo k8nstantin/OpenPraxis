@@ -120,6 +120,7 @@ func decodeList(t *testing.T, body []byte) []commentView {
 // ---- POST -------------------------------------------------------------------
 
 func TestPOST_AddComment_ProductScope(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "alice",
@@ -143,6 +144,7 @@ func TestPOST_AddComment_ProductScope(t *testing.T) {
 }
 
 func TestPOST_AddComment_ManifestScope(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/manifests/m1/comments", addCommentRequest{
 		Author: "bob", Type: string(comments.TypeDecision), Body: "chose plan X",
@@ -157,6 +159,7 @@ func TestPOST_AddComment_ManifestScope(t *testing.T) {
 }
 
 func TestPOST_AddComment_TaskScope(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/tasks/t1/comments", addCommentRequest{
 		Author: "carol", Type: string(comments.TypeExecutionReview), Body: "ran fine",
@@ -171,6 +174,7 @@ func TestPOST_AddComment_TaskScope(t *testing.T) {
 }
 
 func TestPOST_RejectsEmptyBody(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "alice", Type: string(comments.TypeUserNote), Body: "   ",
@@ -184,6 +188,7 @@ func TestPOST_RejectsEmptyBody(t *testing.T) {
 }
 
 func TestPOST_RejectsUnknownType(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "alice", Type: "not_a_type", Body: "hi",
@@ -197,6 +202,7 @@ func TestPOST_RejectsUnknownType(t *testing.T) {
 }
 
 func TestPOST_RejectsEmptyAuthor(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "", Type: string(comments.TypeUserNote), Body: "hi",
@@ -212,6 +218,7 @@ func TestPOST_RejectsEmptyAuthor(t *testing.T) {
 // ---- GET --------------------------------------------------------------------
 
 func TestGET_ListComments_NewestFirst(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	// Insert three comments directly; store assigns UUID v7 ids (monotonic).
 	for i, body := range []string{"first", "second", "third"} {
@@ -235,6 +242,7 @@ func TestGET_ListComments_NewestFirst(t *testing.T) {
 }
 
 func TestGET_ListComments_TypeFilter(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	_, _ = env.store.Add(t.Context(), comments.TargetProduct, "p1", "a",
 		comments.TypeUserNote, "u1")
@@ -251,6 +259,7 @@ func TestGET_ListComments_TypeFilter(t *testing.T) {
 }
 
 func TestGET_ListComments_LimitAndCap(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	for i := 0; i < 5; i++ {
 		_, _ = env.store.Add(t.Context(), comments.TargetProduct, "p1", "a",
@@ -275,6 +284,7 @@ func TestGET_ListComments_LimitAndCap(t *testing.T) {
 }
 
 func TestGET_ListComments_InvalidLimit(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "GET", "/api/products/p1/comments?limit=abc", nil)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -283,6 +293,7 @@ func TestGET_ListComments_InvalidLimit(t *testing.T) {
 }
 
 func TestGET_ListComments_InvalidType(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "GET", "/api/products/p1/comments?type=foo", nil)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -294,6 +305,7 @@ func TestGET_ListComments_InvalidType(t *testing.T) {
 }
 
 func TestGET_ListComments_ScopeIsolation(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	_, _ = env.store.Add(t.Context(), comments.TargetProduct, "X", "a",
 		comments.TypeUserNote, "product-X")
@@ -370,6 +382,7 @@ func TestDELETE_Idempotent(t *testing.T) {
 // ---- body size --------------------------------------------------------------
 
 func TestPOST_BodyTooLarge(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	huge := strings.Repeat("a", commentMaxBodyBytes+1024)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments",
@@ -385,6 +398,7 @@ func TestPOST_BodyTooLarge(t *testing.T) {
 // ---- body_html (M3-T6) ------------------------------------------------------
 
 func TestPOST_Comment_BodyHTMLParagraph(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "alice", Type: string(comments.TypeUserNote), Body: "hello **world**",
@@ -399,6 +413,7 @@ func TestPOST_Comment_BodyHTMLParagraph(t *testing.T) {
 }
 
 func TestPOST_Comment_BodyHTMLCodeBlock(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	src := "```\nfmt.Println(\"hi\")\n```"
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
@@ -414,6 +429,7 @@ func TestPOST_Comment_BodyHTMLCodeBlock(t *testing.T) {
 }
 
 func TestPOST_Comment_BodyHTMLGFMTable(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	src := "| a | b |\n| - | - |\n| 1 | 2 |"
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
@@ -435,6 +451,7 @@ func TestPOST_Comment_BodyHTMLGFMTable(t *testing.T) {
 // sanitizer designed in DV/M5's manifest comes back and a new test
 // asserts the strip behavior under the appropriate trust level.
 func TestPOST_Comment_RawHTMLPassesThrough(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "a", Type: string(comments.TypeUserNote),
@@ -455,6 +472,7 @@ func TestPOST_Comment_RawHTMLPassesThrough(t *testing.T) {
 // appear in prose (outside an HTML-looking tag), goldmark escapes them so
 // the UI renders them as text rather than HTML.
 func TestPOST_Comment_EscapedAngleBrackets(t *testing.T) {
+	t.Skip("per-entity-type comment routes removed; use /api/entities/{id}/comments")
 	env := newCommentsTestEnv(t)
 	resp, body := env.do(t, "POST", "/api/products/p1/comments", addCommentRequest{
 		Author: "a", Type: string(comments.TypeUserNote),
@@ -501,16 +519,12 @@ func TestRoutes_AllCommentEndpointsRegistered(t *testing.T) {
 	api := r.PathPrefix("/api").Subrouter()
 	registerCommentsRoutes(api, nil, nil)
 
+	// Per-entity-type routes (/products/{id}/comments etc.) were removed when
+	// comments were unified under /api/entities/{id}/comments (commit 765325f).
 	want := map[string]string{
-		"GET /api/products/{id}/comments":   "",
-		"POST /api/products/{id}/comments":  "",
-		"GET /api/manifests/{id}/comments":  "",
-		"POST /api/manifests/{id}/comments": "",
-		"GET /api/tasks/{id}/comments":      "",
-		"POST /api/tasks/{id}/comments":     "",
-		"PATCH /api/comments/{id}":          "",
-		"DELETE /api/comments/{id}":         "",
-		"GET /api/comments/types":           "",
+		"PATCH /api/comments/{id}":  "",
+		"DELETE /api/comments/{id}": "",
+		"GET /api/comments/types":   "",
 	}
 	if err := r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		pathTmpl, err := route.GetPathTemplate()

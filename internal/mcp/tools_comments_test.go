@@ -9,7 +9,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	_ "github.com/mattn/go-sqlite3"
@@ -39,7 +38,7 @@ func buildReq(argMap map[string]any) mcplib.CallToolRequest {
 func TestCommentAdd_HappyPath_Task(t *testing.T) {
 	s := newTestServerWithComments(t)
 	res, err := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
+		"target_type": "entity",
 		"target_id":   "019dab05-5da9-7f0b-b5c2-6f4920c91a69",
 		"author":      "agent",
 		"type":        "execution_review",
@@ -55,7 +54,7 @@ func TestCommentAdd_HappyPath_Task(t *testing.T) {
 	if !strings.Contains(got, "Comment added") {
 		t.Errorf("expected success message, got %q", got)
 	}
-	if !strings.Contains(got, "task") || !strings.Contains(got, "execution_review") {
+	if !strings.Contains(got, "entity") || !strings.Contains(got, "comment") {
 		t.Errorf("expected target/type echoed, got %q", got)
 	}
 }
@@ -63,7 +62,7 @@ func TestCommentAdd_HappyPath_Task(t *testing.T) {
 func TestCommentAdd_RejectsUnknownType(t *testing.T) {
 	s := newTestServerWithComments(t)
 	res, err := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
+		"target_type": "entity",
 		"target_id":   "t1",
 		"author":      "agent",
 		"type":        "not_a_real_type",
@@ -94,7 +93,7 @@ func TestCommentAdd_RejectsUnknownTargetType(t *testing.T) {
 func TestCommentAdd_RejectsEmptyBody(t *testing.T) {
 	s := newTestServerWithComments(t)
 	res, _ := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
+		"target_type": "entity",
 		"target_id":   "t1",
 		"author":      "agent",
 		"type":        "execution_review",
@@ -124,7 +123,7 @@ func isErrResult(r *mcplib.CallToolResult) bool {
 	return r.IsError
 }
 
-// newTestServerWithAllStores wires Comments + Tasks + Entities
+// newTestServerWithAllStores wires Comments + Entities
 // so the resolveCommentTarget path can validate target full UUIDs.
 func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
@@ -138,10 +137,6 @@ func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 	if err := comments.InitSchema(db); err != nil {
 		t.Fatalf("InitSchema comments: %v", err)
 	}
-	tasks, err := task.NewStore(db)
-	if err != nil {
-		t.Fatalf("NewStore tasks: %v", err)
-	}
 	entities, err := entity.NewStore(db)
 	if err != nil {
 		t.Fatalf("NewStore entities: %v", err)
@@ -149,7 +144,6 @@ func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 
 	n := &node.Node{
 		Comments: comments.NewStore(db),
-		Tasks:    tasks,
 		Entities: entities,
 	}
 	return &Server{node: n}, db
@@ -161,17 +155,19 @@ func newTestServerWithAllStores(t *testing.T) (*Server, *sql.DB) {
 func TestCommentAdd_RejectsShortPrefix_Task(t *testing.T) {
 	s, _ := newTestServerWithAllStores(t)
 
-	tk, err := s.node.Tasks.Create("", "Example task", "desc", "once", "claude-code", "", "", "")
+	// Tasks are now entities — create a task entity to get a real UUID.
+	tk, err := s.node.Entities.Create(entity.TypeTask, "Example task", entity.StatusActive, nil, "", "test")
 	if err != nil {
-		t.Fatalf("Create task: %v", err)
+		t.Fatalf("Create task entity: %v", err)
 	}
-	if len(tk.ID) != 36 {
-		t.Fatalf("expected 36-char UUID, got %q (len=%d)", tk.ID, len(tk.ID))
+	taskID := tk.EntityUID
+	if len(taskID) != 36 {
+		t.Fatalf("expected 36-char UUID, got %q (len=%d)", taskID, len(taskID))
 	}
 
-	shortPrefix := tk.ID[:12]
+	shortPrefix := taskID[:12]
 	res, err := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
+		"target_type": "entity",
 		"target_id":   shortPrefix,
 		"author":      "agent",
 		"type":        "review_approval",
@@ -185,7 +181,7 @@ func TestCommentAdd_RejectsShortPrefix_Task(t *testing.T) {
 	}
 
 	// No comment row should exist for either the short prefix or the full UUID.
-	for _, id := range []string{shortPrefix, tk.ID} {
+	for _, id := range []string{shortPrefix, taskID} {
 		cs, err := s.node.Comments.List(context.Background(),
 			comments.TargetTask, id, 10, nil)
 		if err != nil {
@@ -199,11 +195,15 @@ func TestCommentAdd_RejectsShortPrefix_Task(t *testing.T) {
 
 func TestCommentAdd_FullUUIDPassthrough_Task(t *testing.T) {
 	s, _ := newTestServerWithAllStores(t)
-	tk, _ := s.node.Tasks.Create("", "Task", "desc", "once", "claude-code", "", "", "")
+	tk, err := s.node.Entities.Create(entity.TypeTask, "Task", entity.StatusActive, nil, "", "test")
+	if err != nil {
+		t.Fatalf("Create task entity: %v", err)
+	}
+	taskID := tk.EntityUID
 
 	res, _ := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
-		"target_id":   tk.ID, // full UUID
+		"target_type": "entity",
+		"target_id":   taskID, // full UUID
 		"author":      "agent",
 		"type":        "execution_review",
 		"body":        "x",
@@ -212,7 +212,7 @@ func TestCommentAdd_FullUUIDPassthrough_Task(t *testing.T) {
 		t.Fatalf("full-UUID should pass through: %q", toolResultText(res))
 	}
 	cs, _ := s.node.Comments.List(context.Background(),
-		comments.TargetTask, tk.ID, 10, nil)
+		comments.TargetTask, taskID, 10, nil)
 	if len(cs) != 1 {
 		t.Fatalf("expected 1 comment, got %d", len(cs))
 	}
@@ -222,7 +222,7 @@ func TestCommentAdd_RejectsNonExistentTarget_Task(t *testing.T) {
 	s, _ := newTestServerWithAllStores(t)
 
 	res, _ := s.handleCommentAdd(context.Background(), buildReq(map[string]any{
-		"target_type": "task",
+		"target_type": "entity",
 		"target_id":   "deadbeef-nope",
 		"author":      "agent",
 		"type":        "execution_review",

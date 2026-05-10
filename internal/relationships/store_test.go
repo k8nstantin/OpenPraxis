@@ -311,7 +311,7 @@ func TestListOutgoing_FiltersByEdgeKind(t *testing.T) {
 	ctx := context.Background()
 
 	mustCreate(t, s, "M1", "M2", EdgeDependsOn)
-	mustCreate(t, s, "M1", "T1", EdgeLinksTo, func(e *Edge) {
+	mustCreate(t, s, "M1", "T1", EdgeOwns, func(e *Edge) {
 		e.DstKind = KindTask
 	})
 	mustCreate(t, s, "M1", "M3", EdgeDependsOn)
@@ -322,9 +322,9 @@ func TestListOutgoing_FiltersByEdgeKind(t *testing.T) {
 		t.Errorf("expected 2 depends_on edges, got %d", len(deps))
 	}
 
-	links, _ := s.ListOutgoing(ctx, "M1", EdgeLinksTo)
-	if len(links) != 1 {
-		t.Errorf("expected 1 links_to edge, got %d", len(links))
+	owns, _ := s.ListOutgoing(ctx, "M1", EdgeOwns)
+	if len(owns) != 1 {
+		t.Errorf("expected 1 owns edge, got %d", len(owns))
 	}
 
 	// Empty kind = all
@@ -1230,7 +1230,7 @@ func TestListOutgoingForMany_AllKindsWhenFilterEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	mustCreate(t, s, "A", "B", EdgeDependsOn)
-	mustCreate(t, s, "A", "C", EdgeLinksTo, func(e *Edge) {
+	mustCreate(t, s, "A", "C", EdgeOwns, func(e *Edge) {
 		e.SrcKind = KindManifest
 		e.DstKind = KindTask
 	})
@@ -1240,7 +1240,7 @@ func TestListOutgoingForMany_AllKindsWhenFilterEmpty(t *testing.T) {
 		t.Fatalf("ListOutgoingForMany: %v", err)
 	}
 	if len(got["A"]) != 2 {
-		t.Errorf("expected 2 edges (depends_on + links_to) for A with empty filter, got %d", len(got["A"]))
+		t.Errorf("expected 2 edges (depends_on + owns) for A with empty filter, got %d", len(got["A"]))
 	}
 }
 

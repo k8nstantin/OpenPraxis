@@ -10,7 +10,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/task"
 
 	"github.com/gorilla/mux"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,16 +19,18 @@ import (
 // /api/tasks/<short-prefix>/comments must 404 rather than silently writing
 // a comment row keyed on a non-canonical id.
 func TestAddComment_RejectsShortPrefix_Task(t *testing.T) {
-	n, tasks, commentsStore := setupResolveTestNode(t)
+	n, commentsStore := setupResolveTestNode(t)
 
-	tk, err := tasks.Create("", "Example task", "desc", "once", "claude-code", "", "", "")
+	// Tasks are now entities — create a task entity to get a real UUID.
+	tk, err := n.Entities.Create(entity.TypeTask, "Example task", entity.StatusActive, nil, "", "test")
 	if err != nil {
-		t.Fatalf("Create task: %v", err)
+		t.Fatalf("Create task entity: %v", err)
 	}
-	if len(tk.ID) != 36 {
-		t.Fatalf("expected 36-char UUID, got %q", tk.ID)
+	taskID := tk.EntityUID
+	if len(taskID) != 36 {
+		t.Fatalf("expected 36-char UUID, got %q", taskID)
 	}
-	shortPrefix := tk.ID[:12]
+	shortPrefix := taskID[:12]
 
 	api := mux.NewRouter().PathPrefix("/api").Subrouter()
 	registerCommentsRoutesFromNode(api, n)
@@ -44,7 +45,7 @@ func TestAddComment_RejectsShortPrefix_Task(t *testing.T) {
 		t.Fatalf("expected 404 for short-prefix target, got status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	for _, id := range []string{shortPrefix, tk.ID} {
+	for _, id := range []string{shortPrefix, taskID} {
 		cs, err := commentsStore.List(req.Context(), comments.TargetTask, id, 10, nil)
 		if err != nil {
 			t.Fatalf("List %q: %v", id, err)
@@ -56,10 +57,15 @@ func TestAddComment_RejectsShortPrefix_Task(t *testing.T) {
 }
 
 func TestListComments_RejectsShortPrefix_Task(t *testing.T) {
-	n, tasks, commentsStore := setupResolveTestNode(t)
-	tk, _ := tasks.Create("", "Example", "desc", "once", "claude-code", "", "", "")
+	n, commentsStore := setupResolveTestNode(t)
 
-	if _, err := commentsStore.Add(t.Context(), comments.TargetTask, tk.ID, "operator",
+	tk, err := n.Entities.Create(entity.TypeTask, "Example", entity.StatusActive, nil, "", "test")
+	if err != nil {
+		t.Fatalf("Create task entity: %v", err)
+	}
+	taskID := tk.EntityUID
+
+	if _, err := commentsStore.Add(t.Context(), comments.TargetTask, taskID, "operator",
 		comments.TypeUserNote, "seeded"); err != nil {
 		t.Fatalf("seed comment: %v", err)
 	}
@@ -67,7 +73,7 @@ func TestListComments_RejectsShortPrefix_Task(t *testing.T) {
 	api := mux.NewRouter().PathPrefix("/api").Subrouter()
 	registerCommentsRoutesFromNode(api, n)
 
-	req := httptest.NewRequest("GET", "/api/tasks/"+tk.ID[:8]+"/comments", nil)
+	req := httptest.NewRequest("GET", "/api/tasks/"+taskID[:8]+"/comments", nil)
 	rec := httptest.NewRecorder()
 	api.ServeHTTP(rec, req)
 
@@ -77,7 +83,7 @@ func TestListComments_RejectsShortPrefix_Task(t *testing.T) {
 }
 
 func TestAddComment_RejectsNonExistentTarget_Task(t *testing.T) {
-	n, _, _ := setupResolveTestNode(t)
+	n, _ := setupResolveTestNode(t)
 	api := mux.NewRouter().PathPrefix("/api").Subrouter()
 	registerCommentsRoutesFromNode(api, n)
 
@@ -92,7 +98,7 @@ func TestAddComment_RejectsNonExistentTarget_Task(t *testing.T) {
 	}
 }
 
-func setupResolveTestNode(t *testing.T) (*node.Node, *task.Store, *comments.Store) {
+func setupResolveTestNode(t *testing.T) (*node.Node, *comments.Store) {
 	t.Helper()
 	dsn := "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
 	db, err := sql.Open("sqlite3", dsn)
@@ -104,10 +110,6 @@ func setupResolveTestNode(t *testing.T) (*node.Node, *task.Store, *comments.Stor
 	if err := comments.InitSchema(db); err != nil {
 		t.Fatalf("InitSchema comments: %v", err)
 	}
-	tasks, err := task.NewStore(db)
-	if err != nil {
-		t.Fatalf("NewStore tasks: %v", err)
-	}
 	entities, err := entity.NewStore(db)
 	if err != nil {
 		t.Fatalf("NewStore entities: %v", err)
@@ -116,7 +118,6 @@ func setupResolveTestNode(t *testing.T) (*node.Node, *task.Store, *comments.Stor
 
 	return &node.Node{
 		Comments: cs,
-		Tasks:    tasks,
 		Entities: entities,
-	}, tasks, cs
+	}, cs
 }
