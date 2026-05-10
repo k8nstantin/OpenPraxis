@@ -10,7 +10,8 @@
  
  */
 import { useRef, useState } from 'react'
-import { Pencil, ChevronDown, ChevronUp } from 'lucide-react'
+import { Pencil, ChevronDown, ChevronUp, Code2, Eye } from 'lucide-react'
+import { CopyButton } from '@/components/copy-button'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -39,6 +40,7 @@ export function ContentBlock({ entityId, kind, label = 'Prompt', placeholder }: 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [viewSource, setViewSource] = useState(false)
   const composerRef = useRef<BlockNoteComposerHandle>(null)
   const qc = useQueryClient()
 
@@ -92,18 +94,35 @@ export function ContentBlock({ entityId, kind, label = 'Prompt', placeholder }: 
         <Skeleton className='h-20 w-full' />
       ) : latest ? (
         <div className='rounded-lg border bg-card'>
-          <div className='flex items-center justify-between px-4 py-2 border-b'>
+          <div className='flex items-center gap-2 px-4 py-2 border-b'>
             <span className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>{label}</span>
             {!editing && (
-              <Button variant='ghost' size='sm' className='h-7 px-2 text-xs' onClick={startEdit}>
-                <Pencil className='mr-1 h-3 w-3' />Edit
-              </Button>
+              <>
+                <button type='button'
+                  onClick={() => setViewSource(false)}
+                  className={`ml-2 text-[11px] px-2 py-0.5 rounded transition-colors ${!viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Eye className='inline h-3 w-3 mr-1' />Rendered
+                </button>
+                <button type='button'
+                  onClick={() => setViewSource(true)}
+                  className={`text-[11px] px-2 py-0.5 rounded transition-colors ${viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Code2 className='inline h-3 w-3 mr-1' />Source
+                </button>
+                <CopyButton text={latest.body ?? ''} className='ml-1' />
+                <Button variant='ghost' size='sm' className='h-7 px-2 text-xs ml-auto' onClick={startEdit}>
+                  <Pencil className='mr-1 h-3 w-3' />Edit
+                </Button>
+              </>
             )}
           </div>
           {!editing && (
             <>
               <div className='px-4 py-3'>
-                <BlockNoteReadView markdown={latest.body ?? ''} />
+                {viewSource ? (
+                  <pre className='whitespace-pre-wrap text-xs font-mono text-muted-foreground'>{latest.body ?? ''}</pre>
+                ) : (
+                  <BlockNoteReadView markdown={latest.body ?? ''} />
+                )}
               </div>
               <div className='px-4 pb-3'>
                 <CommentAttachments commentId={latest.id} />

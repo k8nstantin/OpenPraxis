@@ -27,6 +27,30 @@ import {
 } from '@/components/blocknote-composer'
 import { BlockNoteReadView } from '@/components/blocknote-read-view'
 import { claimAttachment } from '@/lib/queries/attachments'
+import { CopyButton } from '@/components/copy-button'
+
+// Per-comment rendered/source toggle
+function CommentBody({ body }: { body: string }) {
+  const [src, setSrc] = useState(false)
+  return (
+    <div>
+      <div className='flex gap-2 mb-1'>
+        <button type='button' onClick={() => setSrc(false)}
+          className={`text-[10px] px-1.5 py-0.5 rounded ${!src ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+          Rendered
+        </button>
+        <button type='button' onClick={() => setSrc(true)}
+          className={`text-[10px] px-1.5 py-0.5 rounded ${src ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+          Source
+        </button>
+      </div>
+      {src
+        ? <pre className='whitespace-pre-wrap text-xs font-mono text-muted-foreground'>{body}</pre>
+        : <BlockNoteReadView markdown={body} />
+      }
+    </div>
+  )
+}
 
 const TYPE_LABEL: Record<string, string> = {
   prompt:  'Prompt',
@@ -218,10 +242,13 @@ export function CommentsTab({ kind, entityId }: { kind: EntityKind; entityId: st
                         {TYPE_LABEL[c.type] ?? c.type}
                       </Badge>
                     </div>
-                    <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
+                    <div className='flex items-center gap-1'>
+                      <span className='text-muted-foreground text-xs'>{fmtTime(c.created_at)}</span>
+                      <CopyButton text={c.body ?? ''} />
+                    </div>
                   </div>
 
-                  <BlockNoteReadView markdown={c.body ?? ''} />
+                  <CommentBody body={c.body ?? ''} />
                   <CommentAttachments commentId={c.id} />
                 </div>
               ))}
