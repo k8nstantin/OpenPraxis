@@ -1158,7 +1158,16 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 				shouldPush = finalStatus == execution.EventCompleted
 			}
 			if shouldPush && workDir != "" && knobs.BranchRemote != "" {
-				branchName := knobs.BranchPrefix + "/" + t.ID
+				// Use the actual checked-out branch name from git — most reliable for all
+				// branch strategies (task/manifest/product). The agent may have checked out
+				// a manifest-derived shared branch; knobs.Branch is only populated for
+				// strategy=task so we can't rely on it here.
+				branchName, _ := runGit(workDir, "rev-parse", "--abbrev-ref", "HEAD")
+				branchName = strings.TrimSpace(branchName)
+				if branchName == "" || branchName == "HEAD" {
+					// Detached HEAD or error — fall back to task-strategy name
+					branchName = knobs.BranchPrefix + "/" + t.ID
+				}
 				out, pushErr := runGit(workDir, "push", "--set-upstream", knobs.BranchRemote, branchName)
 				if pushErr != nil {
 					slog.Warn("auto-push failed — branch may be local only",
