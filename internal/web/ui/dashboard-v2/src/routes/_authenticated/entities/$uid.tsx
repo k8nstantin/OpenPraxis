@@ -36,11 +36,11 @@ function EntityDetail() {
                 navigate({ to: '/entities/$uid', params: { uid: id }, search: { kind, tab: 'main' } })
               } />
             </Panel>
-            <PanelResizeHandle className='group relative flex w-2 cursor-col-resize items-center justify-center bg-border transition-colors hover:bg-primary/50 data-[resize-handle-state=drag]:bg-primary'>
-              <div className='flex flex-col gap-0.5'>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <span key={i} className='block h-0.5 w-3 rounded-full bg-muted-foreground/30 group-hover:bg-foreground/50' />
-                ))}
+            <PanelResizeHandle className='group bg-border hover:bg-primary/40 data-[resize-handle-state=drag]:bg-primary relative w-1 cursor-col-resize transition-colors'>
+              <div className='absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100'>
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
+                <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
               </div>
             </PanelResizeHandle>
             <Panel defaultSize={78} minSize={40}>
