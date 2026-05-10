@@ -15,9 +15,10 @@ import { EntityTreeNode } from './EntityTreeNode'
 
 // Synthetic root group ids — surfaced as sticky headers, not navigable.
 const GROUP_SKILLS = '__skills__'
-const GROUP_LIFECYCLE = '__lifecycle__'
+const GROUP_PRODUCTS = '__products__'
+const GROUP_IDEAS = '__ideas__'
 const GROUP_PAGES = '__pages__'
-const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_SKILLS, GROUP_LIFECYCLE, GROUP_PAGES])
+const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_SKILLS, GROUP_PRODUCTS, GROUP_IDEAS, GROUP_PAGES])
 
 // Page nav nodes injected into the tree so ALL navigation goes through arborist.
 const PAGE_URLS: Record<string, string> = {
@@ -97,6 +98,9 @@ export function EntityTree() {
   )
   const overlaid = rawTree ? overlayLiveStatus(rawTree, liveIds) : null
 
+  const products = overlaid?.lifecycle.filter((n) => n.kind === 'product') ?? []
+  const ideas = overlaid?.lifecycle.filter((n) => n.kind === 'idea') ?? []
+
   const treeData: TreeNode[] = [
     ...(overlaid
       ? [
@@ -108,11 +112,18 @@ export function EntityTree() {
             children: overlaid.skills,
           },
           {
-            id: GROUP_LIFECYCLE,
-            name: 'Entities',
+            id: GROUP_PRODUCTS,
+            name: 'Products',
             kind: '__group__',
             status: TreeStatus.Active,
-            children: overlaid.lifecycle,
+            children: products,
+          },
+          {
+            id: GROUP_IDEAS,
+            name: 'Ideas',
+            kind: '__group__',
+            status: TreeStatus.Active,
+            children: ideas,
           },
         ]
       : []),

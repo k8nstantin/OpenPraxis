@@ -147,8 +147,16 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 				}
 			}
 		}
-		// Sort root entities chronologically — entity_uid is a ULID, lexicographic = creation order.
-		sort.Slice(lifecycle, func(i, j int) bool { return lifecycle[i].ID > lifecycle[j].ID })
+		// Products first (newest → oldest), then ideas (newest → oldest).
+		// ULID is lexicographically time-sortable so string comparison = creation order.
+		sort.Slice(lifecycle, func(i, j int) bool {
+			pi := lifecycle[i].Kind == entity.TypeProduct
+			pj := lifecycle[j].Kind == entity.TypeProduct
+			if pi != pj {
+				return pi // products before ideas
+			}
+			return lifecycle[i].ID > lifecycle[j].ID // newest first within each kind
+		})
 
 		writeJSON(w, map[string]any{"skills": skills, "lifecycle": lifecycle})
 	}
