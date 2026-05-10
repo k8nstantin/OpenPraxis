@@ -4,7 +4,19 @@ import {
   useEntityHierarchy,
   type EntityKind,
 } from '@/lib/queries/entity'
+import { KIND } from '@/lib/queries/entity-tree'
 import type { HierarchyNode } from '@/lib/types'
+
+// Home path for the breadcrumb root crumb, keyed by entity kind. All
+// entity kinds now resolve to the universal /entities listing — adding
+// a new kind requires one line here.
+const KIND_HOME_PATH: Record<EntityKind, string> = {
+  [KIND.product]: '/entities',
+  [KIND.manifest]: '/entities',
+  [KIND.task]: '/entities',
+  [KIND.skill]: '/entities',
+  [KIND.idea]: '/entities',
+}
 
 // Walk the hierarchy tree to find the path from the root to the
 // target entity id. Returns null if the target isn't reachable.
@@ -74,7 +86,7 @@ function ProductBreadcrumb({
       className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to='/products'
+        to={KIND_HOME_PATH[KIND.product]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
@@ -124,7 +136,7 @@ function TaskBreadcrumb({
       className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to='/tasks'
+        to={KIND_HOME_PATH[KIND.task]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
@@ -155,7 +167,7 @@ function ManifestBreadcrumb({
       className='text-muted-foreground flex items-center gap-1.5 text-sm'
     >
       <Link
-        to='/manifests'
+        to={KIND_HOME_PATH[KIND.manifest]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
         <Home className='h-3.5 w-3.5' />
