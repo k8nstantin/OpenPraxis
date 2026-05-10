@@ -1,5 +1,6 @@
 import { useEntity, type EntityKind } from '@/lib/queries/entity'
 import { Boxes, CheckSquare, FileText } from 'lucide-react'
+import { CopyButton } from '@/components/copy-button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -76,12 +77,18 @@ export function EntityDetailPane({
             ) : entity.data ? (
               <div className='flex items-start justify-between gap-3'>
                 <div>
+                  <div className='mb-1'>
+                    <EntityBreadcrumb kind={kind} entityId={entityId} entityTitle={entity.data.title} />
+                  </div>
                   <h1 className='text-2xl font-bold tracking-tight'>
                     {entity.data.title}
                   </h1>
-                  <code className='text-muted-foreground font-mono text-xs'>
-                    {entity.data.entity_uid}
-                  </code>
+                  <div className='flex items-center gap-1 mt-0.5'>
+                    <code className='text-muted-foreground font-mono text-xs'>
+                      {entity.data.entity_uid}
+                    </code>
+                    <CopyButton text={entity.data.entity_uid} />
+                  </div>
                 </div>
                 <EntityStatusControl
                   kind={kind}

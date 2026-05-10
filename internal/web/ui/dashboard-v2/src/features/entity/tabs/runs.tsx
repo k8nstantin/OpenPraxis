@@ -124,7 +124,12 @@ function RunRow({ run, entityId, selectedRunUid, onSelect, onSelectHistory }: {
           run.event === 'completed' ? 'text-emerald-400' :
           run.event === 'failed' ? 'text-rose-400' : 'text-amber-400'
         }>{run.event}</span></td>
-        <td className={`${tdCls} font-mono text-[10px] opacity-50`}>{run.run_uid.slice(0,12)}</td>
+        <td className={`${tdCls} font-mono text-[10px] opacity-50`}>
+          <span className='flex items-center gap-1'>
+            {run.run_uid.slice(0,12)}
+            <CopyButton text={run.run_uid} />
+          </span>
+        </td>
         <td className={tdCls}>{run.turns || '—'}</td>
         <td className={tdCls}>{run.actions || '—'}</td>
         <td className={tdCls}>{fmtCost(run.cost_usd)}</td>
@@ -211,7 +216,10 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
             <span className='font-bold text-emerald-400'>{liveRun.turns} turns</span>
             <span className='text-blue-400'>{liveRun.actions} actions</span>
             {liveRun.model && <span className='text-muted-foreground text-[10px]'>{liveRun.model}</span>}
-            <span className='text-muted-foreground ml-auto font-mono text-[10px]'>{liveRun.run_uid.slice(0,12)}</span>
+            <span className='text-muted-foreground ml-auto font-mono text-[10px] flex items-center gap-1'>
+              {liveRun.run_uid.slice(0,12)}
+              <CopyButton text={liveRun.run_uid} />
+            </span>
           </div>
           {/* Live output — polls actions every 3s */}
           <div className='border-t border-emerald-500/20'>
