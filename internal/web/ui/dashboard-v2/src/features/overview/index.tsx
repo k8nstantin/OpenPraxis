@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
 import { useTurnActivity, } from '@/lib/queries/turns'
-import { useLiveRuns, type LiveRun } from '@/lib/queries/entity'
+import { useLiveRuns, type LiveRun, type EntityKind } from '@/lib/queries/entity'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -592,7 +592,7 @@ function RunningAgentCard({ run }: { run: LiveRun }) {
   const navigate = useNavigate()
   const handleClick = () => {
     if (run.entity_uid && run.entity_uid !== 'stdio') {
-      navigate({ to: '/entities/$uid', params: { uid: run.entity_uid }, search: { kind: 'task', tab: 'runs' } })
+      navigate({ to: '/entities/$uid', params: { uid: run.entity_uid }, search: { kind: run.entity_type as EntityKind, tab: 'runs' } })
     }
   }
   return (
@@ -636,7 +636,7 @@ function RunningAgentCard({ run }: { run: LiveRun }) {
 
 function RunningAgents() {
   const { data: runs } = useLiveRuns()
-  const active = (runs ?? []).filter(r => r.entity_uid !== 'stdio' || r.turns > 0)
+  const active = (runs ?? []).filter(r => r.entity_uid && r.entity_uid !== 'stdio')
   return (
     <div>
       <div className='flex items-center gap-2 mb-2'>

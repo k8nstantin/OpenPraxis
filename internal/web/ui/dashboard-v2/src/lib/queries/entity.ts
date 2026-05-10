@@ -1003,6 +1003,7 @@ export interface LiveRun {
   run_uid: string
   entity_uid: string
   entity_title: string
+  entity_type: string
   elapsed_sec: number
   turns: number
   actions: number
