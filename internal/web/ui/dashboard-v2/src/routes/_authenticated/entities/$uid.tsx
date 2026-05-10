@@ -25,11 +25,11 @@ function EntityDetail() {
     <>
       <Header />
       <Main fixed fluid>
-        <div className='bg-card h-[calc(100vh-7rem)] overflow-hidden rounded-lg border'>
+        <div className='bg-card flex flex-col flex-1 min-h-0 overflow-hidden rounded-lg border'>
           <PanelGroup
             direction='horizontal'
             autoSaveId={`portal-v2.${kind}.panels`}
-            className='h-full'
+            className='flex-1 min-h-0'
           >
             <Panel defaultSize={22} minSize={15} maxSize={50}>
               <EntityListPane kind={kind} selectedId={uid} onSelect={(id) =>
