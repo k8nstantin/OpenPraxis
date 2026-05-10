@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useDeferredValue } from 'react'
+import { Search } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import { useNavigate } from '@tanstack/react-router'
 import { useLiveRuns } from '@/lib/queries/entity'
@@ -52,6 +53,8 @@ export function EntityTree() {
   const { data: rawTree, isLoading } = useEntityTree()
   const { data: liveRuns } = useLiveRuns()
   const navigate = useNavigate()
+  const [filterInput, setFilterInput] = useState('')
+  const filter = useDeferredValue(filterInput)
 
   const liveIds = new Set(
     (liveRuns ?? [])
@@ -88,32 +91,46 @@ export function EntityTree() {
     [navigate],
   )
 
-  // Single mount point: ref is always attached so the ResizeObserver can fire
-  // before the query settles. Skeleton, empty state, and Tree share the box.
   return (
-    <div ref={ref} className='h-[420px] w-full overflow-hidden'>
-      {isLoading ? (
-        <div className='px-3 space-y-1 pt-2'>
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className='h-5 w-full' />
-          ))}
-        </div>
-      ) : width > 0 && height > 0 ? (
-        <Tree
-          data={treeData}
-          width={width}
-          height={height}
-          indent={16}
-          rowHeight={24}
-          overscanCount={8}
-          onSelect={onSelect}
-          openByDefault={false}
-          initialOpenState={{ [GROUP_SKILLS]: true, [GROUP_LIFECYCLE]: true }}
-          className='scrollbar-thin'
-        >
-          {EntityTreeNode}
-        </Tree>
-      ) : null}
+    <div className='flex flex-col flex-1 min-h-0 w-full'>
+      {/* Filter input — VS Code style search in tree */}
+      <div className='relative px-2 py-1 shrink-0'>
+        <Search className='absolute left-4 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground' />
+        <input
+          value={filterInput}
+          onChange={e => setFilterInput(e.target.value)}
+          placeholder='Filter...'
+          className='w-full pl-6 pr-2 py-1 text-xs bg-white/5 rounded border-0 outline-none text-foreground placeholder:text-muted-foreground focus:bg-white/10'
+        />
+      </div>
+      {/* Tree — flex-1 fills remaining sidebar height */}
+      <div ref={ref} className='flex-1 min-h-0 w-full overflow-hidden'>
+        {isLoading ? (
+          <div className='px-3 space-y-1 pt-2'>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className='h-5 w-full' />
+            ))}
+          </div>
+        ) : width > 0 && height > 0 ? (
+          <Tree
+            data={treeData}
+            width={width}
+            height={height}
+            indent={16}
+            rowHeight={24}
+            overscanCount={8}
+            onSelect={onSelect}
+            openByDefault={false}
+            searchTerm={filter}
+            searchMatch={(node, term) =>
+              node.data.name.toLowerCase().includes(term.toLowerCase())
+            }
+            className='scrollbar-thin'
+          >
+            {EntityTreeNode}
+          </Tree>
+        ) : null}
+      </div>
     </div>
   )
 }

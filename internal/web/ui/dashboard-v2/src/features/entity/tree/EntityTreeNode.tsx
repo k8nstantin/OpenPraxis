@@ -51,9 +51,11 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
       <div
         style={style}
         onClick={() => node.toggle()}
-        className='flex items-center px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground select-none cursor-pointer hover:text-foreground'
+        className='flex items-center pl-3 pr-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground select-none cursor-pointer hover:text-foreground'
       >
+        <ChevronRight className={cn('h-3 w-3 mr-1 shrink-0 transition-transform', node.isOpen && 'rotate-90')} />
         {node.data.name}
+        <span className='ml-1 text-[9px] opacity-50'>({node.children?.length ?? 0})</span>
       </div>
     )
   }

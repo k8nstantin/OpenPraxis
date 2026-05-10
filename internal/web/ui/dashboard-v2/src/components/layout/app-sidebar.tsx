@@ -21,15 +21,19 @@ export function AppSidebar() {
       <SidebarHeader>
         <TeamSwitcher teams={sidebarData.teams} />
       </SidebarHeader>
-      <SidebarContent className='overflow-x-hidden overflow-y-auto'>
-        <SidebarGroup className='shrink-0 p-0'>
-          <SidebarGroupContent>
+      <SidebarContent className='overflow-x-hidden flex flex-col'>
+        {/* Tree fills all available height — grows to fill, nav pins below */}
+        <SidebarGroup className='flex flex-col flex-1 min-h-0 p-0'>
+          <SidebarGroupContent className='flex flex-col flex-1 min-h-0'>
             <EntityTree />
           </SidebarGroupContent>
         </SidebarGroup>
-        {sidebarData.navGroups.map((props) => (
-          <NavGroup key={props.title} {...props} />
-        ))}
+        {/* Nav items below tree — shrink-0 so they don't compress the tree */}
+        <div className='shrink-0 overflow-y-auto'>
+          {sidebarData.navGroups.map((props) => (
+            <NavGroup key={props.title} {...props} />
+          ))}
+        </div>
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={sidebarData.user} />
