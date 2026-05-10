@@ -79,7 +79,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
       <div
         style={style}
         onClick={() => node.toggle()}
-        className='flex items-center pl-3 pr-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground select-none cursor-pointer hover:text-foreground'
+        className='flex items-center pl-3 pr-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground select-none cursor-pointer hover:text-foreground'
       >
         <ChevronRight className={cn('h-3 w-3 mr-1 shrink-0 transition-transform', node.isOpen && 'rotate-90')} />
         {node.data.name}
@@ -104,7 +104,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
       >
         <span className='w-3 shrink-0' />
         <Icon className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-        <span className='flex-1 min-w-0 text-sm truncate'>{node.data.name}</span>
+        <span className='flex-1 min-w-0 text-[13px] truncate'>{node.data.name}</span>
       </div>
     )
   }
@@ -139,7 +139,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
         )}
       />
       <Icon className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-      <span className='flex-1 min-w-0 text-sm truncate'>{node.data.name}</span>
+      <span className='flex-1 min-w-0 text-[13px] truncate'>{node.data.name}</span>
       <span
         className={cn(
           'text-[10px] shrink-0 ml-1',

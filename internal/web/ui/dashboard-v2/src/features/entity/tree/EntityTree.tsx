@@ -169,7 +169,7 @@ export function EntityTree() {
             width={width}
             height={height}
             indent={16}
-            rowHeight={28}
+            rowHeight={24}
             overscanCount={8}
             onSelect={onSelect}
             openByDefault={false}
