@@ -42,12 +42,18 @@ type PromptData struct {
 	PriorRuns     []string
 	OtherComments []string
 	VisceralRules string
-	// BranchPrefix is the resolved branch_prefix knob value (e.g.
-	// "openpraxis", or "qa" when overridden at product scope). The
-	// default <git_workflow> template composes the full branch name
-	// as "{{.BranchPrefix}}/{{.Task.ID}}".
+	// BranchPrefix is the resolved branch_prefix knob value (e.g. "openpraxis").
 	BranchPrefix string
-	Now          time.Time
+	// BranchRemote is the resolved branch_remote knob value (e.g. "github",
+	// "origin"). Used in the git_workflow template so no remote name is
+	// hardcoded. Previously "origin" was hardcoded in the default body.
+	BranchRemote string
+	// Branch is the fully-resolved branch name accounting for branch_strategy.
+	// For strategy=task: "<prefix>/<task-id>". For strategy=manifest or product:
+	// the shared branch name derived from the owning entity's title. Templates
+	// reference {{.Branch}} instead of composing the name themselves.
+	Branch string
+	Now    time.Time
 }
 
 // Render parses `body` as a text/template and executes it against data.
