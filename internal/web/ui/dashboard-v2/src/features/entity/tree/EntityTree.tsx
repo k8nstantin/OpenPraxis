@@ -14,11 +14,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { EntityTreeNode } from './EntityTreeNode'
 
 // Synthetic root group ids — surfaced as sticky headers, not navigable.
+const GROUP_ENTITIES = '__entities__'
 const GROUP_SKILLS = '__skills__'
 const GROUP_PRODUCTS = '__products__'
 const GROUP_IDEAS = '__ideas__'
 const GROUP_PAGES = '__pages__'
-const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_SKILLS, GROUP_PRODUCTS, GROUP_IDEAS, GROUP_PAGES])
+const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_ENTITIES, GROUP_SKILLS, GROUP_PRODUCTS, GROUP_IDEAS, GROUP_PAGES])
 
 // Page nav nodes injected into the tree so ALL navigation goes through arborist.
 const PAGE_URLS: Record<string, string> = {
@@ -102,31 +103,19 @@ export function EntityTree() {
   const ideas = overlaid?.lifecycle.filter((n) => n.kind === 'idea') ?? []
 
   const treeData: TreeNode[] = [
-    ...(overlaid
-      ? [
-          {
-            id: GROUP_SKILLS,
-            name: 'Skills',
-            kind: '__group__',
-            status: TreeStatus.Active,
-            children: overlaid.skills,
-          },
-          {
-            id: GROUP_PRODUCTS,
-            name: 'Products',
-            kind: '__group__',
-            status: TreeStatus.Active,
-            children: products,
-          },
-          {
-            id: GROUP_IDEAS,
-            name: 'Ideas',
-            kind: '__group__',
-            status: TreeStatus.Active,
-            children: ideas,
-          },
-        ]
-      : []),
+    {
+      id: GROUP_ENTITIES,
+      name: 'Entities',
+      kind: '__group__',
+      status: '',
+      children: overlaid
+        ? [
+            { id: GROUP_SKILLS, name: 'Skills', kind: '__group__', status: '', children: overlaid.skills },
+            { id: GROUP_PRODUCTS, name: 'Products', kind: '__group__', status: '', children: products },
+            { id: GROUP_IDEAS, name: 'Ideas', kind: '__group__', status: '', children: ideas },
+          ]
+        : [],
+    },
     {
       id: GROUP_PAGES,
       name: 'Navigation',
