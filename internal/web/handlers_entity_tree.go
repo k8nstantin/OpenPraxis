@@ -158,7 +158,33 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			return lifecycle[i].ID > lifecycle[j].ID // newest first within each kind
 		})
 
-		writeJSON(w, map[string]any{"skills": skills, "lifecycle": lifecycle})
+		// Manifests and tasks: buildNode applied so they expand their owned children.
+		manifests := make([]*treeNode, 0)
+		for _, m := range byKind[entity.TypeManifest] {
+			if m.Status != entity.StatusArchived {
+				if nd := buildNode(m.EntityUID, make(map[string]bool)); nd != nil {
+					manifests = append(manifests, nd)
+				}
+			}
+		}
+		sort.Slice(manifests, func(i, j int) bool { return manifests[i].ID > manifests[j].ID })
+
+		tasks := make([]*treeNode, 0)
+		for _, t := range byKind[entity.TypeTask] {
+			if t.Status != entity.StatusArchived {
+				if nd := buildNode(t.EntityUID, make(map[string]bool)); nd != nil {
+					tasks = append(tasks, nd)
+				}
+			}
+		}
+		sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID > tasks[j].ID })
+
+		writeJSON(w, map[string]any{
+			"skills":    skills,
+			"lifecycle": lifecycle,
+			"manifests": manifests,
+			"tasks":     tasks,
+		})
 	}
 }
 

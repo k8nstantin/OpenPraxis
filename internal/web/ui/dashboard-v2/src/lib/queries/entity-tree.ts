@@ -16,13 +16,20 @@ export interface TreeNode {
 export interface EntityTreePayload {
   skills: TreeNode[]
   lifecycle: TreeNode[]
+  manifests: TreeNode[]
+  tasks: TreeNode[]
 }
 
 async function fetchEntityTree(): Promise<EntityTreePayload> {
   const res = await fetch('/api/entities/tree')
   if (!res.ok) throw new Error(`/api/entities/tree → ${res.status}`)
   const data = (await res.json()) as Partial<EntityTreePayload>
-  return { skills: data.skills ?? [], lifecycle: data.lifecycle ?? [] }
+  return {
+    skills: data.skills ?? [],
+    lifecycle: data.lifecycle ?? [],
+    manifests: data.manifests ?? [],
+    tasks: data.tasks ?? [],
+  }
 }
 
 export function useEntityTree() {
@@ -62,7 +69,12 @@ export function overlayLiveStatus(
     }
     return live ? { ...n, status: TreeStatus.Running } : n
   }
-  return { skills: tree.skills.map(walk), lifecycle: tree.lifecycle.map(walk) }
+  return {
+    skills: tree.skills.map(walk),
+    lifecycle: tree.lifecycle.map(walk),
+    manifests: tree.manifests.map(walk),
+    tasks: tree.tasks.map(walk),
+  }
 }
 
 function deriveStatus(ch: TreeNode[]): string {
