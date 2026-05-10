@@ -77,9 +77,6 @@ export function EntityDetailPane({
             ) : entity.data ? (
               <div className='flex items-start justify-between gap-3'>
                 <div>
-                  <div className='mb-1'>
-                    <EntityBreadcrumb kind={kind} entityId={entityId} entityTitle={entity.data.title} />
-                  </div>
                   <h1 className='text-2xl font-bold tracking-tight'>
                     {entity.data.title}
                   </h1>

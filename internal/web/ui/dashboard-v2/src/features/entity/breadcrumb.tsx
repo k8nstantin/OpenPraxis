@@ -83,19 +83,19 @@ function ProductBreadcrumb({
   return (
     <nav
       aria-label='Breadcrumb'
-      className='text-muted-foreground flex items-center gap-1.5 text-sm'
+      className='text-muted-foreground flex items-center gap-1 text-xs'
     >
       <Link
         to={KIND_HOME_PATH[KIND.product]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
-        <Home className='h-3.5 w-3.5' />
+        <Home className='h-3 w-3' />
         Products
       </Link>
       {path && path.length > 0 ? (
         path.map((node) => (
           <span key={node.id} className='inline-flex items-center gap-1.5'>
-            <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+            <ChevronRight className='h-3 w-3 opacity-50' />
             {node.id === productId ? (
               <span className='text-foreground font-medium'>{node.title}</span>
             ) : (
@@ -111,7 +111,7 @@ function ProductBreadcrumb({
         ))
       ) : productTitle ? (
         <span className='inline-flex items-center gap-1.5'>
-          <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+          <ChevronRight className='h-3 w-3 opacity-50' />
           <span className='text-foreground font-medium'>{productTitle}</span>
         </span>
       ) : null}
@@ -133,17 +133,17 @@ function TaskBreadcrumb({
   return (
     <nav
       aria-label='Breadcrumb'
-      className='text-muted-foreground flex items-center gap-1.5 text-sm'
+      className='text-muted-foreground flex items-center gap-1 text-xs'
     >
       <Link
         to={KIND_HOME_PATH[KIND.task]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
-        <Home className='h-3.5 w-3.5' />
+        <Home className='h-3 w-3' />
         Tasks
       </Link>
       <span className='inline-flex items-center gap-1.5'>
-        <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+        <ChevronRight className='h-3 w-3 opacity-50' />
         <span className='text-foreground font-medium'>
           {taskTitle ?? taskId.slice(0, 12)}
         </span>
@@ -164,17 +164,17 @@ function ManifestBreadcrumb({
   return (
     <nav
       aria-label='Breadcrumb'
-      className='text-muted-foreground flex items-center gap-1.5 text-sm'
+      className='text-muted-foreground flex items-center gap-1 text-xs'
     >
       <Link
         to={KIND_HOME_PATH[KIND.manifest]}
         className='hover:text-foreground inline-flex items-center gap-1'
       >
-        <Home className='h-3.5 w-3.5' />
+        <Home className='h-3 w-3' />
         Manifests
       </Link>
       <span className='inline-flex items-center gap-1.5'>
-        <ChevronRight className='h-3.5 w-3.5 opacity-50' />
+        <ChevronRight className='h-3 w-3 opacity-50' />
         <span className='text-foreground font-medium'>
           {manifestTitle ?? manifestId.slice(0, 12)}
         </span>
