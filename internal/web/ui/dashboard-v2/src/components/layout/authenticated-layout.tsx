@@ -28,7 +28,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
                   <span className='block h-0.5 w-0.5 rounded-full bg-foreground/60' />
                 </div>
               </PanelResizeHandle>
-              <Panel className='flex flex-col overflow-hidden @container/content' data-layout='fixed'>
+              <Panel className='flex flex-col overflow-y-auto @container/content'>
                 {children ?? <Outlet />}
               </Panel>
             </PanelGroup>
