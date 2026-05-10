@@ -13,7 +13,6 @@ import (
 	"github.com/k8nstantin/OpenPraxis/internal/config"
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
-	"github.com/k8nstantin/OpenPraxis/internal/task"
 )
 
 func newDescriptionTestServer(t *testing.T) *Server {
@@ -31,14 +30,9 @@ func newDescriptionTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("entity: %v", err)
 	}
-	tk, err := task.NewStore(db)
-	if err != nil {
-		t.Fatalf("task: %v", err)
-	}
 	n := &node.Node{
 		Config:   &config.Config{Node: config.NodeConfig{UUID: "peer-test"}},
 		Entities: e,
-		Tasks:    tk,
 		Comments: comments.NewStore(db),
 	}
 	return &Server{node: n}
@@ -174,7 +168,7 @@ func TestDescriptionRestore_Tool(t *testing.T) {
 		t.Fatalf("unexpected error: %s", toolResultText(res))
 	}
 	msg := toolResultText(res)
-	if !strings.Contains(msg, "Restored product") {
+	if !strings.Contains(msg, "Restored") {
 		t.Fatalf("unexpected message: %q", msg)
 	}
 

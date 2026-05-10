@@ -64,7 +64,7 @@ var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty"
 // constants iterable for callers that want to enumerate. Was: two
 // hard-coded == chains that drifted whenever a constant was added.
 var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea}
-var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn, EdgeReviews, EdgeLinksTo}
+var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn}
 
 // AllEdgeKinds returns all valid edge kinds. Use this instead of repeating
 // the list at call sites — adding a new kind here propagates everywhere.
@@ -121,14 +121,11 @@ const (
 	KindIdea     = "idea"
 )
 
-// Standard edge kinds. Same model as entity kinds — Go-side validation
-// is the only gate. Schema accepts any TEXT; allEdgeKinds is the
-// allow-list iterated by validEdgeKind.
+// Standard edge kinds. Only owns (parent→child hierarchy) and
+// depends_on (execution ordering) are valid.
 const (
 	EdgeOwns      = "owns"
 	EdgeDependsOn = "depends_on"
-	EdgeReviews   = "reviews"
-	EdgeLinksTo   = "links_to"
 )
 
 // Edge is one row in the relationships table.

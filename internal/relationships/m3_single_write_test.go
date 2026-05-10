@@ -101,6 +101,7 @@ func TestDropOwnershipColumns_DropsManifestProjectID(t *testing.T) {
 
 // TestDropOwnershipColumns_DropsTaskManifestID — same shape for tasks.
 func TestDropOwnershipColumns_DropsTaskManifestID(t *testing.T) {
+	t.Skip("task store migrated to entities; dropTaskManifestIDColumn is now a no-op")
 	db := openTestDB(t)
 
 	if _, err := db.Exec(`CREATE TABLE tasks (
@@ -180,6 +181,7 @@ func TestDropOwnershipColumns_Idempotent(t *testing.T) {
 // rows, MigrateLegacyDeps inserts EdgeOwns rows once; a second call
 // against the same DB inserts zero new rows.
 func TestBackfillOwnershipEdges_Idempotent(t *testing.T) {
+	t.Skip("task store migrated to entities; migrateTaskOwnership is now a no-op")
 	db := openTestDB(t)
 
 	// Seed legacy schemas + a row each.

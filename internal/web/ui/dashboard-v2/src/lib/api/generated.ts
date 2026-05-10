@@ -10,6 +10,54 @@ export const EventCompleted = "completed";
 export const EventFailed = "failed";
 export const EventTurn = "turn"; // one row per turn boundary; Turns field holds the turn number
 /**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonSuccess = "success";
+/**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonMaxTurns = "max_turns";
+/**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonTimeout = "timeout";
+/**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonProcessError = "process_error";
+/**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonBuildFail = "build_fail";
+/**
+ * Terminal-reason values populated on terminal (completed/failed) rows.
+ * Used for pass-rate classification — see PassRateByEntity. ProcessError /
+ * BuildFail / DeliverableMissing are referenced by the runner's retry and
+ * proposer-trigger paths as classification inputs; expose them here so those
+ * call sites read from the canonical constant rather than re-declaring strings.
+ */
+export const TerminalReasonDeliverableMissing = "deliverable_missing";
+/**
  * Row is one append-only event row in execution_log.
  */
 export interface Row {
@@ -84,6 +132,22 @@ export interface Row {
   tests_passed: number /* int */;
   tests_failed: number /* int */;
   agent_pid: number /* int */; // OS PID of the spawned agent process; 0 if unknown
+}
+/**
+ * PassRateSummary aggregates terminal execution-log rows for one entity.
+ * TotalRuns == 0 means the entity has never run — callers must check this
+ * before treating PassRate as meaningful.
+ */
+export interface PassRateSummary {
+  EntityUID: string;
+  TotalRuns: number /* int */;
+  SuccessRuns: number /* int */;
+  FailedRuns: number /* int */;
+  MaxTurnsRuns: number /* int */;
+  TimeoutRuns: number /* int */;
+  AvgTurns: number /* float64 */;
+  AvgCostUSD: number /* float64 */;
+  PassRate: number /* float64 */; // SuccessRuns / TotalRuns; 0.0 when TotalRuns == 0
 }
 /**
  * OutputChunk is one live text chunk in execution_output.

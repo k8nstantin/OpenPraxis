@@ -159,68 +159,10 @@ func (s *Store) migrateManifestOwnership(ctx context.Context) (int, error) {
 	return inserted, nil
 }
 
-// migrateTaskOwnership copies every `tasks.manifest_id != ''` row into
-// a relationships EdgeOwns edge with src=manifest, dst=task.
+// migrateTaskOwnership is a no-op. The tasks table has been retired;
+// task ownership edges are now created directly via the relationships store.
 func (s *Store) migrateTaskOwnership(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, manifest_id, created_at FROM tasks
-		 WHERE manifest_id IS NOT NULL AND manifest_id != ''
-		   AND deleted_at = ''`)
-	if err != nil {
-		// Post-M3 fresh DBs lack the manifest_id column entirely.
-		if isNoSuchTable(err) || isNoSuchColumn(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	defer rows.Close()
-
-	type legacy struct {
-		taskID, manifestID, createdAt string
-	}
-	var pending []legacy
-	for rows.Next() {
-		var l legacy
-		if err := rows.Scan(&l.taskID, &l.manifestID, &l.createdAt); err != nil {
-			return 0, err
-		}
-		pending = append(pending, l)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	inserted := 0
-	for _, l := range pending {
-		if l.taskID == "" || l.manifestID == "" {
-			continue
-		}
-		if _, found, err := s.Get(ctx, l.manifestID, l.taskID, EdgeOwns); err != nil {
-			return inserted, err
-		} else if found {
-			continue
-		}
-		validFrom := l.createdAt
-		if validFrom == "" {
-			validFrom = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-		e := Edge{
-			SrcKind:   KindManifest,
-			SrcID:     l.manifestID,
-			DstKind:   KindTask,
-			DstID:     l.taskID,
-			Kind:      EdgeOwns,
-			ValidFrom: validFrom,
-			ValidTo:   "",
-			CreatedBy: "system",
-			Reason:    "backfill from tasks.manifest_id",
-		}
-		if err := s.BackfillRow(ctx, e); err != nil {
-			return inserted, fmt.Errorf("task ownership %s→%s: %w", l.manifestID, l.taskID, err)
-		}
-		inserted++
-	}
-	return inserted, nil
+	return 0, nil
 }
 
 // migrateProductDeps copies product_dependencies → relationships.

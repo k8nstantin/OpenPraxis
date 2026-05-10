@@ -35,10 +35,10 @@ func containsToolName(as []Action, name string) bool {
 
 func TestSearch_Keyword(t *testing.T) {
 	s := openSearchTestStore(t)
-	if _, err := s.RecordForTask("t1", "node", "Alpha_widget", "in", "out", "/cwd"); err != nil {
+	if _, err := s.RecordForTask("t1", "node", "Alpha_widget", "in", "out", "/cwd", 0); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	if _, err := s.RecordForTask("t2", "node", "Beta_gizmo", "in", "out", "/cwd"); err != nil {
+	if _, err := s.RecordForTask("t2", "node", "Beta_gizmo", "in", "out", "/cwd", 0); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
@@ -53,11 +53,11 @@ func TestSearch_Keyword(t *testing.T) {
 
 func TestSearch_IDExact(t *testing.T) {
 	s := openSearchTestStore(t)
-	id, err := s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd")
+	id, err := s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd", 0)
 	if err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	_, _ = s.RecordForTask("t2", "node", "Other", "in", "out", "/cwd")
+	_, _ = s.RecordForTask("t2", "node", "Other", "in", "out", "/cwd", 0)
 
 	res, err := s.Search(fmt.Sprintf("%d", id), 10)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestSearch_IDPrefix(t *testing.T) {
 	// Create enough rows so ids have a leading digit pattern we can
 	// prefix-match. SQLite INTEGER PK starts at 1.
 	for i := 0; i < 5; i++ {
-		if _, err := s.RecordForTask("t", "node", "Tool", "in", "out", "/cwd"); err != nil {
+		if _, err := s.RecordForTask("t", "node", "Tool", "in", "out", "/cwd", 0); err != nil {
 			t.Fatalf("record: %v", err)
 		}
 	}
@@ -96,7 +96,7 @@ func TestSearch_IDPrefix(t *testing.T) {
 
 func TestSearch_Unknown(t *testing.T) {
 	s := openSearchTestStore(t)
-	_, _ = s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd")
+	_, _ = s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd", 0)
 
 	res, err := s.Search("no-such-thing-xyz-987", 10)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestSearch_Unknown(t *testing.T) {
 
 func TestSearch_EmptyQuery(t *testing.T) {
 	s := openSearchTestStore(t)
-	_, _ = s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd")
+	_, _ = s.RecordForTask("t1", "node", "Tool", "in", "out", "/cwd", 0)
 
 	res, err := s.Search("  ", 10)
 	if err != nil {

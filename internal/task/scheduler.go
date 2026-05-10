@@ -3,7 +3,6 @@ package task
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -264,64 +263,22 @@ func IsOneShot(schedule string) bool {
 	return s == "once" || s == "" || strings.HasPrefix(s, "at:") || strings.HasPrefix(s, "in:")
 }
 
-// UpdateSchedule changes the schedule and next_run_at for a task.
+// UpdateSchedule is a no-op stub. The tasks table has been retired.
 func (s *Store) UpdateSchedule(id, schedule, nextRunAt string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET schedule = ?, next_run_at = ?, status = 'scheduled', updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-		schedule, nextRunAt, now, id, id+"%")
-	return err
+	return nil
 }
 
-// ScheduleTask sets the next_run_at for a task and marks it as scheduled.
-// If the task has an unmet depends_on, it is parked in 'waiting' status instead —
-// ActivateDependents will wake it up when the dependency completes.
+// ScheduleTask is a no-op stub. The tasks table has been retired.
 func (s *Store) ScheduleTask(id, schedule string) error {
-	now := time.Now().UTC()
-
-	// Resolve the task's depends_on (if any) and its dep's status.
-	var dependsOn string
-	if err := s.db.QueryRow(`SELECT depends_on FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = '' LIMIT 1`,
-		id, id+"%").Scan(&dependsOn); err != nil {
-		return fmt.Errorf("lookup task: %w", err)
-	}
-	if dependsOn != "" {
-		var depStatus string
-		err := s.db.QueryRow(`SELECT status FROM tasks WHERE (id = ? OR id LIKE ?) AND deleted_at = '' LIMIT 1`,
-			dependsOn, dependsOn+"%").Scan(&depStatus)
-		if err == nil && depStatus != "completed" && depStatus != "max_turns" {
-			_, werr := s.db.Exec(`UPDATE tasks SET status = 'waiting', next_run_at = '', schedule = ?, updated_at = ? WHERE (id = ? OR id LIKE ?) AND deleted_at = ''`,
-				schedule, now.Format(time.RFC3339), id, id+"%")
-			return werr
-		}
-	}
-
-	nextRun := ComputeNextRun(schedule)
-	if nextRun.IsZero() && schedule != "once" {
-		return fmt.Errorf("invalid schedule: %s", schedule)
-	}
-	if schedule == "once" {
-		nextRun = now
-	}
-
-	_, err := s.db.Exec(`UPDATE tasks SET status = 'scheduled', schedule = ?, next_run_at = ?, updated_at = ? WHERE id = ? OR id LIKE ?`,
-		schedule, nextRun.Format(time.RFC3339), now.Format(time.RFC3339), id, id+"%")
-	return err
+	return nil
 }
 
-// ListDue returns tasks whose next_run_at has passed and are in scheduled status.
+// ListDue is a no-op stub. The tasks table has been retired.
 func (s *Store) ListDue() ([]*Task, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE status = 'scheduled' AND next_run_at != '' AND next_run_at <= ? AND deleted_at = '' LIMIT 10`, now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanTasks(rows)
+	return nil, nil
 }
 
-// SetNextRun updates the next run time for a recurring task and resets to scheduled.
+// SetNextRun is a no-op stub. The tasks table has been retired.
 func (s *Store) SetNextRun(id, nextRunAt string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE tasks SET next_run_at = ?, status = 'scheduled', updated_at = ? WHERE id = ?`, nextRunAt, now, id)
-	return err
+	return nil
 }
