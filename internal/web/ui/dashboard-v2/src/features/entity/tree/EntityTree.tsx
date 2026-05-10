@@ -185,9 +185,18 @@ export function EntityTree() {
             onSelect={onSelect}
             openByDefault={false}
             searchTerm={filter}
-            searchMatch={(node, term) =>
-              node.data.name.toLowerCase().includes(term.toLowerCase())
-            }
+            searchMatch={(node, term) => {
+              const t = term.toLowerCase()
+              if (node.data.name.toLowerCase().includes(t)) return true
+              // If any ancestor matches, show this node too so the full
+              // subtree is visible when searching by parent name.
+              let p = node.parent
+              while (p) {
+                if (p.data?.name?.toLowerCase().includes(t)) return true
+                p = p.parent
+              }
+              return false
+            }}
             className='scrollbar-thin'
           >
             {EntityTreeNode}
