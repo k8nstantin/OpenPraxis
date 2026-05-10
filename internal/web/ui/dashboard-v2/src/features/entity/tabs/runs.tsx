@@ -43,10 +43,11 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
   const containerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
-  // Auto-scroll to bottom when new rows arrive (unless user scrolled up)
+  // Auto-scroll to bottom when new rows arrive (unless user scrolled up).
+  // Use scrollTop directly — scrollIntoView scrolls the page, not the container.
   useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (autoScroll && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
   }, [data?.length, autoScroll])
 
@@ -109,7 +110,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
       {!autoScroll && (
         <button
           type='button'
-          onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }}
+          onClick={() => { setAutoScroll(true); if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight }}
           className='sticky bottom-2 ml-2 rounded bg-primary/80 px-2 py-1 text-[10px] text-primary-foreground hover:bg-primary'
         >
           ↓ scroll to latest
