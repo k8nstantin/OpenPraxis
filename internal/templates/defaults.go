@@ -49,11 +49,14 @@ Call visceral_rules and visceral_confirm first.
 const defaultGitWorkflow = `<git_workflow>
 MANDATORY — every task gets its own branch and PR.
 
-1. Before making ANY code changes, create a new branch:
-   git checkout -b {{.BranchPrefix}}/{{.Task.ID}}
+{{- $branch := .Branch}}{{- if eq $branch ""}}{{$branch = printf "%s/%s" .BranchPrefix .Task.ID}}{{end}}
+1. Before making ANY code changes, create or checkout the branch:
+   git checkout -b {{$branch}} 2>/dev/null || git checkout {{$branch}}
 2. Make all your changes on this branch.
 3. Commit your work with a descriptive message.
-4. Push the branch: git push -u origin {{.BranchPrefix}}/{{.Task.ID}}
+4. Push and verify the branch reached the remote — MANDATORY:
+   git push --set-upstream {{.BranchRemote}} {{$branch}}
+   git ls-remote --heads {{.BranchRemote}} {{$branch}} | grep -q . || echo "ERROR: push failed — retry before closing"
 5. Create a pull request using: gh pr create --title "<title>" --body "<summary>"
 6. Include the PR URL in your final output.
 
@@ -159,13 +162,17 @@ Call visceral_rules and visceral_confirm first.
 
 const markdownGitWorkflow = `## Git Workflow — MANDATORY
 
+{{- $branch := .Branch}}{{- if eq $branch ""}}{{$branch = printf "%s/%s" .BranchPrefix .Task.ID}}{{end}}
+
 Every task gets its own branch and PR.
 
-1. Before making ANY code changes, create a new branch:
-   ` + "`" + `git checkout -b openpraxis/{{.BranchPrefix}}` + "`" + `
+1. Before making ANY code changes, create or checkout the branch:
+   ` + "`" + `git checkout -b {{$branch}} 2>/dev/null || git checkout {{$branch}}` + "`" + `
 2. Make all your changes on this branch.
 3. Commit your work with a descriptive message.
-4. Push the branch: ` + "`" + `git push -u origin openpraxis/{{.BranchPrefix}}` + "`" + `
+4. Push and verify the branch reached the remote — MANDATORY:
+   ` + "`" + `git push --set-upstream {{.BranchRemote}} {{$branch}}` + "`" + `
+   ` + "`" + `git ls-remote --heads {{.BranchRemote}} {{$branch}} | grep -q . || echo "ERROR: push failed"` + "`" + `
 5. Create a pull request using: ` + "`" + `gh pr create --title "<title>" --body "<summary>"` + "`" + `
 6. Include the PR URL in your final output.
 

@@ -689,8 +689,11 @@ type runtimeKnobs struct {
 	RetryOnFailure  int
 	ApprovalMode    string
 	AllowedTools    []string
-	BranchPrefix    string
-	WorktreeBaseDir string
+	BranchPrefix       string
+	BranchRemote       string
+	BranchStrategy     string
+	AutoPushOnComplete string // "always" | "on_success" | "never"
+	WorktreeBaseDir    string
 
 	// Prompt-context knobs — drive the prior_context section of the agent
 	// prompt. Limits and budget controls are catalog-driven so operators
@@ -754,6 +757,24 @@ func decodeRuntimeKnobs(all map[string]settings.Resolved) (runtimeKnobs, error) 
 	}
 	if k.BranchPrefix == "" {
 		k.BranchPrefix = "openpraxis"
+	}
+	if k.BranchRemote, err = resolvedStr(all["branch_remote"].Value); err != nil {
+		return k, fmt.Errorf("branch_remote: %w", err)
+	}
+	if k.BranchRemote == "" {
+		k.BranchRemote = "github"
+	}
+	if k.BranchStrategy, err = resolvedStr(all["branch_strategy"].Value); err != nil {
+		return k, fmt.Errorf("branch_strategy: %w", err)
+	}
+	if k.BranchStrategy == "" {
+		k.BranchStrategy = "task"
+	}
+	if k.AutoPushOnComplete, err = resolvedStr(all["auto_push_on_complete"].Value); err != nil {
+		return k, fmt.Errorf("auto_push_on_complete: %w", err)
+	}
+	if k.AutoPushOnComplete == "" {
+		k.AutoPushOnComplete = "always"
 	}
 	if k.WorktreeBaseDir, err = resolvedStr(all["worktree_base_dir"].Value); err != nil {
 		return k, fmt.Errorf("worktree_base_dir: %w", err)
@@ -1116,13 +1137,39 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 	// Read output in background
 	retryCap := knobs.RetryOnFailure
 	go func() {
+		// finalStatus is set after the agent exits and is read by the defer
+		// to decide whether to auto-push. Pointer so the defer captures it.
+		var finalStatus string
 		defer func() {
 			r.mu.Lock()
 			delete(r.running, t.ID)
 			r.mu.Unlock()
 			cancel()
-			// Clean up persisted runtime state — task is done
-			// runtime_state table removed
+			// Auto-push: ensure the agent's branch reaches the remote before
+			// the worktree is destroyed. Controlled by auto_push_on_complete:
+			//   "always"     — push regardless of outcome (default, safest)
+			//   "on_success" — push only when task completed successfully
+			//   "never"      — skip runner-level push, agent is responsible
+			shouldPush := false
+			switch knobs.AutoPushOnComplete {
+			case "always":
+				shouldPush = true
+			case "on_success":
+				shouldPush = finalStatus == execution.EventCompleted
+			}
+			if shouldPush && workDir != "" && knobs.BranchRemote != "" {
+				branchName := knobs.BranchPrefix + "/" + t.ID
+				out, pushErr := runGit(workDir, "push", "--set-upstream", knobs.BranchRemote, branchName)
+				if pushErr != nil {
+					slog.Warn("auto-push failed — branch may be local only",
+						"component", "runner", "task_id", t.ID[:12],
+						"branch", branchName, "remote", knobs.BranchRemote,
+						"error", pushErr, "output", out)
+				} else {
+					slog.Info("auto-push succeeded", "component", "runner",
+						"task_id", t.ID[:12], "branch", branchName, "remote", knobs.BranchRemote)
+				}
+			}
 			// Remove the per-task worktree directory. The agent's branch
 			// stays intact in the shared .git, so the PR keeps working.
 			r.cleanupTaskWorkspace(workDir)
@@ -1342,6 +1389,8 @@ func (r *Runner) Execute(t *Task, manifestTitle, manifestContent, visceralRules 
 			slog.Info("task completed", "component", "runner", "task_id", t.ID,
 				"actions", rt.Actions, "lines", rt.Lines)
 		}
+		// Capture for the auto-push defer which runs after this goroutine exits.
+		finalStatus = status
 
 		_, numTurns := ParseCostFromOutput(output)
 		costUSD := float64(0)
@@ -1806,6 +1855,19 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string,
 	if branchPfx == "" {
 		branchPfx = "openpraxis"
 	}
+	branchRemote := knobs.BranchRemote
+	if branchRemote == "" {
+		branchRemote = "github"
+	}
+	// Resolve the branch name from strategy. For task strategy, compose
+	// prefix/taskID. For manifest/product, the shared branch name is
+	// injected by the dispatcher in cmd/serve.go — we leave Branch empty
+	// here so the dispatcher's injection takes precedence. The template
+	// falls back to {{.BranchPrefix}}/{{.Task.ID}} when Branch is "".
+	branch := ""
+	if knobs.BranchStrategy == "task" || knobs.BranchStrategy == "" {
+		branch = branchPfx + "/" + t.ID
+	}
 	data := templates.PromptData{
 		Task: templates.TaskView{
 			ID:          t.ID,
@@ -1820,6 +1882,8 @@ func buildPrompt(t *Task, manifestTitle, manifestContent, visceralRules string,
 		},
 		VisceralRules: visceralRules,
 		BranchPrefix:  branchPfx,
+		BranchRemote:  branchRemote,
+		Branch:        branch,
 		Now:           time.Now(),
 	}
 

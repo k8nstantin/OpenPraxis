@@ -92,6 +92,7 @@ func Catalog() []KnobDef {
 		{Key: "branch_prefix", Type: KnobString, Default: "openpraxis", Description: "Prefix used in the agent's <git_workflow> branch name: <prefix>/<task_id>. Operators can set per-product for QA/staging branches."},
 		{Key: "branch_strategy", Type: KnobEnum, EnumValues: []string{"task", "manifest", "product"}, Default: "task", Description: "Branch scope for agent runs. task=own branch + PR per task (default). manifest=all tasks in the manifest share one branch derived from the manifest title. product=all tasks across all manifests share one branch derived from the product title."},
 		{Key: "branch_remote", Type: KnobString, Default: "github", Description: "Git remote name used in branch checkout instructions injected into agent prompts. Default is 'github'. Set to 'origin' for Bitbucket, GitLab, or any other remote."},
+		{Key: "auto_push_on_complete", Type: KnobEnum, EnumValues: []string{"always", "on_success", "never"}, Default: "always", Description: "Push the agent's branch to the remote before worktree cleanup. 'always' preserves work even on failure. 'on_success' pushes only on success. 'never' disables runner-level push (agent solely responsible)."},
 		{Key: "worktree_base_dir", Type: KnobString, Default: ".openpraxis-work", Description: "Directory under the repo root where per-task git worktrees are materialised. Absolute paths are supported for out-of-tree worktrees."},
 		// Proposer Loop — autonomous scaffold-evolution knobs. Gated by
 		// proposer_enabled (off by default). Triggers fire from the runner's

@@ -1,5 +1,5 @@
 import { Outlet } from '@tanstack/react-router'
-import { Monitor, Bell, Palette, Wrench, UserCog } from 'lucide-react'
+import { Monitor, Bell, Palette, Wrench, UserCog, SlidersHorizontal } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { Header } from '@/components/layout/header'
@@ -10,6 +10,11 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { SidebarNav } from './components/sidebar-nav'
 
 const sidebarNavItems = [
+  {
+    title: 'System',
+    href: '/settings/system',
+    icon: <SlidersHorizontal size={18} />,
+  },
   {
     title: 'Profile',
     href: '/settings',
@@ -48,7 +53,7 @@ export function Settings() {
         <ProfileDropdown />
       </Header>
 
-      <Main fixed>
+      <Main>
         <div className='space-y-0.5'>
           <h1 className='text-2xl font-bold tracking-tight md:text-3xl'>
             Settings
@@ -62,7 +67,7 @@ export function Settings() {
           <aside className='top-0 lg:sticky lg:w-1/5'>
             <SidebarNav items={sidebarNavItems} />
           </aside>
-          <div className='flex w-full overflow-y-hidden p-1'>
+          <div className='flex w-full overflow-y-auto p-1'>
             <Outlet />
           </div>
         </div>
