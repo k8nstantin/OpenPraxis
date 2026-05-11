@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { BlockNoteComposer, type BlockNoteComposerHandle } from '@/components/blocknote-composer'
+import { BlockNoteReadView } from '@/components/blocknote-read-view'
 import { useEntityTypes, type EntityType } from '@/lib/queries/entity-types'
 
 async function createEntityType(body: { name: string; display_name: string; description: string; color: string; icon: string }) {
@@ -12,10 +14,7 @@ async function createEntityType(body: { name: string; display_name: string; desc
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text)
-  }
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
@@ -25,10 +24,7 @@ async function updateEntityType(name: string, body: { display_name?: string; des
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text)
-  }
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
@@ -36,24 +32,27 @@ function TypeRow({ et }: { et: EntityType }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [displayName, setDisplayName] = useState(et.display_name)
-  const [description, setDescription] = useState(et.description)
   const [color, setColor] = useState(et.color)
   const [icon, setIcon] = useState(et.icon)
+  const descRef = useRef<BlockNoteComposerHandle>(null)
 
   const update = useMutation({
-    mutationFn: () => updateEntityType(et.name, { display_name: displayName, description, color, icon }),
+    mutationFn: async () => {
+      const description = descRef.current ? (await descRef.current.getMarkdown()).trim() : et.description
+      return updateEntityType(et.name, { display_name: displayName, description, color, icon })
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['entity-types'] }); setEditing(false) },
   })
 
   return (
-    <div className='flex items-start gap-3 py-2 border-b border-white/5 last:border-0'>
+    <div className='flex items-start gap-3 py-3 border-b border-white/5 last:border-0'>
       <div
         className='mt-1 h-4 w-4 rounded-full shrink-0 border border-white/20'
         style={{ backgroundColor: et.color }}
       />
       <div className='flex-1 min-w-0'>
         {editing ? (
-          <div className='space-y-2'>
+          <div className='space-y-3'>
             <div className='grid grid-cols-2 gap-2'>
               <div>
                 <label className='text-[10px] text-muted-foreground uppercase tracking-wide'>Display Name</label>
@@ -64,15 +63,17 @@ function TypeRow({ et }: { et: EntityType }) {
                 <Input value={icon} onChange={e => setIcon(e.target.value)} className='h-7 text-xs mt-0.5' />
               </div>
               <div>
-                <label className='text-[10px] text-muted-foreground uppercase tracking-wide'>Color (hex)</label>
+                <label className='text-[10px] text-muted-foreground uppercase tracking-wide'>Color</label>
                 <div className='flex items-center gap-1 mt-0.5'>
                   <input type='color' value={color} onChange={e => setColor(e.target.value)} className='h-7 w-10 rounded cursor-pointer bg-transparent border border-white/20' />
                   <Input value={color} onChange={e => setColor(e.target.value)} className='h-7 text-xs flex-1 font-mono' />
                 </div>
               </div>
-              <div>
-                <label className='text-[10px] text-muted-foreground uppercase tracking-wide'>Description</label>
-                <Input value={description} onChange={e => setDescription(e.target.value)} className='h-7 text-xs mt-0.5' />
+            </div>
+            <div>
+              <label className='text-[10px] text-muted-foreground uppercase tracking-wide'>Description</label>
+              <div className='rounded-lg border bg-card mt-0.5'>
+                <BlockNoteComposer ref={descRef} initialMarkdown={et.description ?? ''} />
               </div>
             </div>
             {update.isError && <p className='text-xs text-rose-400'>{String(update.error)}</p>}
@@ -89,7 +90,11 @@ function TypeRow({ et }: { et: EntityType }) {
               <code className='text-xs font-mono font-medium'>{et.name}</code>
               <span className='text-xs text-muted-foreground'>— {et.display_name}</span>
             </div>
-            {et.description && <p className='text-xs text-muted-foreground mt-0.5'>{et.description}</p>}
+            {et.description && (
+              <div className='mt-1'>
+                <BlockNoteReadView markdown={et.description} />
+              </div>
+            )}
             <p className='text-[10px] text-muted-foreground font-mono mt-0.5'>icon: {et.icon} · color: {et.color}</p>
           </div>
         )}
@@ -106,21 +111,24 @@ export function SettingsEntityTypes() {
   const { data: types, isLoading } = useEntityTypes()
   const [name, setName] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [description, setDescription] = useState('')
   const [color, setColor] = useState('#6366f1')
   const [icon, setIcon] = useState('Database')
+  const newDescRef = useRef<BlockNoteComposerHandle>(null)
 
   const create = useMutation({
-    mutationFn: () => createEntityType({ name: name.trim(), display_name: displayName.trim() || name.trim(), description, color, icon }),
+    mutationFn: async () => {
+      const description = newDescRef.current ? (await newDescRef.current.getMarkdown()).trim() : ''
+      return createEntityType({ name: name.trim(), display_name: displayName.trim() || name.trim(), description, color, icon })
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['entity-types'] })
-      setName(''); setDisplayName(''); setDescription(''); setColor('#6366f1'); setIcon('Database')
+      setName(''); setDisplayName(''); setColor('#6366f1'); setIcon('Database')
+      newDescRef.current?.clear()
     },
   })
 
   return (
     <div className='space-y-6 w-full'>
-      {/* Existing types */}
       <Card>
         <CardHeader className='pb-2'>
           <CardTitle className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>Entity Types</CardTitle>
@@ -129,14 +137,11 @@ export function SettingsEntityTypes() {
           {isLoading ? (
             <div className='space-y-2'>{[1,2,3].map(i => <Skeleton key={i} className='h-8 w-full' />)}</div>
           ) : (
-            <div>
-              {(types ?? []).map(et => <TypeRow key={et.type_uid} et={et} />)}
-            </div>
+            (types ?? []).map(et => <TypeRow key={et.type_uid} et={et} />)
           )}
         </CardContent>
       </Card>
 
-      {/* Add new type */}
       <Card>
         <CardHeader className='pb-2'>
           <CardTitle className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>Add Entity Type</CardTitle>
@@ -162,9 +167,11 @@ export function SettingsEntityTypes() {
               <label className='text-xs text-muted-foreground'>Icon (lucide name)</label>
               <Input value={icon} onChange={e => setIcon(e.target.value)} placeholder='e.g. GitBranch' className='mt-1 h-8 text-sm' />
             </div>
-            <div className='col-span-2'>
-              <label className='text-xs text-muted-foreground'>Description</label>
-              <Input value={description} onChange={e => setDescription(e.target.value)} placeholder='What is this type for?' className='mt-1 h-8 text-sm' />
+          </div>
+          <div>
+            <label className='text-xs text-muted-foreground'>Description</label>
+            <div className='rounded-lg border bg-card mt-1'>
+              <BlockNoteComposer ref={newDescRef} initialMarkdown='' />
             </div>
           </div>
           {create.isError && <p className='text-xs text-rose-400'>{String(create.error)}</p>}
