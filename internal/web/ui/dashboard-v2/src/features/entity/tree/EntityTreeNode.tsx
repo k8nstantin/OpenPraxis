@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CheckSquare,
   ChevronRight,
+  Database,
   FileText,
   GitBranch,
   Inbox,
@@ -28,6 +29,7 @@ export const KIND_ICON: Record<string, ElementType> = {
   product: Boxes,
   manifest: FileText,
   task: CheckSquare,
+  RAG: Database,
 }
 
 // Icons for synthetic page nav nodes — keyed by node ID.

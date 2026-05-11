@@ -45,6 +45,7 @@ export const KIND = {
   task: 'task',
   skill: 'skill',
   idea: 'idea',
+  RAG: 'RAG',
 } as const
 
 export type EntityKind = (typeof KIND)[keyof typeof KIND]

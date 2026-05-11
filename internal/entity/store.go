@@ -18,6 +18,7 @@ const (
 	TypeManifest = "manifest"
 	TypeTask     = "task"
 	TypeIdea     = "idea"
+	TypeRAG      = "RAG"
 
 	StatusDraft    = "draft"
 	StatusActive   = "active"

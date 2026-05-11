@@ -48,6 +48,7 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			entity.TypeProduct,
 			entity.TypeManifest,
 			entity.TypeTask,
+			entity.TypeRAG,
 		}
 		ch := make(chan res, len(kinds))
 		for _, k := range kinds {
@@ -185,11 +186,22 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(tasks, func(i, j int) bool { return tasks[i].ID > tasks[j].ID })
 
+		rags := make([]*treeNode, 0)
+		for _, r := range byKind[entity.TypeRAG] {
+			if r.Status != entity.StatusArchived {
+				if nd := buildNode(r.EntityUID, make(map[string]bool)); nd != nil {
+					rags = append(rags, nd)
+				}
+			}
+		}
+		sort.Slice(rags, func(i, j int) bool { return rags[i].ID > rags[j].ID })
+
 		writeJSON(w, map[string]any{
 			"skills":    skills,
 			"lifecycle": lifecycle,
 			"manifests": manifests,
 			"tasks":     tasks,
+			"rags":      rags,
 		})
 	}
 }

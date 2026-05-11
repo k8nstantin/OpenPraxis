@@ -63,7 +63,7 @@ var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty"
 // ONE place (the slice) auto-extends both the validator AND keeps the
 // constants iterable for callers that want to enumerate. Was: two
 // hard-coded == chains that drifted whenever a constant was added.
-var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea}
+var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea, KindRAG}
 var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn}
 
 // AllEdgeKinds returns all valid edge kinds. Use this instead of repeating
@@ -119,6 +119,7 @@ const (
 	KindTask     = "task"
 	KindSkill    = "skill"
 	KindIdea     = "idea"
+	KindRAG      = "RAG"
 )
 
 // Standard edge kinds. Only owns (parent→child hierarchy) and

@@ -182,6 +182,7 @@ export const TypeProduct = "product";
 export const TypeManifest = "manifest";
 export const TypeTask = "task";
 export const TypeIdea = "idea";
+export const TypeRAG = "RAG";
 export const StatusDraft = "draft";
 export const StatusActive = "active";
 export const StatusClosed = "closed";

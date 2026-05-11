@@ -18,6 +18,7 @@ export interface EntityTreePayload {
   lifecycle: TreeNode[]
   manifests: TreeNode[]
   tasks: TreeNode[]
+  rags: TreeNode[]
 }
 
 async function fetchEntityTree(): Promise<EntityTreePayload> {
@@ -29,6 +30,7 @@ async function fetchEntityTree(): Promise<EntityTreePayload> {
     lifecycle: data.lifecycle ?? [],
     manifests: data.manifests ?? [],
     tasks: data.tasks ?? [],
+    rags: data.rags ?? [],
   }
 }
 
@@ -74,6 +76,7 @@ export function overlayLiveStatus(
     lifecycle: tree.lifecycle.map(walk),
     manifests: tree.manifests.map(walk),
     tasks: tree.tasks.map(walk),
+    rags: tree.rags.map(walk),
   }
 }
 
