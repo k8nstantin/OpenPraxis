@@ -71,10 +71,10 @@ export function AddEntityButton() {
         <button
           type='button'
           className='flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors'
-          title='Add Entity'
+          title='Create Entity'
         >
           <Plus className='h-3.5 w-3.5' />
-          Add
+          Create Entity
         </button>
       </DialogTrigger>
       <DialogContent className='sm:max-w-md'>
