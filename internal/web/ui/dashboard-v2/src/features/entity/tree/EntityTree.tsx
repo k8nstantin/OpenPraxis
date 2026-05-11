@@ -41,6 +41,7 @@ const PAGE_URLS: Record<string, string> = {
   __page_audit__: '/audit',
   __page_activity__: '/activity',
   __page_settings__: '/settings',
+  __page_entity_types__: '/settings/entity-types',
 }
 
 const PAGE_NODES = Object.entries(PAGE_URLS).map(([id, _]) => ({
@@ -56,6 +57,7 @@ const PAGE_NODES = Object.entries(PAGE_URLS).map(([id, _]) => ({
     __page_audit__: 'Audit',
     __page_activity__: 'Activity',
     __page_settings__: 'Settings',
+    __page_entity_types__: 'Entity Types',
   }[id] ?? id,
   kind: 'page',
   status: '',

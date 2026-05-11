@@ -44,6 +44,7 @@ const PAGE_NAV_ICON: Record<string, ElementType> = {
   __page_audit__: AlertTriangle,
   __page_activity__: Activity,
   __page_settings__: Settings,
+  __page_entity_types__: Database,
 }
 
 const STATUS_COLOR: Partial<Record<string, string>> = {
@@ -57,7 +58,7 @@ const STATUS_GLYPH: Partial<Record<string, string>> = {
   [TreeStatus.Running]: '●',
   [TreeStatus.Completed]: '✓',
   [TreeStatus.Failed]: '✗',
-  [TreeStatus.Active]: '⚠',
+  [TreeStatus.Active]: '●',
   [TreeStatus.Draft]: '○',
   [TreeStatus.Closed]: '○',
   [TreeStatus.Archived]: '○',
