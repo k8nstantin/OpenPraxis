@@ -10,6 +10,7 @@ export interface TreeNode {
   name: string
   kind: string  // EntityKind for real entities; 'page' for synthetic nav nodes
   status: string
+  iconName?: string  // lucide icon name for dynamic entity types from entity_types table
   children?: TreeNode[]
 }
 

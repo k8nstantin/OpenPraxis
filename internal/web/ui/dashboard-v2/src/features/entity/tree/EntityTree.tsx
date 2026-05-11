@@ -111,12 +111,16 @@ export function EntityTree() {
   )
   const overlaid = rawTree ? overlayLiveStatus(rawTree, liveIds) : null
 
-  // Build display name map from entity_types for extra/dynamic groups.
+  // Build display name + icon name maps from entity_types.
   const typeDisplayName = useMemo(() => {
     const m: Record<string, string> = {}
-    for (const et of entityTypes ?? []) {
-      m[et.name] = et.display_name
-    }
+    for (const et of entityTypes ?? []) m[et.name] = et.display_name
+    return m
+  }, [entityTypes])
+
+  const typeIconName = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const et of entityTypes ?? []) m[et.name] = et.icon
     return m
   }, [entityTypes])
 
@@ -143,9 +147,9 @@ export function EntityTree() {
       name: typeDisplayName[typeName] ?? typeName,
       kind: '__group__',
       status: '',
-      children: nodes,
+      children: nodes.map(n => ({ ...n, iconName: typeIconName[typeName] })),
     }))
-  }, [overlaid?.extra_types, typeDisplayName])
+  }, [overlaid?.extra_types, typeDisplayName, typeIconName])
 
   const treeData: TreeNode[] = [
     {

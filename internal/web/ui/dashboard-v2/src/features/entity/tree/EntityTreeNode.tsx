@@ -32,6 +32,22 @@ export const KIND_ICON: Record<string, ElementType> = {
   RAG: Database,
 }
 
+// Lucide icons available for dynamic entity types — keyed by the icon
+// name string stored in entity_types.icon. Extend this map when new
+// icon names are used in Settings › Entity Types.
+export const LUCIDE_BY_NAME: Record<string, ElementType> = {
+  Activity, AlertTriangle, BarChart3, Boxes, Brain, CalendarClock,
+  CheckSquare, Database, FileText, GitBranch, Inbox, LayoutDashboard,
+  Lightbulb, ScrollText, Settings, TrendingUp, Wand2,
+}
+
+// Resolve the icon for any entity kind — checks KIND_ICON first,
+// then LUCIDE_BY_NAME (for dynamic types with an icon name from entity_types),
+// then falls back to GitBranch.
+export function kindIcon(kind: string, iconName?: string): ElementType {
+  return KIND_ICON[kind] ?? (iconName ? LUCIDE_BY_NAME[iconName] : undefined) ?? GitBranch
+}
+
 // Icons for synthetic page nav nodes — keyed by node ID.
 const PAGE_NAV_ICON: Record<string, ElementType> = {
   __page_overview__: LayoutDashboard,
@@ -112,7 +128,7 @@ export function EntityTreeNode({ node, style, dragHandle }: NodeRendererProps<Tr
     )
   }
 
-  const Icon = KIND_ICON[node.data.kind] ?? GitBranch
+  const Icon = kindIcon(node.data.kind, node.data.iconName)
   const glyph = STATUS_GLYPH[node.data.status] ?? '○'
   const color = STATUS_COLOR[node.data.status] ?? 'text-muted-foreground'
   const isPulsing = node.data.status === TreeStatus.Running
