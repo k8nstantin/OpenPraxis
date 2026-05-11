@@ -76,13 +76,19 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		allEdges, _ := n.Relationships.ListOutgoingForMany(ctx, allIDs, "")
 		type adjEdge struct{ dst, kind string }
 		adj := make(map[string][]adjEdge)
-		// ownedByOwns tracks IDs that have a parent via owns — used to find roots.
+		// ownedByOwns tracks IDs owned by a same-or-lower-tier entity.
+		// A product owned by a SKILL is still a root — skills are governance,
+		// not hierarchy parents. Only exclude from root when owned by another
+		// product, manifest, or task (i.e. a non-skill entity).
 		ownedByOwns := make(map[string]bool)
 		for srcID, edges := range allEdges {
 			for _, e := range edges {
 				adj[srcID] = append(adj[srcID], adjEdge{e.DstID, e.Kind})
 				if e.Kind == relationships.EdgeOwns {
-					ownedByOwns[e.DstID] = true
+					srcEntity := entityByID[srcID]
+					if srcEntity == nil || srcEntity.Type != entity.TypeSkill {
+						ownedByOwns[e.DstID] = true
+					}
 				}
 			}
 		}
