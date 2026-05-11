@@ -203,9 +203,10 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(rags, func(i, j int) bool { return rags[i].ID > rags[j].ID })
 
-		// knownSpecial is derived from builtinKinds — single source of truth.
-		// Any kind NOT in this set is included in by_type only and as an extra
-		// section in the response.
+		// knownSpecial intentionally uses builtinKinds (not the active kinds slice).
+		// Custom types from entity_types must NOT be in knownSpecial — they should
+		// flow to extra_types where the frontend builds dynamic sidebar groups.
+		// Only the 6 builtin kinds get their own dedicated named response sections.
 		knownSpecial := make(map[string]bool, len(builtinKinds))
 		for _, k := range builtinKinds {
 			knownSpecial[k] = true

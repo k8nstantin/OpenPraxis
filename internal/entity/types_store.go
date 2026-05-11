@@ -117,9 +117,12 @@ func (s *TypesStore) Seed(ctx context.Context) error {
 			// Only backfill color/icon if they still hold the DB-DEFAULT values —
 			// meaning the columns were just added via ALTER TABLE. If an operator
 			// has customized them, leave them alone (respect SCD-2 spirit).
+			// Backfill color/icon if EITHER still holds the DB-default value
+			// (column was just added via ALTER TABLE). If an operator has
+			// customized BOTH, leave them alone.
 			_, _ = s.db.ExecContext(ctx,
 				`UPDATE entity_types SET color=?, icon=?
-				 WHERE name=? AND valid_to='' AND color='#6366f1' AND icon='Database'`,
+				 WHERE name=? AND valid_to='' AND (color='#6366f1' OR icon='Database')`,
 				t.color, t.icon, t.name)
 			continue
 		}

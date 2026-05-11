@@ -311,7 +311,7 @@ func (s *Store) ListByIDs(ids []string) ([]*Entity, error) {
 // Pass status="" to skip status filtering. limit=0 returns all rows.
 func (s *Store) ListByTypes(types []string, status string, limit int) ([]*Entity, error) {
 	if len(types) == 0 {
-		return nil, nil
+		return []*Entity{}, nil
 	}
 	placeholders := make([]string, len(types))
 	args := make([]any, len(types))

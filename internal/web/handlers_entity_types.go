@@ -117,6 +117,18 @@ func apiEntityTypesUpdate(n *node.Node) http.HandlerFunc {
 		targetName := name
 		if body.NewName != "" {
 			targetName = strings.TrimSpace(body.NewName)
+			// Reject rename if new_name already exists as a different type.
+			if targetName != name {
+				collision, cerr := n.EntityTypes.Exists(r.Context(), targetName)
+				if cerr != nil {
+					http.Error(w, cerr.Error(), http.StatusInternalServerError)
+					return
+				}
+				if collision {
+					http.Error(w, "entity type '"+targetName+"' already exists", http.StatusConflict)
+					return
+				}
+			}
 		}
 		et, err := n.EntityTypes.Rename(r.Context(), name, targetName, body.DisplayName, body.Description, body.Color, body.Icon, "operator")
 		if err != nil {
