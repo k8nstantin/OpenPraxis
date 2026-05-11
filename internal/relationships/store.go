@@ -552,9 +552,8 @@ func validateAsOf(asOf string) error {
 // ListOutgoing returns all CURRENT edges leaving srcID, optionally
 // filtered to a specific edge kind. "Current" means valid_to == ''.
 //
-// edgeKind == "" returns every kind (owns + depends_on + reviews +
-// links_to). Pass a specific kind to restrict (e.g. EdgeDependsOn for
-// just the dep graph).
+// edgeKind == "" returns every kind (owns + depends_on).
+// Pass a specific kind to restrict (e.g. EdgeDependsOn for just the dep graph).
 //
 // Hits the partial index idx_rel_src_current — O(log n + matches) on
 // current state regardless of how much history accumulates.
@@ -825,7 +824,7 @@ type WalkRow struct {
 // appear in the walk.
 //
 // edgeKinds filters which edge kinds to follow:
-//   - nil or empty: follow ALL edge kinds (owns + depends_on + reviews + links_to)
+//   - nil or empty: follow ALL edge kinds (owns + depends_on)
 //   - otherwise: only follow edges whose kind is in the slice
 //
 // maxDepth caps recursion. 0 means "root only" (anchor row only — the

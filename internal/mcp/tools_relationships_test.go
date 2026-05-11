@@ -79,9 +79,11 @@ func TestRelCreate_HappyPath(t *testing.T) {
 }
 
 func TestRelCreate_ValidationError(t *testing.T) {
+	// validKind now accepts any non-empty string (entity_types DB is the
+	// source of truth). Empty string is still rejected.
 	s := newTestServerWithRelationships(t)
 	res, _ := s.handleRelCreate(context.Background(), buildReq(map[string]any{
-		"src_kind": "garbage", "src_id": "M1",
+		"src_kind": "", "src_id": "M1",
 		"dst_kind": "manifest", "dst_id": "M2",
 		"kind": "depends_on",
 	}))

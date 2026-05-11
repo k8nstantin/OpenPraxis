@@ -203,16 +203,12 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(rags, func(i, j int) bool { return rags[i].ID > rags[j].ID })
 
-		// knownSpecial tracks the kinds that are already handled in the named
-		// top-level sections. Any kind NOT in this set is included in by_type
-		// only and as an extra section in the response.
-		knownSpecial := map[string]bool{
-			entity.TypeSkill:    true,
-			entity.TypeIdea:     true,
-			entity.TypeProduct:  true,
-			entity.TypeManifest: true,
-			entity.TypeTask:     true,
-			entity.TypeRAG:      true,
+		// knownSpecial is derived from builtinKinds — single source of truth.
+		// Any kind NOT in this set is included in by_type only and as an extra
+		// section in the response.
+		knownSpecial := make(map[string]bool, len(builtinKinds))
+		for _, k := range builtinKinds {
+			knownSpecial[k] = true
 		}
 
 		// by_type: all entity types keyed by name — for forwards-compatible frontend consumption.

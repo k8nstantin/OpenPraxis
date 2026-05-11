@@ -7,6 +7,8 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+
+	"github.com/gorilla/mux"
 )
 
 // apiEntityTypesList handles GET /api/entity-types.
@@ -74,6 +76,53 @@ func apiEntityTypesCreate(n *node.Node) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, et)
+	}
+}
+
+// apiEntityTypesUpdate handles PUT /api/entity-types/:name.
+// Accepts {"display_name", "description", "color", "icon", "new_name"} and updates the type.
+func apiEntityTypesUpdate(n *node.Node) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if n.EntityTypes == nil {
+			http.Error(w, "entity types not available", http.StatusServiceUnavailable)
+			return
+		}
+		name := mux.Vars(r)["name"]
+		if name == "" {
+			http.Error(w, "name is required", http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			DisplayName string `json:"display_name"`
+			Description string `json:"description"`
+			Color       string `json:"color"`
+			Icon        string `json:"icon"`
+			NewName     string `json:"new_name"` // optional rename
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		// Verify the type exists
+		exists, err := n.EntityTypes.Exists(r.Context(), name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			http.Error(w, "entity type '"+name+"' not found", http.StatusNotFound)
+			return
+		}
+		targetName := name
+		if body.NewName != "" {
+			targetName = strings.TrimSpace(body.NewName)
+		}
+		et, err := n.EntityTypes.Rename(r.Context(), name, targetName, body.DisplayName, body.Description, body.Color, body.Icon, "operator")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		writeJSON(w, et)
 	}
 }

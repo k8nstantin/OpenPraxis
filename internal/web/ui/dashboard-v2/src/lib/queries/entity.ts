@@ -103,7 +103,7 @@ async function fetchJSON<T>(path: string): Promise<T> {
 // GET /api/relationships/graph?root_id=&root_kind=&depth=&edge_kinds=
 export interface GraphNode {
   id: string
-  kind: 'product' | 'manifest' | 'task'
+  kind: AnyEntityKind
   title: string
   status: string
 }
@@ -111,7 +111,7 @@ export interface GraphEdge {
   id: string
   source: string
   target: string
-  kind: 'owns' | 'depends_on' | 'reviews' | 'links_to'
+  kind: 'owns' | 'depends_on'
 }
 export interface GraphPayload {
   nodes: GraphNode[]
