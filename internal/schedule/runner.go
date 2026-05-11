@@ -168,9 +168,17 @@ func (r *Runner) makeJob(id int64, kind, entityID string) func() {
 		}
 		dispatch, ok := r.dispatchers[kind]
 		if !ok {
-			slog.Warn("schedule.Runner: no dispatcher for kind",
+			// Fall back to the wildcard dispatcher ("*") so entity types added
+			// at runtime (via entity_types table) are handled without a server
+			// restart. Unknown kinds with no fallback are logged + skipped.
+			dispatch, ok = r.dispatchers["*"]
+			if !ok {
+				slog.Warn("schedule.Runner: no dispatcher for kind",
+					"schedule_id", id, "entity_kind", kind, "entity_id", entityID)
+				return
+			}
+			slog.Info("schedule.Runner: using fallback dispatcher for kind",
 				"schedule_id", id, "entity_kind", kind, "entity_id", entityID)
-			return
 		}
 		if err := dispatch(ctx, entityID, id); err != nil {
 			// Don't MarkFired on dispatch failure — leave the row to

@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/k8nstantin/OpenPraxis/internal/node"
+	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/templates"
 )
 
@@ -258,9 +259,11 @@ func apiTemplatePreview(n *node.Node) http.HandlerFunc {
 				}
 				// Look up manifest via relationships (owns edge pointing to this task)
 				if n.Relationships != nil {
-					if edges, err := n.Relationships.ListIncoming(r.Context(), tk.EntityUID, "owns"); err == nil {
+					if edges, err := n.Relationships.ListIncoming(r.Context(), tk.EntityUID, relationships.EdgeOwns); err == nil {
+						// Accept the first owner regardless of type — any entity that
+						// owns a task can act as the "manifest" context for template rendering.
 						for _, edge := range edges {
-							if e, err2 := n.Entities.Get(edge.SrcID); err2 == nil && e != nil && e.Type == "manifest" {
+							if e, err2 := n.Entities.Get(edge.SrcID); err2 == nil && e != nil {
 								data.Manifest = templates.ManifestView{
 									ID:    e.EntityUID,
 									Title: e.Title,

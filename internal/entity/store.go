@@ -305,6 +305,40 @@ func (s *Store) ListByIDs(ids []string) ([]*Entity, error) {
 	return scanEntities(rows)
 }
 
+// ListByTypes returns all current (valid_to = '') entities whose type is in
+// the provided list. Executes a single query using IN (...) instead of one
+// query per type, which is more efficient for the tree handler fan-out.
+// Pass status="" to skip status filtering. limit=0 returns all rows.
+func (s *Store) ListByTypes(types []string, status string, limit int) ([]*Entity, error) {
+	if len(types) == 0 {
+		return []*Entity{}, nil
+	}
+	placeholders := make([]string, len(types))
+	args := make([]any, len(types))
+	for i, t := range types {
+		placeholders[i] = "?"
+		args[i] = t
+	}
+	query := `SELECT row_id, entity_uid, type, title, status, tags,
+		valid_from, valid_to, changed_by, change_reason, created_at
+		FROM entities WHERE valid_to = '' AND type IN (` + strings.Join(placeholders, ",") + `)`
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY created_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("entity: list_by_types: %w", err)
+	}
+	defer rows.Close()
+	return scanEntities(rows)
+}
+
 // Search returns current rows where title contains query (case-insensitive
 // substring), optionally filtered by entityType. limit=0 returns all matches.
 func (s *Store) Search(query, entityType string, limit int) ([]*Entity, error) {

@@ -37,12 +37,9 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		type res struct {
-			kind  string
-			items []*entity.Entity
-			err   error
-		}
-		kinds := []string{
+		// Build the kinds slice from entity_types table when available;
+		// fall back to the built-in set if the store is nil or returns an error.
+		builtinKinds := []string{
 			entity.TypeSkill,
 			entity.TypeIdea,
 			entity.TypeProduct,
@@ -50,18 +47,28 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			entity.TypeTask,
 			entity.TypeRAG,
 		}
-		ch := make(chan res, len(kinds))
-		for _, k := range kinds {
-			go func(kind string) {
-				items, err := n.Entities.List(kind, "", 500)
-				ch <- res{kind: kind, items: items, err: err}
-			}(k)
+		var kinds []string
+		if n.EntityTypes != nil {
+			if etypes, err := n.EntityTypes.List(ctx); err == nil && len(etypes) > 0 {
+				kinds = make([]string, 0, len(etypes))
+				for _, et := range etypes {
+					kinds = append(kinds, et.Name)
+				}
+			}
 		}
+		if len(kinds) == 0 {
+			kinds = builtinKinds
+		}
+
+		// Fetch all entities for the active kinds in a single IN-query instead
+		// of spawning one goroutine per kind. SQLite serialises writes but reads
+		// are still serialised through the connection pool, so the fan-out goroutine
+		// approach added goroutine overhead without any real concurrency benefit.
 		byKind := make(map[string][]*entity.Entity)
-		for range kinds {
-			r := <-ch
-			if r.err == nil {
-				byKind[r.kind] = r.items
+		allEntities, err := n.Entities.ListByTypes(kinds, "", 500*len(kinds))
+		if err == nil {
+			for _, e := range allEntities {
+				byKind[e.Type] = append(byKind[e.Type], e)
 			}
 		}
 
@@ -196,12 +203,46 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(rags, func(i, j int) bool { return rags[i].ID > rags[j].ID })
 
+		// knownSpecial intentionally uses builtinKinds (not the active kinds slice).
+		// Custom types from entity_types must NOT be in knownSpecial — they should
+		// flow to extra_types where the frontend builds dynamic sidebar groups.
+		// Only the 6 builtin kinds get their own dedicated named response sections.
+		knownSpecial := make(map[string]bool, len(builtinKinds))
+		for _, k := range builtinKinds {
+			knownSpecial[k] = true
+		}
+
+		// by_type: all entity types keyed by name — for forwards-compatible frontend consumption.
+		byType := make(map[string][]*treeNode, len(kinds))
+		for _, k := range kinds {
+			nodes := make([]*treeNode, 0)
+			for _, e := range byKind[k] {
+				if e.Status != entity.StatusArchived {
+					if nd := buildNode(e.EntityUID, make(map[string]bool)); nd != nil {
+						nodes = append(nodes, nd)
+					}
+				}
+			}
+			sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID > nodes[j].ID })
+			byType[k] = nodes
+		}
+
+		// extra_types: unknown/custom entity kinds not handled as named sections.
+		extraTypes := make(map[string][]*treeNode)
+		for _, k := range kinds {
+			if !knownSpecial[k] {
+				extraTypes[k] = byType[k]
+			}
+		}
+
 		writeJSON(w, map[string]any{
-			"skills":    skills,
-			"lifecycle": lifecycle,
-			"manifests": manifests,
-			"tasks":     tasks,
-			"rags":      rags,
+			"skills":      skills,
+			"lifecycle":   lifecycle,
+			"manifests":   manifests,
+			"tasks":       tasks,
+			"rags":        rags,
+			"by_type":     byType,
+			"extra_types": extraTypes,
 		})
 	}
 }

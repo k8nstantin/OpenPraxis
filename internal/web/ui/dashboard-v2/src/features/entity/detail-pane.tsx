@@ -1,5 +1,7 @@
+import { useMemo } from 'react'
 import { useEntity, type EntityKind } from '@/lib/queries/entity'
-import { Boxes, CheckSquare, FileText } from 'lucide-react'
+import { useEntityTypes } from '@/lib/queries/entity-types'
+import { Boxes, CheckSquare, Database, FileText } from 'lucide-react'
 import { CopyButton } from '@/components/copy-button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -37,16 +39,22 @@ export function EntityDetailPane({
   onTabChange: (tab: EntityTabId) => void
 }) {
   const entity = useEntity(kind, entityId)
+  const { data: entityTypes } = useEntityTypes()
+
+  // Static icon map for built-in kinds; unknown/custom kinds fall back to Database.
   const iconMap: Record<string, React.ElementType> = {
     product: Boxes, task: CheckSquare, manifest: FileText,
     skill: FileText, idea: FileText,
   }
-  const nounMap: Record<string, string> = {
-    product: 'product', manifest: 'manifest', task: 'task',
-    skill: 'skill', idea: 'idea',
-  }
-  const Icon = iconMap[kind] ?? FileText
-  const noun = nounMap[kind] ?? kind
+
+  // noun: prefer display_name from entity_types; fall back to built-in map then kind itself.
+  const noun = useMemo(() => {
+    const et = entityTypes?.find((t) => t.name === kind)
+    if (et) return et.display_name.toLowerCase()
+    return kind
+  }, [entityTypes, kind])
+
+  const Icon = iconMap[kind] ?? Database
 
   if (!entityId) {
     return (

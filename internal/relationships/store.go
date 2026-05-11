@@ -56,14 +56,13 @@ var ErrSelfLoop = errors.New("relationships: a node cannot have an edge to itsel
 // rejects empty IDs at the top so corrupted-state never propagates.
 var ErrEmptyID = errors.New("relationships: src_id and dst_id must be non-empty")
 
-// allEntityKinds and allEdgeKinds are the source of truth for valid
-// kind values. validKind / validEdgeKind iterate these slices instead
-// of hard-coding equality chains; the constant declarations below
-// reference these slices via the validators, so adding a new kind in
-// ONE place (the slice) auto-extends both the validator AND keeps the
-// constants iterable for callers that want to enumerate. Was: two
-// hard-coded == chains that drifted whenever a constant was added.
-var allEntityKinds = []string{KindProduct, KindManifest, KindTask, KindSkill, KindIdea, KindRAG}
+// allEdgeKinds is the source of truth for valid edge kind values.
+// Entity kinds are no longer validated against a static slice — the
+// DB-driven entity_types table is the authoritative source of truth for
+// which entity kinds exist. validKind() only rejects the empty string.
+// The named Kind constants below remain for use as typed references in
+// application code; adding a new built-in kind only requires a new const
+// and a row in entity_types (no slice to update).
 var allEdgeKinds = []string{EdgeOwns, EdgeDependsOn}
 
 // AllEdgeKinds returns all valid edge kinds. Use this instead of repeating
@@ -74,16 +73,13 @@ func AllEdgeKinds() []string {
 	return out
 }
 
-// validKind returns true if k is one of the enumerated entity kinds.
-// Iterates allEntityKinds so adding a new entity kind only requires
-// extending the slice — no validator edit needed.
+// validKind returns true if k is a non-empty string. The DB-driven
+// entity_types table is the source of truth for valid entity kinds;
+// Go-side validation only rejects the empty string (which would silently
+// corrupt the DAG). Edge kinds are still code-defined and validated via
+// validEdgeKind.
 func validKind(k string) bool {
-	for _, v := range allEntityKinds {
-		if k == v {
-			return true
-		}
-	}
-	return false
+	return k != ""
 }
 
 // validEdgeKind returns true if k is one of the enumerated edge kinds.
@@ -109,10 +105,11 @@ func nowUTC() string {
 }
 
 // Standard entity kinds. Stored as TEXT in src_kind / dst_kind columns.
-// Schema is portable — no CHECK constraint enforces this set; Go-side
-// validKind() is the only gate. Adding a new kind: extend allEntityKinds
-// (which the validator iterates) AND add the const; the schema needs
-// no migration since it's just TEXT.
+// These constants are used as typed references in application code.
+// Adding a new built-in kind: add the const here AND a seed row in
+// entity_types — no slice to update, no schema migration needed
+// (it is just TEXT). validKind() accepts any non-empty string because
+// the entity_types table is the authoritative domain validator.
 const (
 	KindProduct  = "product"
 	KindManifest = "manifest"
@@ -555,9 +552,8 @@ func validateAsOf(asOf string) error {
 // ListOutgoing returns all CURRENT edges leaving srcID, optionally
 // filtered to a specific edge kind. "Current" means valid_to == ''.
 //
-// edgeKind == "" returns every kind (owns + depends_on + reviews +
-// links_to). Pass a specific kind to restrict (e.g. EdgeDependsOn for
-// just the dep graph).
+// edgeKind == "" returns every kind (owns + depends_on).
+// Pass a specific kind to restrict (e.g. EdgeDependsOn for just the dep graph).
 //
 // Hits the partial index idx_rel_src_current — O(log n + matches) on
 // current state regardless of how much history accumulates.
@@ -828,7 +824,7 @@ type WalkRow struct {
 // appear in the walk.
 //
 // edgeKinds filters which edge kinds to follow:
-//   - nil or empty: follow ALL edge kinds (owns + depends_on + reviews + links_to)
+//   - nil or empty: follow ALL edge kinds (owns + depends_on)
 //   - otherwise: only follow edges whose kind is in the slice
 //
 // maxDepth caps recursion. 0 means "root only" (anchor row only — the

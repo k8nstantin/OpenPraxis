@@ -185,13 +185,18 @@ func TestCreate_ValidationErrors(t *testing.T) {
 			wantErr: ErrEmptyID,
 		},
 		{
+			// validKind accepts any non-empty string — the DB-driven entity_types
+			// table is the source of truth for valid kinds. Only the empty string
+			// is rejected here (would silently corrupt the DAG).
 			name: "bad src_kind",
-			edge: Edge{SrcKind: "garbage", SrcID: "A", DstKind: KindManifest, DstID: "B", Kind: EdgeDependsOn},
+			edge: Edge{SrcKind: "", SrcID: "A", DstKind: KindManifest, DstID: "B", Kind: EdgeDependsOn},
 			wantErr: ErrInvalidKind,
 		},
 		{
+			// Same rationale as bad_src_kind: empty dst_kind is rejected;
+			// non-empty strings are accepted because entity_types is authoritative.
 			name: "bad dst_kind",
-			edge: Edge{SrcKind: KindManifest, SrcID: "A", DstKind: "garbage", DstID: "B", Kind: EdgeDependsOn},
+			edge: Edge{SrcKind: KindManifest, SrcID: "A", DstKind: "", DstID: "B", Kind: EdgeDependsOn},
 			wantErr: ErrInvalidKind,
 		},
 		{

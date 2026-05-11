@@ -7,6 +7,7 @@ import {
   type GraphNode,
   type GraphEdge,
 } from '@/lib/queries/entity'
+import { useEntityTypes } from '@/lib/queries/entity-types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -45,6 +46,8 @@ const KIND_COLOR: Record<string, string> = {
   product:  '#3b82f6', // blue-500
   manifest: '#a78bfa', // violet-400
   task:     '#10b981', // emerald-500
+  // fallback for unknown/custom entity types
+  _default: '#6366f1', // indigo-500
 }
 
 const KIND_SYMBOL: Record<string, string> = {
@@ -52,6 +55,8 @@ const KIND_SYMBOL: Record<string, string> = {
   product:  'roundRect',
   manifest: 'diamond',
   task:     'circle',
+  // fallback for unknown/custom entity types
+  _default: 'diamond',
 }
 
 const KIND_SIZE: Record<string, number> = {
@@ -59,6 +64,8 @@ const KIND_SIZE: Record<string, number> = {
   product:  32,
   manifest: 26,
   task:     18,
+  // fallback for unknown/custom entity types
+  _default: 20,
 }
 
 interface ChartNode {
@@ -86,10 +93,21 @@ interface ChartLink {
 function build(
   rootId: string,
   nodes: GraphNode[],
-  edges: GraphEdge[]
+  edges: GraphEdge[],
+  apiKindColor: Record<string, string>
 ): { data: ChartNode[]; links: ChartLink[]; categories: { name: string }[] } {
-  const categories = [{ name: 'skill' }, { name: 'product' }, { name: 'manifest' }, { name: 'task' }]
-  const catIndex: Record<string, number> = { skill: 0, product: 1, manifest: 2, task: 3 }
+  // Build categories dynamically from the node kinds present in this graph.
+  const seenKinds: string[] = []
+  const seenSet = new Set<string>()
+  for (const n of nodes) {
+    if (!seenSet.has(n.kind)) {
+      seenSet.add(n.kind)
+      seenKinds.push(n.kind)
+    }
+  }
+  const categories = seenKinds.map((k) => ({ name: k }))
+  const catIndex: Record<string, number> = {}
+  seenKinds.forEach((k, i) => { catIndex[k] = i })
   // Per-node radial-gradient fill. ECharts accepts {type:'radial',
   // colorStops:[]} on itemStyle.color directly. Center bright →
   // periphery deeper; gives each node a soft "glow from within" look.
@@ -104,19 +122,23 @@ function build(
       { offset: 1, color: hex + '60' },
     ],
   })
-  const data: ChartNode[] = nodes.map((n) => ({
+  const data: ChartNode[] = nodes.map((n) => {
+    const color = apiKindColor[n.kind] ?? KIND_COLOR[n.kind] ?? KIND_COLOR._default
+    const symbol = KIND_SYMBOL[n.kind] ?? KIND_SYMBOL._default
+    const size = KIND_SIZE[n.kind] ?? KIND_SIZE._default
+    return ({
     id: n.id,
     name: n.title,
-    symbol: KIND_SYMBOL[n.kind] ?? 'circle',
-    symbolSize: n.id === rootId ? KIND_SIZE[n.kind] + 12 : KIND_SIZE[n.kind],
+    symbol,
+    symbolSize: n.id === rootId ? size + 12 : size,
     category: catIndex[n.kind] ?? 0,
     itemStyle: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      color: grad(KIND_COLOR[n.kind] ?? '#3b82f6') as any,
+      color: grad(color) as any,
       borderColor: STATUS_BORDER[n.status] ?? '#71717a',
       borderWidth: n.id === rootId ? 3 : 1.5,
       shadowBlur: n.id === rootId ? 24 : 8,
-      shadowColor: KIND_COLOR[n.kind] ?? '#3b82f6',
+      shadowColor: color,
       shadowOffsetX: 0,
       shadowOffsetY: 0,
     },
@@ -125,7 +147,7 @@ function build(
     },
     _kind: n.kind,
     _status: n.status,
-  }))
+  })})
   const links: ChartLink[] = edges.map((e) => {
     const isOwns = e.kind === 'owns'
     return {
@@ -148,11 +170,22 @@ function build(
 export function DAGTab({ kind, entityId }: DAGTabProps) {
   const graph = useEntityGraph(kind, entityId, 10)
   const navigate = useNavigate()
+  const entityTypes = useEntityTypes()
+
+  // Build a color map from the API data so custom entity types get their
+  // configured colors. Falls back to KIND_COLOR for any missing entry.
+  const apiKindColor = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const et of entityTypes.data ?? []) {
+      if (et.color) m[et.name] = et.color
+    }
+    return m
+  }, [entityTypes.data])
 
   const built = useMemo(() => {
     if (!graph.data) return null
-    return build(entityId, graph.data.nodes, graph.data.edges)
-  }, [graph.data, entityId])
+    return build(entityId, graph.data.nodes, graph.data.edges, apiKindColor)
+  }, [graph.data, entityId, apiKindColor])
 
   if (graph.isLoading) {
     return (
@@ -255,17 +288,11 @@ export function DAGTab({ kind, entityId }: DAGTabProps) {
                 if (p.dataType !== 'node' || !p.data) return
                 const d = p.data
                 if (d.id === entityId) return
-                const target =
-                  d._kind === 'product'
-                    ? '/products'
-                    : d._kind === 'manifest'
-                      ? '/manifests'
-                      : '/tasks'
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 navigate({
-                  to: target,
-                  search: { id: d.id, tab: 'dag' },
-                } as any)
+                  to: '/entities/$uid',
+                  params: { uid: d.id },
+                  search: { kind: d._kind, tab: 'dag' },
+                })
               },
             }}
           />

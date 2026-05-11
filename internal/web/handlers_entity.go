@@ -81,12 +81,20 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 			return
 		}
 		// Wire the owns edge from parent to the newly created entity.
+		// ProjectID and ManifestID wiring is not restricted to specific entity
+		// types — any entity can be owned by any other entity via EdgeOwns.
+		// SrcKind is resolved by looking up the parent entity so the edge is
+		// stamped with the correct kind regardless of parent type.
 		if n.Relationships != nil {
-			if req.ProjectID != "" && req.Type == "manifest" {
+			if req.ProjectID != "" {
+				srcKind := relationships.KindProduct // default for ProjectID
+				if parent, _ := n.Entities.Get(req.ProjectID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindProduct,
+					SrcKind:   srcKind,
 					SrcID:     req.ProjectID,
-					DstKind:   relationships.KindManifest,
+					DstKind:   e.Type,
 					DstID:     e.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
@@ -94,11 +102,15 @@ func apiEntityCreate(n *node.Node) http.HandlerFunc {
 					slog.Error("entity create: wire owns edge failed", "src", req.ProjectID, "dst", e.EntityUID, "err", err)
 				}
 			}
-			if req.ManifestID != "" && req.Type == "task" {
+			if req.ManifestID != "" {
+				srcKind := relationships.KindManifest // default for ManifestID
+				if parent, _ := n.Entities.Get(req.ManifestID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindManifest,
+					SrcKind:   srcKind,
 					SrcID:     req.ManifestID,
-					DstKind:   relationships.KindTask,
+					DstKind:   e.Type,
 					DstID:     e.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
@@ -194,7 +206,9 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 		// Handle project_id (manifest → product ownership edge).
 		if req.ProjectID != nil && n.Relationships != nil {
 			newProjectID := *req.ProjectID
-			// Remove old owns edge(s) pointing to this manifest from any product.
+			// Remove ALL incoming owns edges to this entity regardless of SrcKind —
+			// with dynamic entity types, any entity can own any other entity.
+			// Filtering by SrcKind == KindProduct was an old hardcoded assumption.
 			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
 			if err != nil {
 				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
@@ -202,20 +216,24 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 				return
 			}
 			for _, e := range incoming {
-				if e.SrcKind == relationships.KindProduct {
-					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
-						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
-						http.Error(w, "failed to remove old relationship", 500)
-						return
-					}
+				if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+					slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to remove old relationship", 500)
+					return
 				}
 			}
 			// Add new owns edge if non-empty project_id.
+			// Resolve actual src kind from the parent entity so the edge is
+			// stamped correctly regardless of parent entity type.
 			if newProjectID != "" {
+				srcKind := relationships.KindProduct // default fallback
+				if parent, _ := n.Entities.Get(newProjectID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindProduct,
+					SrcKind:   srcKind,
 					SrcID:     newProjectID,
-					DstKind:   relationships.KindManifest,
+					DstKind:   existing.Type,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
@@ -230,6 +248,9 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 		// Handle manifest_id (task → manifest ownership edge).
 		if req.ManifestID != nil && n.Relationships != nil {
 			newManifestID := *req.ManifestID
+			// Remove ALL incoming owns edges regardless of SrcKind — with dynamic
+			// entity types, any entity can own any other entity. Filtering by
+			// SrcKind == KindManifest was an old hardcoded assumption.
 			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
 			if err != nil {
 				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
@@ -237,19 +258,23 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 				return
 			}
 			for _, e := range incoming {
-				if e.SrcKind == relationships.KindManifest {
-					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
-						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
-						http.Error(w, "failed to remove old relationship", 500)
-						return
-					}
+				if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+					slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to remove old relationship", 500)
+					return
 				}
 			}
+			// Resolve actual src kind from the parent entity so the edge is
+			// stamped correctly regardless of parent entity type.
 			if newManifestID != "" {
+				srcKind := relationships.KindManifest // default fallback
+				if parent, _ := n.Entities.Get(newManifestID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindManifest,
+					SrcKind:   srcKind,
 					SrcID:     newManifestID,
-					DstKind:   relationships.KindTask,
+					DstKind:   existing.Type,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
@@ -354,10 +379,12 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 
 		// For task entities return the flat atomic run list (existing behaviour).
 		// For manifests and products walk the DAG and return a hierarchical shape:
-		//   manifest → [{task_id, task_title, runs:[...ExecutionRow]}]
-		//   product  → [{manifest_id, manifest_title, tasks:[{task_id, task_title, runs:[...]}]}]
+		//   task-kind     → flat [{...ExecutionRow}]
+		//   manifest-kind → [{task_id, task_title, runs:[...ExecutionRow]}]
+		//   product-kind  → [{manifest_id, manifest_title, tasks:[{task_id, task_title, runs:[...]}]}]
+		//   any other kind → generic walk: same shape as product (recursive owns traversal)
 		e, _ := n.Entities.Get(id)
-		if e == nil || e.Type == "task" || n.Relationships == nil {
+		if e == nil || e.Type == relationships.KindTask || n.Relationships == nil {
 			rows, err := n.ExecutionLog.ListByEntity(ctx, id, limit)
 			if err != nil {
 				http.Error(w, err.Error(), 500)
@@ -387,14 +414,14 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 			return taskRuns{TaskID: taskID, TaskTitle: taskTitle, Runs: rows}
 		}
 
-		if e.Type == "manifest" {
+		if e.Type == relationships.KindManifest {
 			// manifest → tasks
-			edges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
+			edges, _ := n.Relationships.ListOutgoing(ctx, id, relationships.EdgeOwns)
 
 			// Collect all task IDs first, then batch-fetch titles.
 			var taskIDs []string
 			for _, edge := range edges {
-				if edge.DstKind == "task" {
+				if edge.DstKind == relationships.KindTask {
 					taskIDs = append(taskIDs, edge.DstID)
 				}
 			}
@@ -412,7 +439,7 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 
 			result := []taskRuns{}
 			for _, edge := range edges {
-				if edge.DstKind == "task" {
+				if edge.DstKind == relationships.KindTask {
 					title := edge.DstID
 					if t, ok := titleByID[edge.DstID]; ok {
 						title = t
@@ -424,8 +451,10 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// product → manifests → tasks
-		manifEdges, _ := n.Relationships.ListOutgoing(ctx, id, "owns")
+		// product (or any unknown type) → manifests → tasks
+		// Unknown entity types are treated generically like "product": walk all
+		// owned non-task entities as "manifest groups", collect their tasks.
+		manifEdges, _ := n.Relationships.ListOutgoing(ctx, id, relationships.EdgeOwns)
 
 		// Pass 1: collect manifest IDs and, per manifest, their task edges.
 		// This is O(manifests) relationship queries — unavoidable without a
@@ -438,14 +467,16 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 		var allTaskIDs []string
 		var manifIDs []string
 		for _, me := range manifEdges {
-			if me.DstKind != "manifest" {
+			// Include any non-task owned entity as a "manifest group" —
+			// works for manifest-kind and any custom intermediate entity type.
+			if me.DstKind == relationships.KindTask {
 				continue
 			}
 			manifIDs = append(manifIDs, me.DstID)
-			tEdges, _ := n.Relationships.ListOutgoing(ctx, me.DstID, "owns")
+			tEdges, _ := n.Relationships.ListOutgoing(ctx, me.DstID, relationships.EdgeOwns)
 			md := manifData{id: me.DstID, taskEdges: tEdges}
 			for _, te := range tEdges {
-				if te.DstKind == "task" {
+				if te.DstKind == relationships.KindTask {
 					allTaskIDs = append(allTaskIDs, te.DstID)
 				}
 			}
@@ -483,7 +514,7 @@ func apiEntityExecutionLog(n *node.Node) http.HandlerFunc {
 			}
 			tasks := []taskRuns{}
 			for _, te := range md.taskEdges {
-				if te.DstKind != "task" {
+				if te.DstKind != relationships.KindTask {
 					continue
 				}
 				tTitle := te.DstID

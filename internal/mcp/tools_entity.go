@@ -13,8 +13,8 @@ import (
 func (s *Server) registerEntityTools() {
 	s.mcp.AddTool(
 		mcplib.NewTool("entity_create",
-			mcplib.WithDescription("Create an entity — a generic SCD-2 versioned object. Types: skill, product, manifest, task, idea."),
-			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Entity type: skill, product, manifest, task, idea")),
+			mcplib.WithDescription("Create an entity — a generic SCD-2 versioned object. Types: any type from entity_types table (built-in: skill, product, manifest, task, idea, RAG; extensible via POST /api/entity-types)."),
+			mcplib.WithString("type", mcplib.Required(), mcplib.Description("Entity type — any name from the entity_types table (built-in: skill, product, manifest, task, idea, RAG)")),
 			mcplib.WithString("title", mcplib.Required(), mcplib.Description("Entity title")),
 			mcplib.WithString("description", mcplib.Description("Initial prompt/instructions body (stored as first revision)")),
 			mcplib.WithString("status", mcplib.Description("draft, active, closed, archived. Default: draft")),
@@ -25,8 +25,8 @@ func (s *Server) registerEntityTools() {
 
 	s.mcp.AddTool(
 		mcplib.NewTool("entity_list",
-			mcplib.WithDescription("List entities, optionally filtered by type and/or status."),
-			mcplib.WithString("type", mcplib.Description("Filter by type: skill, product, manifest, task, idea")),
+			mcplib.WithDescription("List entities, optionally filtered by type and/or status. Types are DB-driven — use entity_types table for the full list of available types."),
+			mcplib.WithString("type", mcplib.Description("Filter by type — any name from the entity_types table (built-in: skill, product, manifest, task, idea, RAG)")),
 			mcplib.WithString("status", mcplib.Description("Filter by status: draft, active, closed, archived")),
 			mcplib.WithNumber("limit", mcplib.Description("Max results. Default: 50")),
 		),
@@ -64,9 +64,9 @@ func (s *Server) registerEntityTools() {
 
 	s.mcp.AddTool(
 		mcplib.NewTool("entity_search",
-			mcplib.WithDescription("Search entities by title substring (case-insensitive)."),
+			mcplib.WithDescription("Search entities by title substring (case-insensitive). Types are DB-driven — use entity_types table for the full list of available types."),
 			mcplib.WithString("query", mcplib.Required(), mcplib.Description("Search query")),
-			mcplib.WithString("type", mcplib.Description("Filter by type: skill, product, manifest, task, idea")),
+			mcplib.WithString("type", mcplib.Description("Filter by type — any name from the entity_types table (built-in: skill, product, manifest, task, idea, RAG)")),
 			mcplib.WithNumber("limit", mcplib.Description("Max results. Default: 20")),
 		),
 		s.handleEntitySearch,
