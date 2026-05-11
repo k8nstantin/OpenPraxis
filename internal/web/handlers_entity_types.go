@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	"github.com/k8nstantin/OpenPraxis/internal/node"
@@ -12,6 +13,10 @@ import (
 // Returns all current entity types as {"types": [...]}.
 func apiEntityTypesList(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if n.EntityTypes == nil {
+			http.Error(w, "entity types not available", http.StatusServiceUnavailable)
+			return
+		}
 		types, err := n.EntityTypes.List(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -28,6 +33,10 @@ func apiEntityTypesList(n *node.Node) http.HandlerFunc {
 // Accepts {"name", "display_name", "description", "color", "icon"} and creates a new type.
 func apiEntityTypesCreate(n *node.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if n.EntityTypes == nil {
+			http.Error(w, "entity types not available", http.StatusServiceUnavailable)
+			return
+		}
 		var body struct {
 			Name        string `json:"name"`
 			DisplayName string `json:"display_name"`
@@ -39,6 +48,7 @@ func apiEntityTypesCreate(n *node.Node) http.HandlerFunc {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}
+		body.Name = strings.TrimSpace(body.Name)
 		if body.Name == "" {
 			http.Error(w, "name is required", http.StatusBadRequest)
 			return

@@ -17,9 +17,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEntityTypes } from '@/lib/queries/entity-types'
 import { useCreateEntity } from '@/lib/queries/entity'
-import type { EntityKind } from '@/lib/queries/entity'
+import type { AnyEntityKind } from '@/lib/queries/entity'
 import type { Entity } from '@/lib/types'
 
 interface AddEntityDialogProps {
@@ -38,6 +39,7 @@ export function AddEntityDialog({
   onOpenChange,
   onCreated,
 }: AddEntityDialogProps) {
+  const qc = useQueryClient()
   const { data: entityTypes, isLoading: typesLoading } = useEntityTypes()
   const [selectedType, setSelectedType] = useState<string>('')
   const [title, setTitle] = useState('')
@@ -45,16 +47,19 @@ export function AddEntityDialog({
   // useCreateEntity requires the kind up front; we update it dynamically
   // as the user picks a type. Fallback to 'task' to satisfy the hook's
   // type requirement while no type is selected.
-  const create = useCreateEntity((selectedType || 'task') as EntityKind)
+  const create = useCreateEntity((selectedType || 'task') as AnyEntityKind)
 
   const handleSubmit = async () => {
     if (!selectedType || !title.trim()) return
     try {
       const entity = await create.mutateAsync({
-        type: selectedType as EntityKind,
+        type: selectedType as AnyEntityKind,
         title: title.trim(),
         status: 'draft',
       })
+      // Invalidate the entity-types cache so sidebar and other consumers
+      // reflect any newly registered type without waiting for staleTime.
+      qc.invalidateQueries({ queryKey: ['entity-types'] })
       setTitle('')
       setSelectedType('')
       onOpenChange(false)

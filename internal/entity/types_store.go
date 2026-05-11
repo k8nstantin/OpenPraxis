@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,8 +24,16 @@ type EntityType struct {
 }
 
 // TypesStore manages the entity_types table.
+//
+// createMu serializes Create's close-then-insert transaction. Same
+// rationale as relationships.Store.createMu: SQLite WAL snapshot
+// isolation lets two concurrent Creates both see "no current row",
+// close-then-insert concurrently, and produce two rows with valid_to='',
+// breaking the SCD-2 invariant. The mutex makes the close + insert
+// atomic across goroutines.
 type TypesStore struct {
-	db *sql.DB
+	db       *sql.DB
+	createMu sync.Mutex
 }
 
 // NewTypesStore creates a TypesStore and runs the idempotent schema migration.
@@ -105,10 +114,12 @@ func (s *TypesStore) Seed(ctx context.Context) error {
 			return fmt.Errorf("entity_types: seed: check %q: %w", t.name, err)
 		}
 		if exists {
-			// Update color/icon in-place for existing built-in types so that
-			// adding these columns to an existing DB picks up the correct values.
+			// Only backfill color/icon if they still hold the DB-DEFAULT values —
+			// meaning the columns were just added via ALTER TABLE. If an operator
+			// has customized them, leave them alone (respect SCD-2 spirit).
 			_, _ = s.db.ExecContext(ctx,
-				`UPDATE entity_types SET color=?, icon=? WHERE name=? AND valid_to=''`,
+				`UPDATE entity_types SET color=?, icon=?
+				 WHERE name=? AND valid_to='' AND color='#6366f1' AND icon='Database'`,
 				t.color, t.icon, t.name)
 			continue
 		}
@@ -155,6 +166,10 @@ func (s *TypesStore) Create(ctx context.Context, name, displayName, description,
 
 	typeUID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Serialize close-then-insert across goroutines; see createMu docstring.
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -204,4 +219,74 @@ func (s *TypesStore) Exists(ctx context.Context, name string) (bool, error) {
 		return false, fmt.Errorf("entity_types: exists: %w", err)
 	}
 	return count > 0, nil
+}
+
+// Rename closes the current row for oldName and inserts a new row with
+// the SAME type_uid so that entity references remain stable across renames.
+// Create() is for genuinely new types (always generates a fresh UUID);
+// Rename() is for "same logical type, different name" mutations.
+//
+// Returns ErrNotFound (as a wrapped error) if no current row for oldName exists.
+func (s *TypesStore) Rename(ctx context.Context, oldName, newName, displayName, description, color, icon, changedBy string) (*EntityType, error) {
+	if color == "" {
+		color = "#6366f1"
+	}
+	if icon == "" {
+		icon = "Database"
+	}
+	if displayName == "" {
+		displayName = newName
+	}
+
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Fetch the existing type_uid so the new row inherits it.
+	var existingUID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT type_uid FROM entity_types WHERE name = ? AND valid_to = '' LIMIT 1`, oldName).Scan(&existingUID)
+	if err != nil {
+		return nil, fmt.Errorf("entity_types: rename: fetch uid for %q: %w", oldName, err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("entity_types: rename: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Close the current row for oldName.
+	_, err = tx.ExecContext(ctx,
+		`UPDATE entity_types SET valid_to = ? WHERE name = ? AND valid_to = ''`, now, oldName)
+	if err != nil {
+		return nil, fmt.Errorf("entity_types: rename: close prior: %w", err)
+	}
+
+	// Insert new row with the same type_uid.
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO entity_types
+		(type_uid, name, display_name, description, color, icon, valid_from, valid_to, changed_by, change_reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 'rename', ?)`,
+		existingUID, newName, displayName, description, color, icon, now, changedBy, now)
+	if err != nil {
+		return nil, fmt.Errorf("entity_types: rename: insert: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("entity_types: rename: commit: %w", err)
+	}
+
+	return &EntityType{
+		TypeUID:     existingUID,
+		Name:        newName,
+		DisplayName: displayName,
+		Description: description,
+		Color:       color,
+		Icon:        icon,
+		ValidFrom:   now,
+		ValidTo:     "",
+		CreatedAt:   now,
+	}, nil
 }

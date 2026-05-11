@@ -16,6 +16,7 @@ export function useEntityTypes() {
       fetch('/api/entity-types')
         .then((r) => r.json())
         .then((d) => (d.types ?? []) as EntityType[]),
+    // 60 s stale time; types are invalidated on create via add-entity-dialog mutation.
     staleTime: 60_000,
   })
 }

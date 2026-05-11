@@ -38,21 +38,20 @@ var ErrEmptyEntityID = errors.New("schedule: entity_id must be non-empty")
 var ErrEmptyRunAt = errors.New("schedule: run_at must be non-empty")
 
 // Standard entity kinds for schedules. Stored as TEXT in entity_kind.
-// Add a new kind: extend allEntityKinds (which the validator iterates)
-// AND add the const; the schema needs no migration.
+// These constants are used as typed references in application code.
+// Adding a new kind: add the const here AND a seed row in entity_types —
+// the entity_types table is the authoritative domain validator; validKind()
+// accepts any non-empty string. No schema migration needed.
 const (
 	KindProduct  = "product"
 	KindManifest = "manifest"
 	KindTask     = "task"
 )
 
-var allEntityKinds = []string{KindProduct, KindManifest, KindTask}
-
 // validKind returns true if k is a non-empty string. The DB-driven
-// entity_types table is now the source of truth for valid entity kinds;
+// entity_types table is the source of truth for valid entity kinds;
 // Go-side validation only rejects the empty string (which would silently
-// corrupt the schedule index). The allEntityKinds slice is retained for
-// callers that enumerate built-in kinds (e.g. seed logic, tests).
+// corrupt the schedule index).
 func validKind(k string) bool {
 	return k != ""
 }

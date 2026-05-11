@@ -206,7 +206,9 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 		// Handle project_id (manifest → product ownership edge).
 		if req.ProjectID != nil && n.Relationships != nil {
 			newProjectID := *req.ProjectID
-			// Remove old owns edge(s) pointing to this manifest from any product.
+			// Remove ALL incoming owns edges to this entity regardless of SrcKind —
+			// with dynamic entity types, any entity can own any other entity.
+			// Filtering by SrcKind == KindProduct was an old hardcoded assumption.
 			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
 			if err != nil {
 				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
@@ -214,20 +216,24 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 				return
 			}
 			for _, e := range incoming {
-				if e.SrcKind == relationships.KindProduct {
-					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
-						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
-						http.Error(w, "failed to remove old relationship", 500)
-						return
-					}
+				if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+					slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to remove old relationship", 500)
+					return
 				}
 			}
 			// Add new owns edge if non-empty project_id.
+			// Resolve actual src kind from the parent entity so the edge is
+			// stamped correctly regardless of parent entity type.
 			if newProjectID != "" {
+				srcKind := relationships.KindProduct // default fallback
+				if parent, _ := n.Entities.Get(newProjectID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindProduct,
+					SrcKind:   srcKind,
 					SrcID:     newProjectID,
-					DstKind:   relationships.KindManifest,
+					DstKind:   existing.Type,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",
@@ -242,6 +248,9 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 		// Handle manifest_id (task → manifest ownership edge).
 		if req.ManifestID != nil && n.Relationships != nil {
 			newManifestID := *req.ManifestID
+			// Remove ALL incoming owns edges regardless of SrcKind — with dynamic
+			// entity types, any entity can own any other entity. Filtering by
+			// SrcKind == KindManifest was an old hardcoded assumption.
 			incoming, err := n.Relationships.ListIncoming(r.Context(), existing.EntityUID, relationships.EdgeOwns)
 			if err != nil {
 				slog.Error("re-parent: list incoming failed", "entity", existing.EntityUID, "err", err)
@@ -249,19 +258,23 @@ func apiEntityUpdate(n *node.Node) http.HandlerFunc {
 				return
 			}
 			for _, e := range incoming {
-				if e.SrcKind == relationships.KindManifest {
-					if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
-						slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
-						http.Error(w, "failed to remove old relationship", 500)
-						return
-					}
+				if err := n.Relationships.Remove(r.Context(), e.SrcID, existing.EntityUID, relationships.EdgeOwns, "http-api", "re-parent"); err != nil {
+					slog.Error("re-parent: remove old edge failed", "src", e.SrcID, "dst", existing.EntityUID, "err", err)
+					http.Error(w, "failed to remove old relationship", 500)
+					return
 				}
 			}
+			// Resolve actual src kind from the parent entity so the edge is
+			// stamped correctly regardless of parent entity type.
 			if newManifestID != "" {
+				srcKind := relationships.KindManifest // default fallback
+				if parent, _ := n.Entities.Get(newManifestID); parent != nil {
+					srcKind = parent.Type
+				}
 				if err := n.Relationships.Create(r.Context(), relationships.Edge{
-					SrcKind:   relationships.KindManifest,
+					SrcKind:   srcKind,
 					SrcID:     newManifestID,
-					DstKind:   relationships.KindTask,
+					DstKind:   existing.Type,
 					DstID:     existing.EntityUID,
 					Kind:      relationships.EdgeOwns,
 					CreatedBy: "http-api",

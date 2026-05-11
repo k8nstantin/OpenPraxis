@@ -50,6 +50,12 @@ export const KIND = {
 
 export type EntityKind = (typeof KIND)[keyof typeof KIND]
 
+// AnyEntityKind accepts the 6 known built-in kinds (with full autocomplete)
+// plus any arbitrary string for DB-driven dynamic types. Use this wherever
+// custom/user-defined kinds may flow through instead of EntityKind.
+// eslint-disable-next-line @typescript-eslint/ban-types
+export type AnyEntityKind = EntityKind | (string & {})
+
 // EntityRecord is the unified entity shape returned by /api/entities.
 export type EntityRecord = Entity
 
@@ -320,11 +326,12 @@ export function useExecutionOutput(runUid: string | undefined, isLive = true) {
 // ── Mutations ─────────────────────────────────────────────────────────
 
 // Create a new entity of any type. Returns the created entity so the
-// caller can immediately navigate to it.
-export function useCreateEntity(kind: EntityKind) {
+// caller can immediately navigate to it. Accepts AnyEntityKind so
+// DB-driven dynamic types are not rejected at the call site.
+export function useCreateEntity(kind: AnyEntityKind) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (payload: { type: EntityKind; title: string; status?: string; tags?: string[] }) => {
+    mutationFn: async (payload: { type: AnyEntityKind; title: string; status?: string; tags?: string[] }) => {
       const res = await fetch('/api/entities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -334,7 +341,10 @@ export function useCreateEntity(kind: EntityKind) {
       return (await res.json()) as Entity
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: entityKeys.list(kind) })
+      // Invalidate the list for this kind if it is a known EntityKind.
+      // For dynamic kinds the query key still matches the string value so
+      // callers that used entityKeys.list() for the same kind will refresh.
+      qc.invalidateQueries({ queryKey: [kind, 'list'] })
     },
   })
 }

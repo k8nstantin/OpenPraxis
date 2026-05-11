@@ -60,23 +60,15 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			kinds = builtinKinds
 		}
 
-		type res struct {
-			kind  string
-			items []*entity.Entity
-			err   error
-		}
-		ch := make(chan res, len(kinds))
-		for _, k := range kinds {
-			go func(kind string) {
-				items, err := n.Entities.List(kind, "", 500)
-				ch <- res{kind: kind, items: items, err: err}
-			}(k)
-		}
+		// Fetch all entities for the active kinds in a single IN-query instead
+		// of spawning one goroutine per kind. SQLite serialises writes but reads
+		// are still serialised through the connection pool, so the fan-out goroutine
+		// approach added goroutine overhead without any real concurrency benefit.
 		byKind := make(map[string][]*entity.Entity)
-		for range kinds {
-			r := <-ch
-			if r.err == nil {
-				byKind[r.kind] = r.items
+		allEntities, err := n.Entities.ListByTypes(kinds, "", 500*len(kinds))
+		if err == nil {
+			for _, e := range allEntities {
+				byKind[e.Type] = append(byKind[e.Type], e)
 			}
 		}
 

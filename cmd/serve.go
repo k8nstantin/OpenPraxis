@@ -15,6 +15,7 @@ import (
 
 	"github.com/k8nstantin/OpenPraxis/internal/chat"
 	"github.com/k8nstantin/OpenPraxis/internal/comments"
+	"github.com/k8nstantin/OpenPraxis/internal/entity"
 	execution "github.com/k8nstantin/OpenPraxis/internal/execution"
 	"github.com/k8nstantin/OpenPraxis/internal/relationships"
 	"github.com/k8nstantin/OpenPraxis/internal/settings"
@@ -564,16 +565,25 @@ var serveCmd = &cobra.Command{
 			// Any entity type that owns tasks (directly or transitively) is handled
 			// uniformly — no hardcoded type checks.
 			var taskIDs []string
+			seen := map[string]bool{parentID: true}
 			var collectAll func(id string)
 			collectAll = func(id string) {
 				edges, _ := n.Relationships.ListOutgoing(ctx, id, relationships.EdgeOwns)
 				for _, edge := range edges {
 					if edge.DstKind == relationships.KindTask {
+						if seen[edge.DstID] {
+							continue
+						}
+						seen[edge.DstID] = true
 						if te, _ := n.Entities.Get(edge.DstID); te != nil &&
-							te.Status != "archived" && te.Status != "closed" {
+							te.Status != entity.StatusArchived && te.Status != entity.StatusClosed {
 							taskIDs = append(taskIDs, edge.DstID)
 						}
 					} else {
+						if seen[edge.DstID] {
+							continue
+						}
+						seen[edge.DstID] = true
 						// non-task owned entity — recurse
 						collectAll(edge.DstID)
 					}
