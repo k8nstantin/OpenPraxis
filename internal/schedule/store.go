@@ -48,14 +48,13 @@ const (
 
 var allEntityKinds = []string{KindProduct, KindManifest, KindTask}
 
-// validKind returns true if k is one of the enumerated entity kinds.
+// validKind returns true if k is a non-empty string. The DB-driven
+// entity_types table is now the source of truth for valid entity kinds;
+// Go-side validation only rejects the empty string (which would silently
+// corrupt the schedule index). The allEntityKinds slice is retained for
+// callers that enumerate built-in kinds (e.g. seed logic, tests).
 func validKind(k string) bool {
-	for _, v := range allEntityKinds {
-		if k == v {
-			return true
-		}
-	}
-	return false
+	return k != ""
 }
 
 // nowUTC returns the current time as RFC3339Nano in UTC. Composite-PK

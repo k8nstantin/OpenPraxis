@@ -37,18 +37,33 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		type res struct {
-			kind  string
-			items []*entity.Entity
-			err   error
-		}
-		kinds := []string{
+		// Build the kinds slice from entity_types table when available;
+		// fall back to the built-in set if the store is nil or returns an error.
+		builtinKinds := []string{
 			entity.TypeSkill,
 			entity.TypeIdea,
 			entity.TypeProduct,
 			entity.TypeManifest,
 			entity.TypeTask,
 			entity.TypeRAG,
+		}
+		var kinds []string
+		if n.EntityTypes != nil {
+			if etypes, err := n.EntityTypes.List(ctx); err == nil && len(etypes) > 0 {
+				kinds = make([]string, 0, len(etypes))
+				for _, et := range etypes {
+					kinds = append(kinds, et.Name)
+				}
+			}
+		}
+		if len(kinds) == 0 {
+			kinds = builtinKinds
+		}
+
+		type res struct {
+			kind  string
+			items []*entity.Entity
+			err   error
 		}
 		ch := make(chan res, len(kinds))
 		for _, k := range kinds {
@@ -196,12 +211,49 @@ func apiEntityTree(n *node.Node) http.HandlerFunc {
 		}
 		sort.Slice(rags, func(i, j int) bool { return rags[i].ID > rags[j].ID })
 
+		// knownSpecial tracks the kinds that are already handled in the named
+		// top-level sections. Any kind NOT in this set is included in by_type
+		// only and as an extra section in the response.
+		knownSpecial := map[string]bool{
+			entity.TypeSkill:    true,
+			entity.TypeIdea:     true,
+			entity.TypeProduct:  true,
+			entity.TypeManifest: true,
+			entity.TypeTask:     true,
+			entity.TypeRAG:      true,
+		}
+
+		// by_type: all entity types keyed by name — for forwards-compatible frontend consumption.
+		byType := make(map[string][]*treeNode, len(kinds))
+		for _, k := range kinds {
+			nodes := make([]*treeNode, 0)
+			for _, e := range byKind[k] {
+				if e.Status != entity.StatusArchived {
+					if nd := buildNode(e.EntityUID, make(map[string]bool)); nd != nil {
+						nodes = append(nodes, nd)
+					}
+				}
+			}
+			sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID > nodes[j].ID })
+			byType[k] = nodes
+		}
+
+		// extra_types: unknown/custom entity kinds not handled as named sections.
+		extraTypes := make(map[string][]*treeNode)
+		for _, k := range kinds {
+			if !knownSpecial[k] {
+				extraTypes[k] = byType[k]
+			}
+		}
+
 		writeJSON(w, map[string]any{
-			"skills":    skills,
-			"lifecycle": lifecycle,
-			"manifests": manifests,
-			"tasks":     tasks,
-			"rags":      rags,
+			"skills":      skills,
+			"lifecycle":   lifecycle,
+			"manifests":   manifests,
+			"tasks":       tasks,
+			"rags":        rags,
+			"by_type":     byType,
+			"extra_types": extraTypes,
 		})
 	}
 }

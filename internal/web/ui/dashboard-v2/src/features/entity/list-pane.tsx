@@ -6,6 +6,7 @@ import {
   useLiveRuns,
   type EntityKind,
 } from '@/lib/queries/entity'
+import { useEntityTypes } from '@/lib/queries/entity-types'
 import type { Entity } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,9 +21,10 @@ const STATUS_DOT: Record<string, string> = {
   archived: 'bg-zinc-600',
 }
 
-const KIND_LABEL: Record<string, string> = {
+// Fallback labels for built-in kinds while entity_types loads.
+const KIND_LABEL_FALLBACK: Record<string, string> = {
   product: 'Products', manifest: 'Manifests', task: 'Tasks',
-  idea: 'Ideas', skill: 'Skills',
+  idea: 'Ideas', skill: 'Skills', RAG: 'RAG',
 }
 
 interface ListRow { id: string; title: string; status: string; tags?: string[] }
@@ -39,6 +41,7 @@ export function EntityListPane({
   const list = useEntityList(kind)
   const create = useCreateEntity(kind)
   const { data: liveRuns } = useLiveRuns()
+  const { data: entityTypes } = useEntityTypes()
   const runningIds = useMemo(
     () => new Set((liveRuns ?? []).map((r) => r.entity_uid)),
     [liveRuns]
@@ -49,7 +52,15 @@ export function EntityListPane({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
-  const label = KIND_LABEL[kind] ?? kind
+  // Build label from entity_types display_name when loaded; fall back to
+  // static map for built-in kinds, then capitalize the kind name.
+  const label = useMemo(() => {
+    const et = entityTypes?.find((t) => t.name === kind)
+    if (et) return et.display_name + 's'
+    const fallback = KIND_LABEL_FALLBACK[kind]
+    if (fallback) return fallback
+    return kind.charAt(0).toUpperCase() + kind.slice(1) + 's'
+  }, [entityTypes, kind])
 
   // Flat chronological list — newest first (API returns newest first by default)
   const rows: ListRow[] = useMemo(() => {

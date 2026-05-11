@@ -493,6 +493,8 @@ func mountAPI(api *mux.Router, deps ServerDeps) {
 	api.HandleFunc("/entities/{id}/comments", apiEntityCommentsAdd(n)).Methods("POST")
 	api.HandleFunc("/entities/{id}", apiEntityGet(n)).Methods("GET")
 	api.HandleFunc("/entities/{id}", apiEntityUpdate(n)).Methods("PUT")
+	api.HandleFunc("/entity-types", apiEntityTypesList(n)).Methods("GET")
+	api.HandleFunc("/entity-types", apiEntityTypesCreate(n)).Methods("POST")
 	// Legacy dependency management routes — used by the Dependencies tab.
 	// Products expose downstream sub-products; manifests expose upstream deps.
 	api.HandleFunc("/products/{id}/dependencies", apiEntityDependencies(n, "product")).Methods("GET")

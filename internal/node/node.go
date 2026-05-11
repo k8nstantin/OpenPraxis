@@ -71,6 +71,9 @@ type Node struct {
 	// ExecutionLog is the unified run-history store (EL/M1). Replaces
 	// task_runs + task_run_host_samples in EL/M5.
 	ExecutionLog *executionlog.Store
+	// EntityTypes is the DB-driven entity type registry. Seeded on boot
+	// with built-in types; new types can be added via /api/entity-types.
+	EntityTypes *entity.TypesStore
 	runner       *task.Runner
 	hostSampler  *task.HostSampler
 	Embedder     *embedding.Engine
@@ -250,6 +253,13 @@ func New(cfg *config.Config) (*Node, error) {
 	}
 	executionStore := executionlog.NewStore(index.DB())
 
+	entityTypesStore, err := entity.NewTypesStore(index.DB())
+	if err != nil {
+		return nil, fmt.Errorf("init entity types store: %w", err)
+	}
+	if err := entityTypesStore.Seed(context.Background()); err != nil {
+		return nil, fmt.Errorf("seed entity types: %w", err)
+	}
 
 	n := &Node{
 		Config:           cfg,
@@ -269,6 +279,7 @@ func New(cfg *config.Config) (*Node, error) {
 		Relationships:    relationshipsStore,
 		Schedules:        scheduleStore,
 		ExecutionLog:     executionStore,
+		EntityTypes:      entityTypesStore,
 		Embedder:         embedder,
 		StartedAt:        time.Now(),
 	}

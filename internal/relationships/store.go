@@ -74,16 +74,14 @@ func AllEdgeKinds() []string {
 	return out
 }
 
-// validKind returns true if k is one of the enumerated entity kinds.
-// Iterates allEntityKinds so adding a new entity kind only requires
-// extending the slice — no validator edit needed.
+// validKind returns true if k is a non-empty string. The DB-driven
+// entity_types table is now the source of truth for valid entity kinds;
+// Go-side validation only rejects the empty string (which would silently
+// corrupt the DAG). Edge kinds are still code-defined and validated via
+// validEdgeKind. The allEntityKinds slice is retained for callers that
+// enumerate built-in kinds (e.g. the relationships constants).
 func validKind(k string) bool {
-	for _, v := range allEntityKinds {
-		if k == v {
-			return true
-		}
-	}
-	return false
+	return k != ""
 }
 
 // validEdgeKind returns true if k is one of the enumerated edge kinds.

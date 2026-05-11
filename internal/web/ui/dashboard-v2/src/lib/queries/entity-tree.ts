@@ -19,6 +19,8 @@ export interface EntityTreePayload {
   manifests: TreeNode[]
   tasks: TreeNode[]
   rags: TreeNode[]
+  // extra_types: any entity types beyond the six built-in kinds, keyed by name.
+  extra_types: Record<string, TreeNode[]>
 }
 
 async function fetchEntityTree(): Promise<EntityTreePayload> {
@@ -31,6 +33,7 @@ async function fetchEntityTree(): Promise<EntityTreePayload> {
     manifests: data.manifests ?? [],
     tasks: data.tasks ?? [],
     rags: data.rags ?? [],
+    extra_types: data.extra_types ?? {},
   }
 }
 
@@ -71,12 +74,17 @@ export function overlayLiveStatus(
     }
     return live ? { ...n, status: TreeStatus.Running } : n
   }
+  const walkedExtra: Record<string, TreeNode[]> = {}
+  for (const [k, nodes] of Object.entries(tree.extra_types)) {
+    walkedExtra[k] = nodes.map(walk)
+  }
   return {
     skills: tree.skills.map(walk),
     lifecycle: tree.lifecycle.map(walk),
     manifests: tree.manifests.map(walk),
     tasks: tree.tasks.map(walk),
     rags: tree.rags.map(walk),
+    extra_types: walkedExtra,
   }
 }
 

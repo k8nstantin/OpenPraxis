@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useDeferredValue } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
 import { Search } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeApi } from 'react-arborist'
@@ -10,6 +10,7 @@ import {
   useEntityTree,
   type TreeNode,
 } from '@/lib/queries/entity-tree'
+import { useEntityTypes } from '@/lib/queries/entity-types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EntityTreeNode } from './EntityTreeNode'
 
@@ -22,7 +23,10 @@ const GROUP_TASKS = '__tasks__'
 const GROUP_PRODUCTS = '__products__'
 const GROUP_IDEAS = '__ideas__'
 const GROUP_PAGES = '__pages__'
-const GROUP_IDS: ReadonlySet<string> = new Set([GROUP_ENTITIES, GROUP_SKILLS, GROUP_RAG, GROUP_MANIFESTS, GROUP_TASKS, GROUP_PRODUCTS, GROUP_IDEAS, GROUP_PAGES])
+
+// BASE_GROUP_IDS covers the built-in groups. Dynamic groups are added
+// per-render based on extra_types from the entity tree response.
+const BASE_GROUP_IDS: ReadonlySet<string> = new Set([GROUP_ENTITIES, GROUP_SKILLS, GROUP_RAG, GROUP_MANIFESTS, GROUP_TASKS, GROUP_PRODUCTS, GROUP_IDEAS, GROUP_PAGES])
 
 // Page nav nodes injected into the tree so ALL navigation goes through arborist.
 const PAGE_URLS: Record<string, string> = {
@@ -90,6 +94,7 @@ function useElementSize<T extends HTMLElement>() {
 export function EntityTree() {
   const { ref, width, height } = useElementSize<HTMLDivElement>()
   const { data: rawTree, isLoading } = useEntityTree()
+  const { data: entityTypes } = useEntityTypes()
   const { data: liveRuns } = useLiveRuns()
   const navigate = useNavigate()
   const [filterInput, setFilterInput] = useState('')
@@ -102,8 +107,41 @@ export function EntityTree() {
   )
   const overlaid = rawTree ? overlayLiveStatus(rawTree, liveIds) : null
 
+  // Build display name map from entity_types for extra/dynamic groups.
+  const typeDisplayName = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const et of entityTypes ?? []) {
+      m[et.name] = et.display_name
+    }
+    return m
+  }, [entityTypes])
+
+  // Extra type group ids (prefixed to avoid collisions with real entity ids).
+  const extraGroupIds = useMemo(() => {
+    if (!overlaid?.extra_types) return new Set<string>()
+    return new Set(Object.keys(overlaid.extra_types).map((k) => `__type_${k}__`))
+  }, [overlaid?.extra_types])
+
+  // Full set of group ids: built-in + dynamic.
+  const groupIds = useMemo(
+    () => new Set([...BASE_GROUP_IDS, ...extraGroupIds]),
+    [extraGroupIds],
+  )
+
   const products = overlaid?.lifecycle.filter((n) => n.kind === 'product') ?? []
   const ideas = overlaid?.lifecycle.filter((n) => n.kind === 'idea') ?? []
+
+  // Extra group children for dynamic entity types from the entity_types table.
+  const extraTypeGroups: TreeNode[] = useMemo(() => {
+    if (!overlaid?.extra_types) return []
+    return Object.entries(overlaid.extra_types).map(([typeName, nodes]) => ({
+      id: `__type_${typeName}__`,
+      name: typeDisplayName[typeName] ?? typeName,
+      kind: '__group__',
+      status: '',
+      children: nodes,
+    }))
+  }, [overlaid?.extra_types, typeDisplayName])
 
   const treeData: TreeNode[] = [
     {
@@ -117,6 +155,7 @@ export function EntityTree() {
             { id: GROUP_RAG,       name: 'RAG',       kind: '__group__', status: '', children: overlaid.rags },
             { id: GROUP_IDEAS,     name: 'Ideas',     kind: '__group__', status: '', children: ideas },
             { id: GROUP_PRODUCTS,  name: 'Products',  kind: '__group__', status: '', children: products },
+            ...extraTypeGroups,
             { id: GROUP_MANIFESTS, name: 'Manifests', kind: '__group__', status: '', children: overlaid.manifests },
             { id: GROUP_TASKS,     name: 'Tasks',     kind: '__group__', status: '', children: overlaid.tasks },
           ]
@@ -134,7 +173,7 @@ export function EntityTree() {
   const onSelect = useCallback(
     (nodes: NodeApi<TreeNode>[]) => {
       const node = nodes[0]
-      if (!node || GROUP_IDS.has(node.id)) return
+      if (!node || groupIds.has(node.id)) return
       const url = PAGE_URLS[node.id]
       if (url) {
         navigate({ to: url })
@@ -146,7 +185,7 @@ export function EntityTree() {
         })
       }
     },
-    [navigate],
+    [navigate, groupIds],
   )
 
   return (
@@ -179,7 +218,7 @@ export function EntityTree() {
             overscanCount={8}
             onSelect={onSelect}
             openByDefault={false}
-            initialOpenState={{ [GROUP_ENTITIES]: true, [GROUP_PAGES]: true }}
+            initialOpenState={{ [GROUP_ENTITIES]: true, [GROUP_PAGES]: true, [GROUP_PRODUCTS]: true }}
             searchTerm={filter}
             searchMatch={(node, term) => {
               const t = term.toLowerCase()

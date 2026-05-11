@@ -285,7 +285,7 @@ var serveCmd = &cobra.Command{
 			if n.Relationships == nil || n.Entities == nil {
 				return
 			}
-			manifests, err := n.Entities.List("manifest", "active", 0)
+			manifests, err := n.Entities.List(relationships.KindManifest, "active", 0)
 			if err != nil || len(manifests) == 0 {
 				return
 			}
@@ -355,9 +355,9 @@ var serveCmd = &cobra.Command{
 			// Limit to 4 hops: task → manifest → product → skill.
 			current := entityID
 			for hop := 0; hop < 4; hop++ {
-				edges, _ := n.Relationships.ListIncoming(ctx, current, "owns")
+				edges, _ := n.Relationships.ListIncoming(ctx, current, relationships.EdgeOwns)
 				for _, edge := range edges {
-					if edge.SrcKind == "skill" {
+					if edge.SrcKind == relationships.KindSkill {
 						// Collect all skills — do not stop at the first one.
 						revs, err := n.Comments.List(ctx, comments.TargetEntity, edge.SrcID, 1, &ct)
 						if err == nil && len(revs) > 0 && revs[0].Body != "" {
@@ -461,7 +461,12 @@ var serveCmd = &cobra.Command{
 				scope := settings.Scope{TaskID: entityID}
 				if res, err := n.SettingsResolver.Resolve(ctx, scope, "branch_strategy"); err == nil {
 					strategy, _ := res.Value.(string)
-					if strategy == "manifest" || strategy == "product" {
+					// Normalise: any unrecognised strategy is treated like "product" so
+					// custom entity types work without requiring a server code change.
+					if strategy != relationships.KindManifest && strategy != relationships.KindProduct && strategy != "" {
+						strategy = relationships.KindProduct
+					}
+					if strategy == relationships.KindManifest || strategy == relationships.KindProduct {
 						// Derive the shared branch name from the owning entity's title.
 						sharedBranch := ""
 						branchPrefix := "openpraxis"
@@ -479,10 +484,10 @@ var serveCmd = &cobra.Command{
 						if n.Relationships != nil {
 							// Walk up to find the entity whose title drives the branch name.
 							lookupID := entityID
-							if strategy == "manifest" {
-								if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(edges) > 0 {
+							if strategy == relationships.KindManifest {
+								if edges, _ := n.Relationships.ListIncoming(ctx, lookupID, relationships.EdgeOwns); len(edges) > 0 {
 									for _, edge := range edges {
-										if edge.SrcKind == "manifest" {
+										if edge.SrcKind == relationships.KindManifest {
 											if me, _ := n.Entities.Get(edge.SrcID); me != nil {
 												sharedBranch = deriveBranchName(branchPrefix, me.Title)
 											}
@@ -490,13 +495,13 @@ var serveCmd = &cobra.Command{
 										}
 									}
 								}
-							} else { // product — walk task → manifest → product
-								if manifEdges, _ := n.Relationships.ListIncoming(ctx, lookupID, "owns"); len(manifEdges) > 0 {
+							} else { // product (or normalised-to-product) — walk up the owns chain
+								if manifEdges, _ := n.Relationships.ListIncoming(ctx, lookupID, relationships.EdgeOwns); len(manifEdges) > 0 {
 									for _, me := range manifEdges {
-										if me.SrcKind == "manifest" {
-											if prodEdges, _ := n.Relationships.ListIncoming(ctx, me.SrcID, "owns"); len(prodEdges) > 0 {
+										if me.SrcKind == relationships.KindManifest {
+											if prodEdges, _ := n.Relationships.ListIncoming(ctx, me.SrcID, relationships.EdgeOwns); len(prodEdges) > 0 {
 												for _, pe := range prodEdges {
-													if pe.SrcKind == "product" {
+													if pe.SrcKind == relationships.KindProduct {
 														if pe2, _ := n.Entities.Get(pe.SrcID); pe2 != nil {
 															sharedBranch = deriveBranchName(branchPrefix, pe2.Title)
 														}
@@ -555,32 +560,26 @@ var serveCmd = &cobra.Command{
 				return fmt.Errorf("entity not found: %s", parentID)
 			}
 
-			// Collect all tasks under this entity (one or two hops down).
+			// Collect all tasks under this entity by recursively walking owns edges.
+			// Any entity type that owns tasks (directly or transitively) is handled
+			// uniformly — no hardcoded type checks.
 			var taskIDs []string
-			collectTasks := func(srcID string) {
-				edges, _ := n.Relationships.ListOutgoing(ctx, srcID, "owns")
+			var collectAll func(id string)
+			collectAll = func(id string) {
+				edges, _ := n.Relationships.ListOutgoing(ctx, id, relationships.EdgeOwns)
 				for _, edge := range edges {
-					if edge.DstKind == "task" {
+					if edge.DstKind == relationships.KindTask {
 						if te, _ := n.Entities.Get(edge.DstID); te != nil &&
 							te.Status != "archived" && te.Status != "closed" {
 							taskIDs = append(taskIDs, edge.DstID)
 						}
+					} else {
+						// non-task owned entity — recurse
+						collectAll(edge.DstID)
 					}
 				}
 			}
-
-			if parent.Type == "manifest" {
-				collectTasks(parentID)
-			} else { // product — walk manifest → tasks
-				manifEdges, _ := n.Relationships.ListOutgoing(ctx, parentID, "owns")
-				for _, me := range manifEdges {
-					if me.DstKind == "manifest" {
-						collectTasks(me.DstID)
-					}
-				}
-				// Also collect tasks directly under the product
-				collectTasks(parentID)
-			}
+			collectAll(parentID)
 
 			if len(taskIDs) == 0 {
 				slog.Info("dispatch: no active tasks found", "parent_uid", parentID[:12], "type", parent.Type)
@@ -632,11 +631,14 @@ var serveCmd = &cobra.Command{
 		//   manifest → fire each owned task individually (execution recorded per task)
 		//   product  → fire each task across all manifests individually
 		//   skill    → fire each task across all owned products
+		//   *        → fallback for any entity type added via the entity_types
+		//              table at runtime; dispatches the same way as manifest/product
 		scheduleRunner := schedule.NewRunner(n.Schedules, map[string]schedule.DispatchFunc{
-			"task":     dispatch,
-			"manifest": dispatchAtomicTasks,
-			"product":  dispatchAtomicTasks,
-			"skill":    dispatchAtomicTasks,
+			relationships.KindTask:     dispatch,
+			relationships.KindManifest: dispatchAtomicTasks,
+			relationships.KindProduct:  dispatchAtomicTasks,
+			relationships.KindSkill:    dispatchAtomicTasks,
+			"*":                        dispatchAtomicTasks,
 		})
 		n.ScheduleRunner = scheduleRunner
 		if err := scheduleRunner.Start(ctx); err != nil {
@@ -651,10 +653,10 @@ var serveCmd = &cobra.Command{
 		if rules, err := n.Index.ListByType("visceral", 100); err == nil && len(rules) > 0 {
 			fmt.Printf("  Visceral:  %d rules\n", len(rules))
 		}
-		if active, err := n.Entities.List("task", "active", 0); err == nil {
+		if active, err := n.Entities.List(relationships.KindTask, "active", 0); err == nil {
 			fmt.Printf("  Tasks:     %d active\n", len(active))
 		}
-		if manifests, err := n.Entities.List("manifest", "active", 0); err == nil {
+		if manifests, err := n.Entities.List(relationships.KindManifest, "active", 0); err == nil {
 			fmt.Printf("  Manifests: %d active\n", len(manifests))
 		}
 		fmt.Println("  =====================")
