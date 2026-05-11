@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react'
-import { Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeApi } from 'react-arborist'
 import { useNavigate } from '@tanstack/react-router'
+import { AddEntityDialog } from '@/features/entity/add-entity-dialog'
 import { useLiveRuns } from '@/lib/queries/entity'
 import {
   TreeStatus,
@@ -99,6 +100,7 @@ export function EntityTree() {
   const navigate = useNavigate()
   const [filterInput, setFilterInput] = useState('')
   const filter = useDeferredValue(filterInput)
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const liveIds = new Set(
     (liveRuns ?? [])
@@ -190,6 +192,18 @@ export function EntityTree() {
 
   return (
     <div className='flex flex-col flex-1 min-h-0 w-full'>
+      {/* Create Entity button */}
+      <div className='flex items-center px-2 pt-1 pb-0 shrink-0'>
+        <button
+          type='button'
+          onClick={() => setDialogOpen(true)}
+          className='flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors'
+        >
+          <Plus className='h-3.5 w-3.5' />
+          Create Entity
+        </button>
+        <AddEntityDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      </div>
       {/* Filter input — VS Code style search in tree */}
       <div className='relative px-2 py-1 shrink-0'>
         <Search className='absolute left-4 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground' />
