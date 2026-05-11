@@ -31,6 +31,7 @@ async function updateEntityType(name: string, body: { display_name?: string; des
 function TypeRow({ et }: { et: EntityType }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [viewSource, setViewSource] = useState(false)
   const [displayName, setDisplayName] = useState(et.display_name)
   const [color, setColor] = useState(et.color)
   const [icon, setIcon] = useState(et.icon)
@@ -92,7 +93,20 @@ function TypeRow({ et }: { et: EntityType }) {
             </div>
             {et.description && (
               <div className='mt-1'>
-                <BlockNoteReadView markdown={et.description} />
+                <div className='flex gap-2 mb-1'>
+                  <button type='button' onClick={() => setViewSource(false)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${!viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                    Rendered
+                  </button>
+                  <button type='button' onClick={() => setViewSource(true)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                    Source
+                  </button>
+                </div>
+                {viewSource
+                  ? <pre className='whitespace-pre-wrap text-xs font-mono text-muted-foreground'>{et.description}</pre>
+                  : <BlockNoteReadView markdown={et.description} />
+                }
               </div>
             )}
             <p className='text-[10px] text-muted-foreground font-mono mt-0.5'>icon: {et.icon} · color: {et.color}</p>
