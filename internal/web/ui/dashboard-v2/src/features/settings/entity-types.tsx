@@ -91,25 +91,28 @@ function TypeRow({ et }: { et: EntityType }) {
               <code className='text-xs font-mono font-medium'>{et.name}</code>
               <span className='text-xs text-muted-foreground'>— {et.display_name}</span>
             </div>
-            {et.description && (
-              <div className='mt-1'>
-                <div className='flex gap-2 mb-1'>
-                  <button type='button' onClick={() => setViewSource(false)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded ${!viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                    Rendered
-                  </button>
-                  <button type='button' onClick={() => setViewSource(true)}
-                    className={`text-[10px] px-1.5 py-0.5 rounded ${viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                    Source
-                  </button>
-                </div>
+            <div className='mt-1.5 rounded-lg border bg-card'>
+              <div className='flex items-center gap-2 px-3 py-1.5 border-b border-white/5'>
+                <span className='text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex-1'>Description</span>
+                <button type='button' onClick={() => setViewSource(false)}
+                  className={`text-[10px] px-2 py-0.5 rounded transition-colors ${!viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Rendered
+                </button>
+                <button type='button' onClick={() => setViewSource(true)}
+                  className={`text-[10px] px-2 py-0.5 rounded transition-colors ${viewSource ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Source
+                </button>
+              </div>
+              <div className='px-3 py-2'>
                 {viewSource
-                  ? <pre className='whitespace-pre-wrap text-xs font-mono text-muted-foreground'>{et.description}</pre>
-                  : <BlockNoteReadView markdown={et.description} />
+                  ? <pre className='whitespace-pre-wrap text-xs font-mono text-muted-foreground min-h-[2rem]'>{et.description || '(no description)'}</pre>
+                  : et.description
+                    ? <BlockNoteReadView markdown={et.description} />
+                    : <span className='text-xs text-muted-foreground italic'>No description</span>
                 }
               </div>
-            )}
-            <p className='text-[10px] text-muted-foreground font-mono mt-0.5'>icon: {et.icon} · color: {et.color}</p>
+            </div>
+            <p className='text-[10px] text-muted-foreground font-mono mt-1'>icon: {et.icon} · color: {et.color}</p>
           </div>
         )}
       </div>
