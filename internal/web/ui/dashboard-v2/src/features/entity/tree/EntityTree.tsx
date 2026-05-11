@@ -41,6 +41,7 @@ const PAGE_URLS: Record<string, string> = {
   __page_audit__: '/audit',
   __page_activity__: '/activity',
   __page_settings__: '/settings',
+  __page_entity_types__: '/settings/entity-types',
 }
 
 const PAGE_NODES = Object.entries(PAGE_URLS).map(([id, _]) => ({
@@ -56,6 +57,7 @@ const PAGE_NODES = Object.entries(PAGE_URLS).map(([id, _]) => ({
     __page_audit__: 'Audit',
     __page_activity__: 'Activity',
     __page_settings__: 'Settings',
+    __page_entity_types__: 'Entity Types',
   }[id] ?? id,
   kind: 'page',
   status: '',
@@ -109,12 +111,16 @@ export function EntityTree() {
   )
   const overlaid = rawTree ? overlayLiveStatus(rawTree, liveIds) : null
 
-  // Build display name map from entity_types for extra/dynamic groups.
+  // Build display name + icon name maps from entity_types.
   const typeDisplayName = useMemo(() => {
     const m: Record<string, string> = {}
-    for (const et of entityTypes ?? []) {
-      m[et.name] = et.display_name
-    }
+    for (const et of entityTypes ?? []) m[et.name] = et.display_name
+    return m
+  }, [entityTypes])
+
+  const typeIconName = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const et of entityTypes ?? []) m[et.name] = et.icon
     return m
   }, [entityTypes])
 
@@ -141,9 +147,9 @@ export function EntityTree() {
       name: typeDisplayName[typeName] ?? typeName,
       kind: '__group__',
       status: '',
-      children: nodes,
+      children: nodes.map(n => ({ ...n, iconName: typeIconName[typeName] })),
     }))
-  }, [overlaid?.extra_types, typeDisplayName])
+  }, [overlaid?.extra_types, typeDisplayName, typeIconName])
 
   const treeData: TreeNode[] = [
     {
@@ -232,7 +238,7 @@ export function EntityTree() {
             overscanCount={8}
             onSelect={onSelect}
             openByDefault={false}
-            initialOpenState={{ [GROUP_ENTITIES]: true, [GROUP_PAGES]: true, [GROUP_PRODUCTS]: true }}
+            initialOpenState={{ [GROUP_ENTITIES]: true, [GROUP_PAGES]: true }}
             searchTerm={filter}
             searchMatch={(node, term) => {
               const t = term.toLowerCase()
