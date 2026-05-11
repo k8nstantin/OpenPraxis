@@ -4,6 +4,7 @@ import { Tree } from 'react-arborist'
 import type { NodeApi } from 'react-arborist'
 import { useNavigate } from '@tanstack/react-router'
 import { useLiveRuns } from '@/lib/queries/entity'
+import { AddEntityButton } from '@/features/entity/add-entity-dialog'
 import {
   TreeStatus,
   overlayLiveStatus,
@@ -114,10 +115,10 @@ export function EntityTree() {
       children: overlaid
         ? [
             { id: GROUP_SKILLS,    name: 'Skills',    kind: '__group__', status: '', children: overlaid.skills },
-            { id: GROUP_RAG,       name: 'RAG',       kind: '__group__', status: '', children: overlaid.rags },
             { id: GROUP_IDEAS,     name: 'Ideas',     kind: '__group__', status: '', children: ideas },
             { id: GROUP_PRODUCTS,  name: 'Products',  kind: '__group__', status: '', children: products },
             { id: GROUP_MANIFESTS, name: 'Manifests', kind: '__group__', status: '', children: overlaid.manifests },
+            { id: GROUP_RAG,       name: 'RAG',       kind: '__group__', status: '', children: overlaid.rags },
             { id: GROUP_TASKS,     name: 'Tasks',     kind: '__group__', status: '', children: overlaid.tasks },
           ]
         : [],
@@ -151,7 +152,10 @@ export function EntityTree() {
 
   return (
     <div className='flex flex-col flex-1 min-h-0 w-full'>
-      {/* Filter input — VS Code style search in tree */}
+      {/* Add Entity button + Filter input */}
+      <div className='flex items-center gap-1 px-2 pt-1 pb-0 shrink-0'>
+        <AddEntityButton />
+      </div>
       <div className='relative px-2 py-1 shrink-0'>
         <Search className='absolute left-4 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground' />
         <input
