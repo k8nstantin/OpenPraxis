@@ -29,4 +29,9 @@ var (
 	// ErrNegativeClusterID is returned when a cluster assignment contains a
 	// negative cluster ID.
 	ErrNegativeClusterID = errors.New("leiden: cluster id must be non-negative")
+
+	// ErrNilContext is returned when a nil [context.Context] is passed to a
+	// public function that accepts one. Callers should pass
+	// [context.Background] when they do not need cancellation.
+	ErrNilContext = errors.New("leiden: nil context")
 )

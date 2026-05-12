@@ -1,6 +1,7 @@
 package leiden
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 )
@@ -51,7 +52,7 @@ func BenchmarkHierarchicalLeiden_PlantedPartition_1k(b *testing.B) {
 	opts.Seed = 1
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := HierarchicalLeiden(fx.nNodes, fx.edges, opts)
+		_, err := HierarchicalLeiden(context.Background(), fx.nNodes, fx.edges, opts)
 		if err != nil {
 			b.Fatalf("HierarchicalLeiden: %v", err)
 		}
@@ -83,7 +84,7 @@ func BenchmarkModularity_PlantedPartition_1k(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := Modularity(fx.nNodes, fx.edges, partition, 1.0)
+		_, err := Modularity(context.Background(), fx.nNodes, fx.edges, partition, 1.0)
 		if err != nil {
 			b.Fatalf("Modularity: %v", err)
 		}
@@ -99,7 +100,7 @@ func BenchmarkLeiden_KarateClub(b *testing.B) {
 	opts.Seed = 1
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := Leiden(n, edges, opts)
+		_, err := Leiden(context.Background(), n, edges, opts)
 		if err != nil {
 			b.Fatalf("Leiden: %v", err)
 		}
@@ -112,7 +113,7 @@ func benchmarkLeiden(b *testing.B, fx benchPlantedFixture) {
 	opts.Seed = 1
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := Leiden(fx.nNodes, fx.edges, opts)
+		_, err := Leiden(context.Background(), fx.nNodes, fx.edges, opts)
 		if err != nil {
 			b.Fatalf("Leiden: %v", err)
 		}

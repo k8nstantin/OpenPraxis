@@ -1,6 +1,9 @@
 package leiden
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // Modularity computes the generalised Newman modularity Q of a partition on
 // a weighted, undirected graph:
@@ -21,12 +24,23 @@ import "fmt"
 // Returns 0 with a nil error for the degenerate case of a graph with zero
 // total edge weight (no edges and no self-loops).
 //
+// ctx is checked once before scoring. If it is already cancelled, Modularity
+// returns 0 and ctx.Err(). Pass [context.Background] for an uncancelable
+// call.
+//
 // Errors:
+//   - [ErrNilContext] if ctx is nil.
 //   - [ErrInvalidNodeCount] if nNodes is non-positive.
 //   - [ErrAssignmentLength] if len(partition) != nNodes.
 //   - [ErrNegativeClusterID] if any partition entry is negative.
 //   - [ErrNodeOutOfRange] or [ErrNegativeEdgeWeight] if an edge is invalid.
-func Modularity(nNodes int, edges []Edge, partition []int, gamma float64) (float64, error) {
+func Modularity(ctx context.Context, nNodes int, edges []Edge, partition []int, gamma float64) (float64, error) {
+	if ctx == nil {
+		return 0, ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if len(partition) != nNodes {
 		return 0, fmt.Errorf("%w: got %d, want %d", ErrAssignmentLength, len(partition), nNodes)
 	}

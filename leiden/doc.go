@@ -21,4 +21,9 @@
 //     as a [HierarchicalResult].
 //   - [Modularity]: score an arbitrary partition with the generalised
 //     Newman modularity, independent of the algorithm itself.
+//   - [CommunityCount] and [GroupBy]: post-process a partition slice
+//     without constructing a [Clustering].
+//
+// All long-running entry points accept a [context.Context]; pass
+// [context.Background] when cancellation is not needed.
 package leiden

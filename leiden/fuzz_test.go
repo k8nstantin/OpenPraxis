@@ -1,6 +1,7 @@
 package leiden
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -66,7 +67,7 @@ func FuzzLeiden(f *testing.F) {
 		opts.Seed = seed
 		opts.MaxIterations = 20 // bound work per fuzz iteration
 
-		res, err := Leiden(n, decodeEdges(edgeBlob, n), opts)
+		res, err := Leiden(context.Background(), n, decodeEdges(edgeBlob, n), opts)
 		if err != nil {
 			return
 		}
@@ -111,7 +112,7 @@ func FuzzHierarchicalLeiden(f *testing.F) {
 		opts.Seed = seed
 		opts.MaxIterations = 10
 
-		res, err := HierarchicalLeiden(n, decodeEdges(edgeBlob, n), opts)
+		res, err := HierarchicalLeiden(context.Background(), n, decodeEdges(edgeBlob, n), opts)
 		if err != nil {
 			return
 		}
@@ -154,7 +155,7 @@ func FuzzModularity(f *testing.F) {
 		if math.IsNaN(gamma) || math.IsInf(gamma, 0) || gamma < -10 || gamma > 10 {
 			return
 		}
-		q, err := Modularity(n, decodeEdges(edgeBlob, n), decodePartition(partBlob, n), gamma)
+		q, err := Modularity(context.Background(), n, decodeEdges(edgeBlob, n), decodePartition(partBlob, n), gamma)
 		if err != nil {
 			return
 		}

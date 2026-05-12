@@ -1,6 +1,7 @@
 package leiden
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"sort"
@@ -76,7 +77,7 @@ func TestDefaultOptions_Values(t *testing.T) {
 func TestLeiden_TwoCliqueBridge_FindsTwoCommunities(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.5
-	res, err := Leiden(8, twoCliqueBridgeEdges(), opts)
+	res, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), opts)
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestLeiden_TwoCliqueBridge_FindsTwoCommunities(t *testing.T) {
 }
 
 func TestLeiden_EmptyEdges_AllSingletons(t *testing.T) {
-	res, err := Leiden(5, nil, DefaultOptions())
+	res, err := Leiden(context.Background(), 5, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestLeiden_EmptyEdges_AllSingletons(t *testing.T) {
 }
 
 func TestLeiden_SingleNode(t *testing.T) {
-	res, err := Leiden(1, nil, DefaultOptions())
+	res, err := Leiden(context.Background(), 1, nil, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -125,11 +126,11 @@ func TestLeiden_DeterministicSeed(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.3
 	opts.Seed = 12345
-	a, err := Leiden(8, edges, opts)
+	a, err := Leiden(context.Background(), 8, edges, opts)
 	if err != nil {
 		t.Fatalf("Leiden (a): %v", err)
 	}
-	b, err := Leiden(8, edges, opts)
+	b, err := Leiden(context.Background(), 8, edges, opts)
 	if err != nil {
 		t.Fatalf("Leiden (b): %v", err)
 	}
@@ -142,7 +143,7 @@ func TestLeiden_DeterministicSeed(t *testing.T) {
 }
 
 func TestLeiden_ReturnedSliceIsOwnedByCaller(t *testing.T) {
-	res, err := Leiden(8, twoCliqueBridgeEdges(), DefaultOptions())
+	res, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), DefaultOptions())
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestLeiden_ReturnedSliceIsOwnedByCaller(t *testing.T) {
 	for i := range res.Partition {
 		res.Partition[i] = -999
 	}
-	res2, err := Leiden(8, twoCliqueBridgeEdges(), DefaultOptions())
+	res2, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), DefaultOptions())
 	if err != nil {
 		t.Fatalf("Leiden (2): %v", err)
 	}
@@ -179,7 +180,7 @@ func TestLeiden_InvalidInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Leiden(tt.nNodes, tt.edges, tt.opts)
+			_, err := Leiden(context.Background(), tt.nNodes, tt.edges, tt.opts)
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("err=%v, want errors.Is %v", err, tt.wantErr)
 			}
@@ -190,7 +191,7 @@ func TestLeiden_InvalidInputs(t *testing.T) {
 func TestLeiden_NegativeMaxIterations(t *testing.T) {
 	opts := DefaultOptions()
 	opts.MaxIterations = -1
-	_, err := Leiden(3, nil, opts)
+	_, err := Leiden(context.Background(), 3, nil, opts)
 	if err == nil {
 		t.Fatal("expected error for negative MaxIterations, got nil")
 	}
@@ -200,7 +201,7 @@ func TestLeiden_MaxIterationsOneStopsEarly(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.5
 	opts.MaxIterations = 1
-	res, err := Leiden(8, twoCliqueBridgeEdges(), opts)
+	res, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), opts)
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -212,7 +213,7 @@ func TestLeiden_MaxIterationsOneStopsEarly(t *testing.T) {
 func TestHierarchicalLeiden_TwoCliqueBridge(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.5
-	res, err := HierarchicalLeiden(8, twoCliqueBridgeEdges(), opts)
+	res, err := HierarchicalLeiden(context.Background(), 8, twoCliqueBridgeEdges(), opts)
 	if err != nil {
 		t.Fatalf("HierarchicalLeiden: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestLeiden_QualityImprovesOverSingleton(t *testing.T) {
 		t.Fatalf("scoreCPM (singleton): %v", err)
 	}
 
-	res, err := Leiden(8, edges, opts)
+	res, err := Leiden(context.Background(), 8, edges, opts)
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}

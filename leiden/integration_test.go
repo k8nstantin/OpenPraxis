@@ -1,6 +1,7 @@
 package leiden
 
 import (
+	"context"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -20,7 +21,7 @@ func TestIntegration_KarateClub_TwoLeadersSeparated(t *testing.T) {
 			opts := DefaultOptions()
 			opts.Resolution = gamma
 			opts.Seed = 1
-			res, err := Leiden(n, edges, opts)
+			res, err := Leiden(context.Background(), n, edges, opts)
 			if err != nil {
 				t.Fatalf("Leiden: %v", err)
 			}
@@ -50,11 +51,11 @@ func TestIntegration_KarateClub_ModularityIsHigh(t *testing.T) {
 		opts := DefaultOptions()
 		opts.Resolution = gamma
 		opts.Seed = 1
-		res, err := Leiden(n, edges, opts)
+		res, err := Leiden(context.Background(), n, edges, opts)
 		if err != nil {
 			t.Fatalf("Leiden(γ=%g): %v", gamma, err)
 		}
-		mod, err := Modularity(n, edges, res.Partition, 1.0)
+		mod, err := Modularity(context.Background(), n, edges, res.Partition, 1.0)
 		if err != nil {
 			t.Fatalf("Modularity(γ=%g): %v", gamma, err)
 		}
@@ -85,7 +86,7 @@ func TestIntegration_KarateClub_RecoversGroundTruth(t *testing.T) {
 		opts := DefaultOptions()
 		opts.Resolution = gamma
 		opts.Seed = 1
-		res, err := Leiden(n, edges, opts)
+		res, err := Leiden(context.Background(), n, edges, opts)
 		if err != nil {
 			t.Fatalf("Leiden(γ=%g): %v", gamma, err)
 		}
@@ -110,7 +111,7 @@ func TestIntegration_PlantedPartition_HighRecovery(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.1
 	opts.Seed = 11
-	res, err := Leiden(n, edges, opts)
+	res, err := Leiden(context.Background(), n, edges, opts)
 	if err != nil {
 		t.Fatalf("Leiden: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestIntegration_PlantedPartition_HierarchicalLevels(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Resolution = 0.1
 	opts.Seed = 7
-	res, err := HierarchicalLeiden(n, edges, opts)
+	res, err := HierarchicalLeiden(context.Background(), n, edges, opts)
 	if err != nil {
 		t.Fatalf("HierarchicalLeiden: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestIntegration_PlantedPartition_NodeWeightedPathRunsCleanly(t *testing.T) 
 	opts.Resolution = 0.1
 	opts.Seed = 3
 	opts.NodeWeights = weights
-	res, err := Leiden(n, edges, opts)
+	res, err := Leiden(context.Background(), n, edges, opts)
 	if err != nil {
 		t.Fatalf("Leiden(weighted): %v", err)
 	}
@@ -203,7 +204,7 @@ func TestIntegration_AllNonZeroResolutions_AllNodesAssigned(t *testing.T) {
 			opts := DefaultOptions()
 			opts.Resolution = gamma
 			opts.Seed = 1
-			res, err := Leiden(n, edges, opts)
+			res, err := Leiden(context.Background(), n, edges, opts)
 			if err != nil {
 				t.Fatalf("Leiden: %v", err)
 			}

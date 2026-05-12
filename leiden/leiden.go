@@ -1,6 +1,7 @@
 package leiden
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 )
@@ -118,10 +119,16 @@ const defaultMaxIterations = 100
 // may contain duplicate node pairs (whose weights sum). Edge weights and
 // node weights must be non-negative.
 //
+// ctx is checked at the start of every coarsening iteration. If ctx is
+// cancelled or its deadline is exceeded, Leiden returns the zero [Result]
+// and ctx.Err() (use [errors.Is] with [context.Canceled] or
+// [context.DeadlineExceeded] to test). Pass [context.Background] for an
+// uncancelable run.
+//
 // Reference: Traag, Waltman & van Eck, "From Louvain to Leiden: guaranteeing
 // well-connected communities", Scientific Reports 9:5233 (2019).
-func Leiden(nNodes int, edges []Edge, opts Options) (Result, error) {
-	res, err := runLeiden(nNodes, edges, opts)
+func Leiden(ctx context.Context, nNodes int, edges []Edge, opts Options) (Result, error) {
+	res, err := runLeiden(ctx, nNodes, edges, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -133,12 +140,16 @@ func Leiden(nNodes int, edges []Edge, opts Options) (Result, error) {
 // when the multi-level structure of the graph is informative (e.g. building
 // a community dendrogram or selecting a resolution after the fact).
 //
-// HierarchicalLeiden has the same input contract as [Leiden].
-func HierarchicalLeiden(nNodes int, edges []Edge, opts Options) (HierarchicalResult, error) {
-	return runLeiden(nNodes, edges, opts)
+// HierarchicalLeiden has the same input and cancellation contract as
+// [Leiden].
+func HierarchicalLeiden(ctx context.Context, nNodes int, edges []Edge, opts Options) (HierarchicalResult, error) {
+	return runLeiden(ctx, nNodes, edges, opts)
 }
 
-func runLeiden(nNodes int, edges []Edge, opts Options) (HierarchicalResult, error) {
+func runLeiden(ctx context.Context, nNodes int, edges []Edge, opts Options) (HierarchicalResult, error) {
+	if ctx == nil {
+		return HierarchicalResult{}, ErrNilContext
+	}
 	if opts.MaxIterations < 0 {
 		return HierarchicalResult{}, fmt.Errorf("leiden: MaxIterations must be non-negative, got %d", opts.MaxIterations)
 	}
@@ -169,6 +180,9 @@ func runLeiden(nNodes int, edges []Edge, opts Options) (HierarchicalResult, erro
 
 	var levels []LevelResult
 	for iter := 0; iter < maxIter; iter++ {
+		if err := ctx.Err(); err != nil {
+			return HierarchicalResult{}, err
+		}
 		moves := runLocalMove(currentNet, parent, q, rng)
 
 		levelPart := projectToOriginal(origToCurrent, parent, nNodes)
