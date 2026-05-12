@@ -1,3 +1,17 @@
+// Copyright 2026 Constantin Alexander
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package leiden
 
 import (
@@ -194,6 +208,47 @@ func TestLeiden_NegativeMaxIterations(t *testing.T) {
 	_, err := Leiden(context.Background(), 3, nil, opts)
 	if err == nil {
 		t.Fatal("expected error for negative MaxIterations, got nil")
+	}
+}
+
+// TestLeiden_ZeroValueOptions verifies that a zero-initialised Options
+// (every field at its Go zero value) is accepted and produces a valid run.
+// This is the forward-compatibility contract: a caller who constructs
+// Options{} directly — without going through DefaultOptions — must still
+// get a usable result, because adding fields to Options must never break
+// callers who omit them.
+//
+// Concretely: MaxIterations=0 must fall back to the package default, a
+// nil NodeWeights slice must mean unit weights, Seed=0 must be a valid
+// RNG seed, and Resolution=0 / Randomness=0 must be accepted.
+func TestLeiden_ZeroValueOptions(t *testing.T) {
+	var opts Options // every field at its Go zero value
+	res, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), opts)
+	if err != nil {
+		t.Fatalf("Leiden with zero Options: %v", err)
+	}
+	if len(res.Partition) != 8 {
+		t.Fatalf("len(Partition)=%d, want 8", len(res.Partition))
+	}
+	if res.NumClusters <= 0 {
+		t.Errorf("NumClusters=%d, want >0", res.NumClusters)
+	}
+	for i, c := range res.Partition {
+		if c < 0 || c >= res.NumClusters {
+			t.Errorf("Partition[%d]=%d, out of range [0, %d)", i, c, res.NumClusters)
+		}
+	}
+	if res.Iterations <= 0 {
+		t.Errorf("Iterations=%d, want >0", res.Iterations)
+	}
+	// The zero-value run must be deterministic: a second call with the
+	// same zero Options must reproduce the same partition.
+	res2, err := Leiden(context.Background(), 8, twoCliqueBridgeEdges(), Options{})
+	if err != nil {
+		t.Fatalf("Leiden (second call): %v", err)
+	}
+	if !reflect.DeepEqual(res.Partition, res2.Partition) {
+		t.Errorf("zero Options not deterministic:\n a=%v\n b=%v", res.Partition, res2.Partition)
 	}
 }
 
