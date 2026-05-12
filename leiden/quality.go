@@ -106,3 +106,87 @@ func (q cpmQuality) nodeMass(net *CompactNetwork, u int) float64 {
 func (q cpmQuality) resolution() float64 {
 	return q.Gamma
 }
+
+// modularityQuality is the Newman-Girvan modularity with a generalised
+// resolution parameter (Reichardt-Bornholdt, Arenas et al.):
+//
+//	Q = (1/2m) Σ_{ij} [ A_ij − γ · (k_i · k_j) / (2m) ] · δ(c_i, c_j)
+//	  = (1/2m) [ Σ_c (2·e_c^≠ + e_c^◦) − (γ/2m) · Σ_c K_c² ]
+//
+// where A is the (symmetric) weighted adjacency matrix, k_i is node i's
+// strength, 2m = Σ_i k_i, e_c^≠ is the sum of weights of non-self-loop
+// edges with both endpoints in cluster c (counted once per edge), e_c^◦
+// is the sum of weights of self-loops in c (counted once), and K_c is
+// the sum of strengths over c. γ is the resolution parameter — larger γ
+// favours smaller clusters; γ = 1 recovers classic modularity.
+//
+// The node mass used by [qualityFunction] is the node's strength, so the
+// running clusterMass maintained by the algorithm phases is K_c.
+//
+// modularityQuality is not invariant under [aggregateNetwork] because the
+// aggregation stores each internal edge once as a self-loop (the convention
+// that preserves [cpmQuality]). Carrying modularity across coarsening
+// levels therefore requires the algorithm to maintain the original-level
+// node strengths through aggregation; that is the algorithm runner's
+// responsibility, not this quality function's.
+type modularityQuality struct {
+	Gamma float64
+}
+
+func (q modularityQuality) value(net *CompactNetwork, cl *Clustering) float64 {
+	twoM := net.totalNodeStrength
+	if twoM == 0 {
+		return 0
+	}
+	// Σ over CSR entries in same cluster: counts each internal non-self-loop
+	// edge twice (u→v and v→u) and each internal self-loop once.
+	var internal float64
+	for u := 0; u < net.nNodes; u++ {
+		cu := cl.assignment[u]
+		nbrs := net.Neighbors(u)
+		ws := net.NeighborWeights(u)
+		for i, v := range nbrs {
+			if cl.assignment[v] != cu {
+				continue
+			}
+			internal += ws[i]
+		}
+	}
+	masses := make([]float64, cl.nClusters)
+	for u := 0; u < net.nNodes; u++ {
+		masses[cl.assignment[u]] += net.nodeStrengths[u]
+	}
+	var penalty float64
+	for _, k := range masses {
+		penalty += k * k
+	}
+	return (internal - q.Gamma*penalty/twoM) / twoM
+}
+
+func (q modularityQuality) moveDelta(net *CompactNetwork, u, from, to int, wToFrom, wToTo float64, clusterMass []float64) float64 {
+	if from == to {
+		return 0
+	}
+	twoM := net.totalNodeStrength
+	if twoM == 0 {
+		return 0
+	}
+	ku := net.nodeStrengths[u]
+	// Δ internal-CSR-sum: each non-self-loop edge from u contributes 2·w
+	// because it appears in u's CSR and the neighbour's CSR. u's self-loop
+	// stays with u and contributes 0 change.
+	deltaInternal := 2.0 * (wToTo - wToFrom)
+	// Δ Σ_c K_c² = (K_from − k_u)² + (K_to + k_u)² − K_from² − K_to²
+	//            = 2·k_u·(K_to − K_from + k_u).
+	// clusterMass[from] still includes u; clusterMass[to] does not.
+	deltaPenalty := 2.0 * ku * (clusterMass[to] - clusterMass[from] + ku)
+	return (deltaInternal - q.Gamma*deltaPenalty/twoM) / twoM
+}
+
+func (q modularityQuality) nodeMass(net *CompactNetwork, u int) float64 {
+	return net.nodeStrengths[u]
+}
+
+func (q modularityQuality) resolution() float64 {
+	return q.Gamma
+}

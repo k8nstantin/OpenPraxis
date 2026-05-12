@@ -106,6 +106,40 @@ func TestLocalMove_MonotoneImprovement(t *testing.T) {
 	}
 }
 
+func TestLocalMove_ModularityFindsTwoCommunities(t *testing.T) {
+	// Local-move is quality-function-agnostic; modularity should drive the
+	// same two-K_4 bridged graph to two communities at γ = 1.
+	var edges []Edge
+	for i := 0; i < 4; i++ {
+		for j := i + 1; j < 4; j++ {
+			edges = append(edges, Edge{From: i, To: j, Weight: 1})
+		}
+	}
+	for i := 4; i < 8; i++ {
+		for j := i + 1; j < 8; j++ {
+			edges = append(edges, Edge{From: i, To: j, Weight: 1})
+		}
+	}
+	edges = append(edges, Edge{From: 3, To: 4, Weight: 1})
+	net := mustNetwork(t, 8, edges)
+	cl, _ := NewSingletonClustering(8)
+	q := modularityQuality{Gamma: 1.0}
+	before := q.value(net, cl)
+
+	if moves := runLocalMove(net, cl, q, rand.New(rand.NewSource(42))); moves == 0 {
+		t.Fatalf("expected moves; got 0")
+	}
+	after := q.value(net, cl)
+	if after+floatTol < before {
+		t.Errorf("modularity decreased: before=%g, after=%g", before, after)
+	}
+	want := [][]int{{0, 1, 2, 3}, {4, 5, 6, 7}}
+	got := clusterMembership(cl)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("partition = %v, want %v", got, want)
+	}
+}
+
 func TestLocalMove_DeterministicWithSeed(t *testing.T) {
 	edges := []Edge{
 		{0, 1, 1}, {1, 2, 1}, {0, 2, 1},

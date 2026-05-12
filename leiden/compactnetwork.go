@@ -22,15 +22,16 @@ import "fmt"
 // Node weights default to 1.0 when not supplied. Node strength — the sum of
 // weights of incident directed entries — is precomputed on construction.
 type CompactNetwork struct {
-	nNodes           int
-	nEdges           int
-	nodeWeights      []float64
-	nodeStrengths    []float64
-	firstNeighborIdx []int
-	neighbors        []int
-	neighborWeights  []float64
-	totalNodeWeight  float64
-	totalEdgeWeight  float64
+	nNodes            int
+	nEdges            int
+	nodeWeights       []float64
+	nodeStrengths     []float64
+	firstNeighborIdx  []int
+	neighbors         []int
+	neighborWeights   []float64
+	totalNodeWeight   float64
+	totalNodeStrength float64
+	totalEdgeWeight   float64
 }
 
 // NewCompactNetwork builds a CompactNetwork over nNodes nodes from the given
@@ -123,24 +124,27 @@ func NewCompactNetworkWithNodeWeights(nNodes int, nodeWeights []float64, edges [
 	}
 
 	strengths := make([]float64, nNodes)
+	totalNodeStrength := 0.0
 	for i := 0; i < nNodes; i++ {
 		s := 0.0
 		for j := firstNeighborIdx[i]; j < firstNeighborIdx[i+1]; j++ {
 			s += neighborWeights[j]
 		}
 		strengths[i] = s
+		totalNodeStrength += s
 	}
 
 	return &CompactNetwork{
-		nNodes:           nNodes,
-		nEdges:           len(edges),
-		nodeWeights:      weights,
-		nodeStrengths:    strengths,
-		firstNeighborIdx: firstNeighborIdx,
-		neighbors:        neighbors,
-		neighborWeights:  neighborWeights,
-		totalNodeWeight:  totalNodeWeight,
-		totalEdgeWeight:  totalEdgeWeight,
+		nNodes:            nNodes,
+		nEdges:            len(edges),
+		nodeWeights:       weights,
+		nodeStrengths:     strengths,
+		firstNeighborIdx:  firstNeighborIdx,
+		neighbors:         neighbors,
+		neighborWeights:   neighborWeights,
+		totalNodeWeight:   totalNodeWeight,
+		totalNodeStrength: totalNodeStrength,
+		totalEdgeWeight:   totalEdgeWeight,
 	}, nil
 }
 
@@ -161,6 +165,16 @@ func (n *CompactNetwork) NodeStrength(node int) float64 { return n.nodeStrengths
 
 // TotalNodeWeight returns the sum of all node weights.
 func (n *CompactNetwork) TotalNodeWeight() float64 { return n.totalNodeWeight }
+
+// TotalNodeStrength returns the sum of every node's strength, equivalently
+// the sum of the weights of all stored CSR entries.
+//
+// For graphs without self-loops this equals 2·TotalEdgeWeight (each
+// non-self-loop edge contributes its weight to both endpoints' strength).
+// Self-loops are stored once and so contribute their weight exactly once.
+// This sum is the standard 2m normalisation used by the modularity quality
+// function.
+func (n *CompactNetwork) TotalNodeStrength() float64 { return n.totalNodeStrength }
 
 // TotalEdgeWeight returns the sum of all input edge weights, counting each
 // undirected edge once.
