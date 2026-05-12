@@ -3,6 +3,7 @@ package leiden
 import (
 	"math"
 	"math/rand"
+	"sort"
 )
 
 // runRefinement performs the Leiden refinement phase on the partition
@@ -125,6 +126,12 @@ func runRefinement(net *CompactNetwork, parent *Clustering, q qualityFunction, t
 		if len(candidates) == 0 {
 			continue
 		}
+		// edgeToR is a Go map, so iteration order above is randomised on
+		// every loop. Sort by R-cluster id so argmax tiebreaking and
+		// exponential sampling are reproducible for a given rng seed.
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].id < candidates[j].id
+		})
 
 		var pick cand
 		if theta <= 0 {
