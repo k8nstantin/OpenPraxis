@@ -13,6 +13,12 @@
 //   - [CompactNetwork]: an immutable CSR-style representation of the graph.
 //   - [Clustering]: a partition of nodes into clusters.
 //
-// Higher-level entry points (the algorithm itself, options, results) are
-// introduced in later milestones and are not part of this milestone.
+// The user-facing entry points are:
+//
+//   - [Options] and [DefaultOptions]: forward-compatible configuration.
+//   - [Leiden]: run the algorithm to convergence and return a flat [Result].
+//   - [HierarchicalLeiden]: return the partition at every coarsening level
+//     as a [HierarchicalResult].
+//   - [Modularity]: score an arbitrary partition with the generalised
+//     Newman modularity, independent of the algorithm itself.
 package leiden

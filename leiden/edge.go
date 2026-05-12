@@ -5,8 +5,9 @@ package leiden
 //
 // Edges are treated as undirected by [CompactNetwork]: the pair (From, To)
 // is equivalent to (To, From). Self-loops (From == To) are permitted and
-// contribute twice their Weight to the incident node's strength, matching
-// the convention used by the Leiden reference implementation.
+// are stored as a single CSR entry that contributes their Weight once to
+// the incident node's strength. See [CompactNetwork.TotalNodeStrength] for
+// how this interacts with the 2m modularity normalisation.
 //
 // Weight must be non-negative; negative weights are rejected when
 // constructing a [CompactNetwork].
