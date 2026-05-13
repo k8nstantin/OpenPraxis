@@ -70,9 +70,19 @@ func apiRelationshipsGraph(n *node.Node) http.HandlerFunc {
 				return
 			}
 			seenNodes[id] = true
-			if e, _ := n.Entities.Get(id); e != nil {
-				nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: e.Type, Title: e.Title, Status: e.Status})
+			e, _ := n.Entities.Get(id)
+			if e == nil {
+				return
 			}
+			// Skip archived and closed entities. They remain in the database
+			// (SCD-2 history) but are not part of the live graph the dashboard
+			// renders. Remove from nodeSet so edges to/from them are also
+			// dropped in Step 4.
+			if e.Status == "archived" || e.Status == "closed" {
+				delete(nodeSet, id)
+				return
+			}
+			nodes = append(nodes, nodeOut{ID: e.EntityUID, Kind: e.Type, Title: e.Title, Status: e.Status})
 		}
 
 		for id := range nodeSet {
