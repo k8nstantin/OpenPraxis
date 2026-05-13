@@ -789,13 +789,23 @@ func apiProductHierarchy(n *node.Node) http.HandlerFunc {
 			http.Error(w, "not found", 404)
 			return
 		}
-		root := buildHierarchy(r, n, e.EntityUID, relationships.KindProduct, 0)
+		root := buildHierarchy(r, n, e.EntityUID, 0)
 		writeJSON(w, root)
 	}
 }
 
-// buildHierarchy recursively constructs the hierarchy tree up to maxDepth.
-func buildHierarchy(r *http.Request, n *node.Node, entityID, kind string, depth int) *hierarchyNode {
+// buildHierarchy recursively constructs the hierarchy tree by walking outgoing
+// `owns` edges. Type-agnostic: it reads each destination entity's type from
+// the entities table and groups children accordingly (type=product → SubProducts;
+// everything else → Children). New entity types added via the entity_types
+// table work automatically; no code change required.
+//
+// This replaces the prior implementation which hardcoded `KindProduct` and
+// `KindManifest` checks against edge kinds and used a brittle
+// incoming-depends_on pattern for sub-product discovery. The relationships
+// table is now the single source of structural truth; the entities table is
+// the single source of identity/type truth.
+func buildHierarchy(r *http.Request, n *node.Node, entityID string, depth int) *hierarchyNode {
 	if depth > 10 {
 		return nil
 	}
@@ -809,28 +819,20 @@ func buildHierarchy(r *http.Request, n *node.Node, entityID, kind string, depth 
 		Type:   e.Type,
 		Status: e.Status,
 	}
-	if kind == relationships.KindProduct {
-		// Sub-products: products that depend on this one
-		incoming, _ := n.Relationships.ListIncoming(r.Context(), entityID, relationships.EdgeDependsOn)
-		for _, edge := range incoming {
-			if edge.SrcKind != relationships.KindProduct {
-				continue
-			}
-			sub := buildHierarchy(r, n, edge.SrcID, relationships.KindProduct, depth+1)
-			if sub != nil {
-				node.SubProducts = append(node.SubProducts, sub)
-			}
+	owned, _ := n.Relationships.ListOutgoing(r.Context(), entityID, relationships.EdgeOwns)
+	for _, edge := range owned {
+		child, err := n.Entities.Get(edge.DstID)
+		if err != nil || child == nil {
+			continue
 		}
-		// Owned manifests: products own manifests via EdgeOwns
-		owned, _ := n.Relationships.ListOutgoing(r.Context(), entityID, relationships.EdgeOwns)
-		for _, edge := range owned {
-			if edge.DstKind != relationships.KindManifest {
-				continue
-			}
-			mani := buildHierarchy(r, n, edge.DstID, relationships.KindManifest, depth+1)
-			if mani != nil {
-				node.Children = append(node.Children, mani)
-			}
+		sub := buildHierarchy(r, n, child.EntityUID, depth+1)
+		if sub == nil {
+			continue
+		}
+		if child.Type == relationships.KindProduct {
+			node.SubProducts = append(node.SubProducts, sub)
+		} else {
+			node.Children = append(node.Children, sub)
 		}
 	}
 	return node
