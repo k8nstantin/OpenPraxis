@@ -825,6 +825,13 @@ func buildHierarchy(r *http.Request, n *node.Node, entityID string, depth int) *
 		if err != nil || child == nil {
 			continue
 		}
+		// Skip archived and closed entities from the rendered hierarchy.
+		// They remain in the database (SCD-2 history) but are not part of the
+		// live tree. Status filtering is data-driven: the entities table is
+		// the source of truth for what is currently live; the renderer respects it.
+		if child.Status == "archived" || child.Status == "closed" {
+			continue
+		}
 		sub := buildHierarchy(r, n, child.EntityUID, depth+1)
 		if sub == nil {
 			continue
