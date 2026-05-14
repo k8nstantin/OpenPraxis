@@ -2,72 +2,37 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EChart } from '@/components/echart'
 import { cn } from '@/lib/utils'
 import { ActivityChart } from '@/features/overview'
-import { LineChart, toMs } from '@/components/charts'
+import {
+  // types
+  type StatsHistory, type DayProductivity, type RangeDays,
+  // constants
+  RANGES,
+  // hooks
+  useStatsHistory,
+  // helpers
+  padDays, fmt, Kpi, Empty, ChartCard,
+  // KPI strips
+  RunsKpiStrip, EfficiencyKpiStrip, TokensKpiStrip,
+  // chart bodies
+  RunsBarChart, DurationLineChart, TerminalReasonsChart, RetriesBarChart,
+  TurnsLineChart, CacheHitLineChart, ContextPctLineChart, TokensPerTurnLineChart,
+  ActionsPerTurnLineChart, CompactionsBarChart,
+  TokenStackedBarChart, CacheRatioLineChart, OutputTokensBarChart, ReasoningTokensBarChart,
+  ModelsPieChart, AgentsPieChart, TriggerSplitPieChart,
+} from './panels'
 
-// Helper: convert a day string "2026-05-05" to UTC ms timestamp
-const dayMs = (day: string) => toMs(day)
+// /stats page — global view. Wires shared chart components from panels.tsx
+// with entityId=null. The only /stats-specific bits kept inline:
+//   - ActivityChart at top (uses /api/stats/charts hourly + history daily)
+//   - Productivity tab merges git history into execution_log productivity
+//     (git is global, not entity-scopable, so this stays here)
 
-// ── Types ─────────────────────────────────────────────────────────────────
-
-interface DaySystem { day: string; avg_cpu_pct: number; avg_net_rx_mbps: number; avg_net_tx_mbps: number; avg_disk_read_mbps: number; avg_disk_write_mbps: number }
-
-interface StatsHistory {
-  runs: DayRun[]
-  efficiency: DayEfficiency[]
-  tokens: DayTokens[]
-  productivity: DayProductivity[]
-  models: LabelCount[]
-  agents: LabelCount[]
-  terminal_reasons: LabelCount[]
-  trigger_split: LabelCount[]
-  system_daily: DaySystem[]
-  totals: Totals
-}
-
-interface DayRun { day: string; completed: number; failed: number; avg_dur_sec: number; max_dur_sec: number; avg_run_number: number }
-interface DayEfficiency { day: string; avg_turns: number; avg_actions: number; avg_actions_per_turn: number; avg_context_pct: number; avg_tokens_per_turn: number; avg_cache_hit_pct: number; total_compactions: number; total_errors: number; avg_ttfb_ms: number }
-interface DayTokens { day: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_create_tokens: number; reasoning_tokens: number; tool_use_tokens: number }
-interface DayProductivity { day: string; lines_added: number; lines_removed: number; files_changed: number; commits: number; tests_run: number; tests_passed: number; tests_failed: number; prs_opened: number }
-interface LabelCount { label: string; count: number }
-interface Totals {
-  total_runs: number; total_failed: number; total_turns: number; total_actions: number
-  total_compactions: number; total_errors: number
-  total_input_tokens: number; total_output_tokens: number
-  total_cache_read_tokens: number; total_cache_create_tokens: number
-  total_lines_added: number; total_lines_removed: number
-  total_files_changed: number; total_commits: number
-  total_tests_run: number; total_tests_passed: number; total_tests_failed: number
-  avg_cache_hit_pct: number; avg_turns: number; avg_dur_sec: number; avg_context_pct: number
-}
-
-// ── Query ─────────────────────────────────────────────────────────────────
-
-const RANGES = [
-  { label: '1d',   days: 1 },
-  { label: '2d',   days: 2 },
-  { label: '3d',   days: 3 },
-  { label: '1w',   days: 7 },
-  { label: '2w',   days: 14 },
-  { label: '1m',   days: 30 },
-  { label: '3m',   days: 90 },
-  { label: 'All',  days: 0 },
-] as const
-
-type RangeDays = typeof RANGES[number]['days']
-
-function useStatsHistory(days: RangeDays) {
-  const url = days > 0 ? `/api/stats/history?days=${days}` : '/api/stats/history'
-  return useQuery({
-    queryKey: ['stats', 'history', days],
-    queryFn: () => fetch(url).then(r => r.json()) as Promise<StatsHistory>,
-    staleTime: 30_000,
-  })
-}
+// ── /stats-specific: git history merge for Productivity tab ───────────────
 
 interface GitDay { day: string; lines_added: number; lines_removed: number; files_changed: number; commits: number }
 interface GitHistory { total_commits: number; total_added: number; total_removed: number; total_files: number; hourly_buckets: { hour: string; lines_added: number; lines_removed: number; files_changed: number; commits: number }[] }
@@ -78,7 +43,6 @@ function useGitHistory(days: RangeDays) {
     queryKey: ['stats', 'git', days],
     queryFn: async () => {
       const d = await fetch(`/api/stats/git?${param}`).then(r => r.json()) as GitHistory
-      // Roll hourly buckets up to daily
       const byDay = new Map<string, GitDay>()
       for (const b of (d.hourly_buckets ?? [])) {
         const day = b.hour.slice(0, 10)
@@ -95,7 +59,6 @@ function useGitHistory(days: RangeDays) {
   })
 }
 
-// Merge git daily data with execution_log productivity data.
 function mergeProductivity(exec: DayProductivity[], git: GitDay[]): DayProductivity[] {
   const map = new Map<string, DayProductivity>()
   for (const b of exec) map.set(b.day, { ...b })
@@ -113,274 +76,11 @@ function mergeProductivity(exec: DayProductivity[], git: GitDay[]): DayProductiv
   return [...map.values()].sort((a, b) => a.day < b.day ? -1 : 1)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-// Pad sparse daily arrays to a continuous range so charts don't have gaps.
-function padDays<T extends { day: string }>(data: T[], empty: (day: string) => T): T[] {
-  if (!data.length) return data
-  const map = new Map(data.map(d => [d.day, d]))
-  const start = new Date(data[0].day + 'T00:00:00Z')
-  const end   = new Date(data[data.length - 1].day + 'T00:00:00Z')
-  const out: T[] = []
-  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-    const key = d.toISOString().slice(0, 10)
-    out.push(map.get(key) ?? empty(key))
-  }
-  return out
-}
-
-function fmt(n: number, dec = 0) {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
-  return n.toFixed(dec)
-}
-
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
-  return (
-    <div className='space-y-0.5'>
-      <div className='text-muted-foreground text-[10px] uppercase tracking-wider'>{label}</div>
-      <div className={cn('font-mono text-xl font-semibold tabular-nums', accent)}>{value}</div>
-      {sub && <div className='text-muted-foreground text-[10px]'>{sub}</div>}
-    </div>
-  )
-}
-
-// Chart with its own range selector — each chart is independently zoomable.
-function ChartCard({ title, series }: {
-  title: string
-  series: (range: RangeDays) => React.ReactNode
-}) {
-  const [range, setRange] = useState<RangeDays>(7)
-  return (
-    <Card>
-      <CardHeader className='pb-1 pt-3'>
-        <div className='flex items-center justify-between gap-2'>
-          <CardTitle className='text-xs text-muted-foreground uppercase tracking-wider truncate'>{title}</CardTitle>
-          <div className='inline-flex shrink-0 rounded border bg-muted/20 p-px text-[9px]'>
-            {RANGES.map(r => (
-              <button key={r.days} type='button'
-                onClick={() => setRange(r.days)}
-                className={cn('rounded px-1.5 py-0.5 transition-colors',
-                  range === r.days
-                    ? 'bg-primary/20 text-foreground font-semibold'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}>
-                {r.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className='pb-3'>{series(range)}</CardContent>
-    </Card>
-  )
-}
-
-function RangeBar({ range, onRange }: { range: RangeDays; onRange: (r: RangeDays) => void }) {
-  return (
-    <div className='flex items-center gap-2 mb-4'>
-      <div className='inline-flex rounded-md border bg-card p-0.5 text-xs'>
-        {RANGES.map(r => (
-          <button key={r.days} type='button'
-            onClick={() => onRange(r.days)}
-            className={cn('rounded px-3 py-1 transition-colors',
-              range === r.days
-                ? 'bg-primary/15 text-foreground font-semibold'
-                : 'text-muted-foreground hover:text-foreground'
-            )}>
-            {r.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function Empty() {
-  return <div className='h-[180px] flex items-center justify-center text-xs text-muted-foreground'>No data yet</div>
-}
-
-// ── Runs chart components ─────────────────────────────────────────────────
-
-function RunsBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.runs.length) return <Empty />
-  const runs = padDays(data.runs, d => ({ day: d, completed: 0, failed: 0, avg_dur_sec: 0, max_dur_sec: 0, avg_run_number: 0 }))
-  const days = runs.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 32, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
-      series: [
-        { name: 'completed', type: 'bar', stack: 'r', data: runs.map(d => d.completed), itemStyle: { color: '#10b981' } },
-        { name: 'failed',    type: 'bar', stack: 'r', data: runs.map(d => d.failed),    itemStyle: { color: '#f43f5e' } },
-      ],
-    }} />
-  )
-}
-
-function DurationLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.runs.length) return <Empty />
-  const runs = padDays(data.runs, d => ({ day: d, completed: 0, failed: 0, avg_dur_sec: 0, max_dur_sec: 0, avg_run_number: 0 }))
-  return <LineChart series={[{ name: 'avg dur', data: runs.map(d => [dayMs(d.day), +d.avg_dur_sec.toFixed(1)] as [number,number]), color: '#a78bfa', area: true }]} yLeft={{ unit: 's' }} />
-}
-
-function TerminalReasonsChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.terminal_reasons.length) return <Empty />
-  return (
-    <EChart height={180} option={{
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      series: [{ type: 'pie', radius: ['40%', '65%'], center: ['50%', '42%'], data: data.terminal_reasons.map(d => ({ name: d.label || 'success', value: d.count, itemStyle: { color: d.label === 'success' || d.label === '' ? '#10b981' : d.label === 'max_turns' ? '#f59e0b' : '#f43f5e' } })), label: { show: false } }],
-    }} />
-  )
-}
-
-function RetriesBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.runs.length) return <Empty />
-  const runs = padDays(data.runs, d => ({ day: d, completed: 0, failed: 0, avg_dur_sec: 0, max_dur_sec: 0, avg_run_number: 0 }))
-  const days = runs.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 32, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'bar', data: runs.map(d => +d.avg_run_number.toFixed(1)), itemStyle: { color: '#6366f1' } }],
-    }} />
-  )
-}
-
-// ── Efficiency chart components ───────────────────────────────────────────
-
-function TurnsLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  return <LineChart series={[{ name: 'avg turns', data: eff.map(d => [dayMs(d.day), +d.avg_turns.toFixed(1)] as [number,number]), color: '#a78bfa', area: true }]} />
-}
-
-function CacheHitLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  return <LineChart series={[{ name: 'cache hit', data: eff.map(d => [dayMs(d.day), +d.avg_cache_hit_pct.toFixed(1)] as [number,number]), color: '#10b981', area: true }]} yLeft={{ min: 0, max: 100, unit: '%' }} />
-}
-
-function ContextPctLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  return <LineChart series={[{ name: 'ctx window', data: eff.map(d => [dayMs(d.day), +d.avg_context_pct.toFixed(1)] as [number,number]), color: '#f59e0b', area: true }]} yLeft={{ min: 0, max: 100, unit: '%' }} />
-}
-
-function TokensPerTurnLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  return <LineChart series={[{ name: 'tok/turn', data: eff.map(d => [dayMs(d.day), +d.avg_tokens_per_turn.toFixed(0)] as [number,number]), color: '#38bdf8' }]} />
-}
-
-function ActionsPerTurnLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  return <LineChart series={[{ name: 'actions/turn', data: eff.map(d => [dayMs(d.day), +d.avg_actions_per_turn.toFixed(2)] as [number,number]), color: '#6366f1' }]} />
-}
-
-function CompactionsBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.efficiency.length) return <Empty />
-  const eff = padDays(data.efficiency, d => ({ day: d, avg_turns: 0, avg_actions: 0, avg_actions_per_turn: 0, avg_context_pct: 0, avg_tokens_per_turn: 0, avg_cache_hit_pct: 0, total_compactions: 0, total_errors: 0, avg_ttfb_ms: 0 }))
-  const days = eff.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 32, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
-      series: [{ type: 'bar', data: eff.map(d => d.total_compactions), itemStyle: { color: '#f59e0b' } }],
-    }} />
-  )
-}
-
-// ── Tokens chart components ───────────────────────────────────────────────
-
-function TokenStackedBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.tokens.length) return <Empty />
-  const tok = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
-  const days = tok.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v: number) => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'k' : String(v) } },
-      series: [
-        { name: 'cache read',  type: 'bar', stack: 'tok', data: tok.map(d => d.cache_read_tokens),   itemStyle: { color: '#10b981' } },
-        { name: 'input',       type: 'bar', stack: 'tok', data: tok.map(d => d.input_tokens),        itemStyle: { color: '#38bdf8' } },
-        { name: 'output',      type: 'bar', stack: 'tok', data: tok.map(d => d.output_tokens),       itemStyle: { color: '#a78bfa' } },
-        { name: 'cache write', type: 'bar', stack: 'tok', data: tok.map(d => d.cache_create_tokens), itemStyle: { color: '#f59e0b' } },
-      ],
-    }} />
-  )
-}
-
-function CacheRatioLineChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.tokens.length) return <Empty />
-  const tok = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
-  return <LineChart
-    series={[{ name: 'cache reuse', data: tok.map(d => { const t = d.cache_read_tokens + d.cache_create_tokens; return [dayMs(d.day), t > 0 ? +((d.cache_read_tokens/t)*100).toFixed(1) : 0] as [number,number] }), color: '#10b981', area: true }]}
-    yLeft={{ min: 0, max: 100, unit: '%' }}
-  />
-}
-
-function OutputTokensBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.tokens.length) return <Empty />
-  const tok = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
-  const days = tok.map(d => d.day.slice(5))
-  return (
-    <EChart height={180} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9, formatter: (v:number) => v>=1e3?(v/1e3).toFixed(0)+'k':String(v) } },
-      series: [{ type: 'bar', data: tok.map(d => d.output_tokens), itemStyle: { color: '#a78bfa' } }],
-    }} />
-  )
-}
-
-function ReasoningTokensBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.tokens.length) return <Empty />
-  const tok = padDays(data.tokens, d => ({ day: d, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, reasoning_tokens: 0, tool_use_tokens: 0 }))
-  const days = tok.map(d => d.day.slice(5))
-  if (!tok.some(d => d.reasoning_tokens > 0)) {
-    return <div className='h-[180px] flex items-center justify-center text-xs text-muted-foreground'>No reasoning tokens yet (Opus extended thinking)</div>
-  }
-  return (
-    <EChart height={180} option={{
-      grid: { left: 40, right: 16, top: 8, bottom: 24 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
-      yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
-      series: [{ type: 'bar', data: tok.map(d => d.reasoning_tokens), itemStyle: { color: '#f43f5e' } }],
-    }} />
-  )
-}
-
-// ── Productivity chart components ─────────────────────────────────────────
+// /stats-specific Productivity charts — these merge git data with execution_log
+// productivity, so they can't be shared with entity-scoped Stats.
 
 function LinesBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
+  const { data } = useStatsHistory(null, range)
   const git = useGitHistory(range)
   if (!data) return <Empty />
   const merged = mergeProductivity(data.productivity, git.data?.daily ?? [])
@@ -392,7 +92,7 @@ function LinesBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 40, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 } },
       series: [
         { name: 'added',   type: 'bar', data: prod.map(d => d.lines_added),    itemStyle: { color: '#10b981' }, stack: 'lines' },
@@ -403,7 +103,7 @@ function LinesBarChart({ range }: { range: RangeDays }) {
 }
 
 function CommitsFilesBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
+  const { data } = useStatsHistory(null, range)
   const git = useGitHistory(range)
   if (!data) return <Empty />
   const merged = mergeProductivity(data.productivity, git.data?.daily ?? [])
@@ -415,7 +115,7 @@ function CommitsFilesBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'commits', type: 'bar', data: prod.map(d => d.commits),       itemStyle: { color: '#6366f1' } },
@@ -426,7 +126,7 @@ function CommitsFilesBarChart({ range }: { range: RangeDays }) {
 }
 
 function TestsBarChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
+  const { data } = useStatsHistory(null, range)
   const git = useGitHistory(range)
   if (!data) return <Empty />
   const merged = mergeProductivity(data.productivity, git.data?.daily ?? [])
@@ -438,7 +138,7 @@ function TestsBarChart({ range }: { range: RangeDays }) {
     <EChart height={180} option={{
       grid: { left: 32, right: 16, top: 8, bottom: 24 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9  }, boundaryGap: false },
+      xAxis: { type: 'category', data: days, axisLabel: { fontSize: 9 }, boundaryGap: false },
       yAxis: { type: 'value', axisLabel: { fontSize: 9 }, minInterval: 1 },
       series: [
         { name: 'passed', type: 'bar', stack: 't', data: prod.map(d => d.tests_passed), itemStyle: { color: '#10b981' } },
@@ -448,127 +148,56 @@ function TestsBarChart({ range }: { range: RangeDays }) {
   )
 }
 
-// ── Agents chart components ───────────────────────────────────────────────
+// ── Tabs ──────────────────────────────────────────────────────────────────
 
-function ModelsPieChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.models.length) return <Empty />
-  const modelColors: Record<string, string> = {
-    'claude-opus-4-7': '#f43f5e', 'claude-sonnet-4-6': '#a78bfa',
-    'claude-haiku-4-5': '#38bdf8', 'unknown': '#71717a',
-  }
-  return (
-    <EChart height={180} option={{
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      series: [{ type: 'pie', radius: ['40%','65%'], center: ['50%','42%'], data: data.models.map(d => ({ name: d.label, value: d.count, itemStyle: { color: modelColors[d.label] ?? '#71717a' } })), label: { show: false } }],
-    }} />
-  )
-}
-
-function AgentsPieChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.agents.length) return <Empty />
-  return (
-    <EChart height={180} option={{
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      series: [{ type: 'pie', radius: ['40%','65%'], center: ['50%','42%'], data: data.agents.map(d => ({ name: d.label, value: d.count })), label: { show: false } }],
-    }} />
-  )
-}
-
-function TriggerSplitPieChart({ range }: { range: RangeDays }) {
-  const { data } = useStatsHistory(range)
-  if (!data?.trigger_split.length) return <Empty />
-  return (
-    <EChart height={180} option={{
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: '#a1a1aa' } },
-      series: [{ type: 'pie', radius: ['40%','65%'], center: ['50%','42%'], data: data.trigger_split.map(d => ({ name: d.label, value: d.count, itemStyle: { color: d.label === 'interactive' ? '#38bdf8' : d.label === 'manual' ? '#10b981' : '#a78bfa' } })), label: { show: false } }],
-    }} />
-  )
-}
-
-// ── Tab: Runs ─────────────────────────────────────────────────────────────
-
-function RunsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
-  const t = data.totals
+function RunsTab({ data }: { data: StatsHistory }) {
   return (
     <div className='space-y-4'>
-      <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
-        <Card><CardContent className='pt-4'><Kpi label='Total runs' value={String(t.total_runs + t.total_failed)} sub={`${t.total_failed} failed`} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Success rate' value={`${t.total_runs + t.total_failed > 0 ? ((t.total_runs / (t.total_runs + t.total_failed)) * 100).toFixed(0) : 0}%`} accent='text-emerald-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Avg duration' value={`${t.avg_dur_sec.toFixed(0)}s`} sub={`${(t.avg_dur_sec/60).toFixed(1)} min`} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Avg turns' value={t.avg_turns.toFixed(1)} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Errors' value={String(t.total_errors)} accent={t.total_errors > 0 ? 'text-rose-400' : undefined} /></CardContent></Card>
-      </div>
+      <RunsKpiStrip data={data} />
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily runs — completed vs failed' series={(r) => <RunsBarChart range={r} />} />
-        <ChartCard title='Avg duration per day (seconds)' series={(r) => <DurationLineChart range={r} />} />
-        <ChartCard title='Terminal reasons' series={(r) => <TerminalReasonsChart range={r} />} />
-        <ChartCard title='Avg retry number (run_number) — higher = more retries' series={(r) => <RetriesBarChart range={r} />} />
+        <ChartCard entityId={null} title='Daily runs — completed vs failed' series={(e, r) => <RunsBarChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Avg duration per day (seconds)'  series={(e, r) => <DurationLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Terminal reasons'                 series={(e, r) => <TerminalReasonsChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Avg retry number (run_number) — higher = more retries' series={(e, r) => <RetriesBarChart entityId={e} range={r} />} />
       </div>
     </div>
   )
 }
 
-// ── Tab: Efficiency ───────────────────────────────────────────────────────
-
-function EfficiencyTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
-  const t = data.totals
+function EfficiencyTab({ data }: { data: StatsHistory }) {
   return (
     <div className='space-y-4'>
-      <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
-        <Card><CardContent className='pt-4'><Kpi label='Avg turns/run' value={t.avg_turns.toFixed(1)} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Cache hit' value={`${t.avg_cache_hit_pct.toFixed(0)}%`} accent='text-emerald-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Avg context %' value={`${t.avg_context_pct.toFixed(0)}%`} accent={t.avg_context_pct > 80 ? 'text-amber-400' : undefined} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Compactions' value={String(t.total_compactions)} sub='context resets' accent={t.total_compactions > 0 ? 'text-amber-400' : undefined} /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Total errors' value={String(t.total_errors)} accent={t.total_errors > 10 ? 'text-rose-400' : undefined} /></CardContent></Card>
-      </div>
+      <EfficiencyKpiStrip data={data} />
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Avg turns per run' series={(r) => <TurnsLineChart range={r} />} />
-        <ChartCard title='Cache hit rate %' series={(r) => <CacheHitLineChart range={r} />} />
-        <ChartCard title='Avg context window used %' series={(r) => <ContextPctLineChart range={r} />} />
-        <ChartCard title='Avg tokens per turn' series={(r) => <TokensPerTurnLineChart range={r} />} />
-        <ChartCard title='Actions per turn (efficiency — higher = less deliberation)' series={(r) => <ActionsPerTurnLineChart range={r} />} />
-        <ChartCard title='Compactions per day (context resets — 0 is best)' series={(r) => <CompactionsBarChart range={r} />} />
+        <ChartCard entityId={null} title='Avg turns per run'                                    series={(e, r) => <TurnsLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Cache hit rate %'                                     series={(e, r) => <CacheHitLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Avg context window used %'                            series={(e, r) => <ContextPctLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Avg tokens per turn'                                  series={(e, r) => <TokensPerTurnLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Actions per turn (efficiency — higher = less deliberation)' series={(e, r) => <ActionsPerTurnLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Compactions per day (context resets — 0 is best)'     series={(e, r) => <CompactionsBarChart entityId={e} range={r} />} />
       </div>
     </div>
   )
 }
 
-// ── Tab: Tokens ───────────────────────────────────────────────────────────
-
-function TokensTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
-  const t = data.totals
-  const totalAll = t.total_input_tokens + t.total_output_tokens + t.total_cache_read_tokens + t.total_cache_create_tokens
+function TokensTab({ data }: { data: StatsHistory }) {
   return (
     <div className='space-y-4'>
-      <div className='grid grid-cols-2 gap-3 md:grid-cols-5'>
-        <Card><CardContent className='pt-4'><Kpi label='Input tokens' value={fmt(t.total_input_tokens)} accent='text-sky-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Output tokens' value={fmt(t.total_output_tokens)} accent='text-violet-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Cache read' value={fmt(t.total_cache_read_tokens)} sub='reused' accent='text-emerald-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Cache write' value={fmt(t.total_cache_create_tokens)} sub='written' accent='text-amber-400' /></CardContent></Card>
-        <Card><CardContent className='pt-4'><Kpi label='Total tokens' value={fmt(totalAll)} /></CardContent></Card>
-      </div>
+      <TokensKpiStrip data={data} />
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Daily token volumes (stacked)' series={(r) => <TokenStackedBarChart range={r} />} />
-        <ChartCard title='Cache read/write ratio (higher = better cache compounding)' series={(r) => <CacheRatioLineChart range={r} />} />
-        <ChartCard title='Output tokens per day' series={(r) => <OutputTokensBarChart range={r} />} />
-        <ChartCard title='Reasoning tokens per day (Opus extended thinking)' series={(r) => <ReasoningTokensBarChart range={r} />} />
+        <ChartCard entityId={null} title='Daily token volumes (stacked)'                                   series={(e, r) => <TokenStackedBarChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Cache read/write ratio (higher = better cache compounding)'      series={(e, r) => <CacheRatioLineChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Output tokens per day'                                           series={(e, r) => <OutputTokensBarChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Reasoning tokens per day (Opus extended thinking)'               series={(e, r) => <ReasoningTokensBarChart entityId={e} range={r} />} />
       </div>
     </div>
   )
 }
 
-// ── Tab: Productivity ─────────────────────────────────────────────────────
-
-function ProductivityTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
+function ProductivityTab({ data, range }: { data: StatsHistory; range: RangeDays }) {
   const git = useGitHistory(range)
   const t = data.totals
   const g = git.data
-  // Use git totals when execution_log totals are zero (historical data)
   const linesAdded   = t.total_lines_added   || (g?.total_added   ?? 0)
   const linesRemoved = t.total_lines_removed || (g?.total_removed ?? 0)
   const filesChanged = t.total_files_changed || (g?.total_files   ?? 0)
@@ -586,23 +215,21 @@ function ProductivityTab({ data, range, onRange }: { data: StatsHistory; range: 
         <Card><CardContent className='pt-4'><Kpi label='Tests failed'  value={String(t.total_tests_failed)} accent={t.total_tests_failed > 0 ? 'text-rose-400' : undefined} /></CardContent></Card>
       </div>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-        <ChartCard title='Lines added / removed per day' series={(r) => <LinesBarChart range={r} />} />
-        <ChartCard title='Commits + files changed per day' series={(r) => <CommitsFilesBarChart range={r} />} />
-        <ChartCard title='Tests run / passed / failed per day' series={(r) => <TestsBarChart range={r} />} />
+        <ChartCard entityId={null} title='Lines added / removed per day'      series={(_e, r) => <LinesBarChart range={r} />} />
+        <ChartCard entityId={null} title='Commits + files changed per day'     series={(_e, r) => <CommitsFilesBarChart range={r} />} />
+        <ChartCard entityId={null} title='Tests run / passed / failed per day' series={(_e, r) => <TestsBarChart range={r} />} />
       </div>
     </div>
   )
 }
 
-// ── Tab: Agents ───────────────────────────────────────────────────────────
-
-function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeDays; onRange: (r: RangeDays) => void }) {
+function AgentsTab() {
   return (
     <div className='space-y-4'>
       <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
-        <ChartCard title='Runs by model' series={(r) => <ModelsPieChart range={r} />} />
-        <ChartCard title='Runs by agent runtime' series={(r) => <AgentsPieChart range={r} />} />
-        <ChartCard title='Interactive vs autonomous' series={(r) => <TriggerSplitPieChart range={r} />} />
+        <ChartCard entityId={null} title='Runs by model'              series={(e, r) => <ModelsPieChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Runs by agent runtime'      series={(e, r) => <AgentsPieChart entityId={e} range={r} />} />
+        <ChartCard entityId={null} title='Interactive vs autonomous'  series={(e, r) => <TriggerSplitPieChart entityId={e} range={r} />} />
       </div>
     </div>
   )
@@ -610,18 +237,14 @@ function AgentsTab({ data, range, onRange }: { data: StatsHistory; range: RangeD
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-// ── Activity overview chart (daily, same series as Overview hourly) ───────────
-
-
 export function StatsPage() {
   const [range, setRange] = useState<RangeDays>(7)
-  const { data, isLoading } = useStatsHistory(range)
+  const { data, isLoading } = useStatsHistory(null, range)
 
   return (
     <>
       <Header />
       <Main>
-        {/* Page header with range selector — one selector controls all tabs */}
         <div className='mb-4 flex items-center justify-between'>
           <h1 className='text-2xl font-bold tracking-tight'>Stats</h1>
           <div className='flex items-center gap-3'>
@@ -657,11 +280,11 @@ export function StatsPage() {
               <TabsTrigger value='productivity'>Productivity</TabsTrigger>
               <TabsTrigger value='agents'>Agents</TabsTrigger>
             </TabsList>
-            <TabsContent value='runs'         className='mt-4'><RunsTab         data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='efficiency'   className='mt-4'><EfficiencyTab   data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='tokens'       className='mt-4'><TokensTab       data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='productivity' className='mt-4'><ProductivityTab data={data} range={range} onRange={setRange} /></TabsContent>
-            <TabsContent value='agents'       className='mt-4'><AgentsTab       data={data} range={range} onRange={setRange} /></TabsContent>
+            <TabsContent value='runs'         className='mt-4'><RunsTab         data={data} /></TabsContent>
+            <TabsContent value='efficiency'   className='mt-4'><EfficiencyTab   data={data} /></TabsContent>
+            <TabsContent value='tokens'       className='mt-4'><TokensTab       data={data} /></TabsContent>
+            <TabsContent value='productivity' className='mt-4'><ProductivityTab data={data} range={range} /></TabsContent>
+            <TabsContent value='agents'       className='mt-4'><AgentsTab /></TabsContent>
           </Tabs>
         ) : null}
       </Main>
