@@ -865,16 +865,26 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 			}
 		}
 
-		// If run_uid provided, filter to actions created at/after run start.
+		// If run_uid provided, filter actions to the run's time window:
+		//   [started_at, terminal_at]   for completed/failed/cancelled runs
+		//   [started_at, ∞)              for in-flight runs (no terminal row yet)
+		// Without the upper bound, expanding an older completed run would
+		// surface actions from every later run of the same task.
 		runUID := r.URL.Query().Get("run_uid")
-		var sinceTime string
+		var sinceTime, untilTime string
 		if runUID != "" && n.ExecutionLog != nil {
 			rows, err := n.ExecutionLog.ListByRun(ctx, runUID)
 			if err == nil {
 				for _, row := range rows {
-					if row.Event == "started" {
-						sinceTime = row.CreatedAt
-						break
+					switch row.Event {
+					case "started":
+						if sinceTime == "" {
+							sinceTime = row.CreatedAt
+						}
+					case "completed", "failed", "cancelled":
+						if row.CreatedAt > untilTime {
+							untilTime = row.CreatedAt
+						}
 					}
 				}
 			}
@@ -890,13 +900,17 @@ func apiEntityActions(n *node.Node) http.HandlerFunc {
 			return
 		}
 
-		// Filter by run start time when run_uid was specified.
-		if sinceTime != "" {
+		if sinceTime != "" || untilTime != "" {
 			filtered := actions[:0]
 			for _, a := range actions {
-				if a.CreatedAt.Format("2006-01-02T15:04:05Z07:00") >= sinceTime {
-					filtered = append(filtered, a)
+				ts := a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
+				if sinceTime != "" && ts < sinceTime {
+					continue
 				}
+				if untilTime != "" && ts > untilTime {
+					continue
+				}
+				filtered = append(filtered, a)
 			}
 			actions = filtered
 		}

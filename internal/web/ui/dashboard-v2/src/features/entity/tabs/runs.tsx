@@ -37,21 +37,21 @@ function exportJSON(data: ActionRow[], runUid: string) {
   URL.revokeObjectURL(url)
 }
 
-function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) {
-  const { data, isLoading } = useEntityActions(entityId, runUid, true)
+function RunOutput({ entityId, runUid, isLive }: { entityId: string; runUid: string; isLive: boolean }) {
+  const { data, isLoading } = useEntityActions(entityId, runUid, isLive)
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
+  // Only auto-scroll for live runs — replay should let the user scroll freely.
+  const [autoScroll, setAutoScroll] = useState(isLive)
 
-  // Auto-scroll to bottom when new rows arrive (unless user scrolled up).
-  // Use scrollTop directly — scrollIntoView scrolls the page, not the container.
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
+    if (isLive && autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
-  }, [data?.length, autoScroll])
+  }, [data?.length, autoScroll, isLive])
 
   const handleScroll = () => {
+    if (!isLive) return
     const el = containerRef.current
     if (!el) return
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
@@ -59,7 +59,11 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
   }
 
   if (isLoading) return <div className='text-muted-foreground p-3 text-xs'>Loading…</div>
-  if (!data?.length) return <div className='text-muted-foreground p-3 text-xs animate-pulse'>Waiting for agent output…</div>
+  if (!data?.length) return (
+    <div className={`text-muted-foreground p-3 text-xs ${isLive ? 'animate-pulse' : ''}`}>
+      {isLive ? 'Waiting for agent output…' : 'No actions captured for this run.'}
+    </div>
+  )
 
   return (
     <div>
@@ -107,7 +111,7 @@ function LiveOutput({ entityId, runUid }: { entityId: string; runUid: string }) 
         </div>
       ))}
       <div ref={bottomRef} />
-      {!autoScroll && (
+      {isLive && !autoScroll && (
         <button
           type='button'
           onClick={() => { setAutoScroll(true); if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight }}
@@ -131,6 +135,76 @@ function fmtCost(usd: number) {
 function fmtTime(v: string | number) {
   const ms = typeof v === 'number' ? v * 1000 : Date.parse(v)
   return isFinite(ms) ? new Date(ms).toLocaleString() : '—'
+}
+function fmtNum(n: number) {
+  if (!n) return '0'
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
+  return String(n)
+}
+function fmtDur(ms: number) {
+  if (!ms) return '—'
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  const rem = (s - m * 60).toFixed(0)
+  return `${m}m ${rem}s`
+}
+
+function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+  return (
+    <div className='rounded border bg-card/40 px-2 py-1.5'>
+      <div className='text-muted-foreground text-[9px] uppercase tracking-wider'>{label}</div>
+      <div className={`font-mono text-sm font-semibold tabular-nums ${accent ?? ''}`}>{value}</div>
+      {sub && <div className='text-muted-foreground text-[9px]'>{sub}</div>}
+    </div>
+  )
+}
+
+function RunStatsStrip({ run }: { run: ExecutionRow }) {
+  const totalTok = (run.input_tokens || 0) + (run.output_tokens || 0) + (run.cache_read_tokens || 0) + (run.cache_create_tokens || 0)
+  return (
+    <div className='space-y-2'>
+      <div className='grid grid-cols-3 gap-1.5 md:grid-cols-6 lg:grid-cols-9'>
+        <Kpi label='Status' value={run.event} accent={
+          run.event === 'completed' ? 'text-emerald-400' :
+          run.event === 'failed' ? 'text-rose-400' : 'text-amber-400'
+        } sub={run.terminal_reason || undefined} />
+        <Kpi label='Duration' value={fmtDur(run.duration_ms)} sub={run.ttfb_ms ? `${fmtDur(run.ttfb_ms)} ttfb` : undefined} />
+        <Kpi label='Cost' value={fmtCost(run.cost_usd)} sub={run.cost_per_turn ? `${fmtCost(run.cost_per_turn)}/turn` : undefined} />
+        <Kpi label='Turns' value={String(run.turns || 0)} sub={run.tokens_per_turn ? `${fmtNum(run.tokens_per_turn)} tok/turn` : undefined} />
+        <Kpi label='Actions' value={String(run.actions || 0)} sub={run.cost_per_action ? `${fmtCost(run.cost_per_action)}/act` : undefined} />
+        <Kpi label='Errors' value={String(run.errors || 0)} accent={run.errors > 0 ? 'text-rose-400' : undefined} />
+        <Kpi label='Compactions' value={String(run.compactions || 0)} accent={run.compactions > 0 ? 'text-amber-400' : undefined} />
+        <Kpi label='Cache hit' value={`${(run.cache_hit_rate_pct || 0).toFixed(0)}%`} accent='text-emerald-400' />
+        <Kpi label='Ctx window' value={`${(run.context_window_pct || 0).toFixed(0)}%`} accent={run.context_window_pct > 80 ? 'text-amber-400' : undefined} />
+      </div>
+      <div className='grid grid-cols-3 gap-1.5 md:grid-cols-6 lg:grid-cols-9'>
+        <Kpi label='Input tok' value={fmtNum(run.input_tokens)} accent='text-sky-400' />
+        <Kpi label='Output tok' value={fmtNum(run.output_tokens)} accent='text-violet-400' />
+        <Kpi label='Cache read' value={fmtNum(run.cache_read_tokens)} accent='text-emerald-400' />
+        <Kpi label='Cache write' value={fmtNum(run.cache_create_tokens)} accent='text-amber-400' />
+        <Kpi label='Reasoning tok' value={fmtNum(run.reasoning_tokens)} accent={run.reasoning_tokens > 0 ? 'text-rose-400' : undefined} />
+        <Kpi label='Total tok' value={fmtNum(totalTok)} />
+        <Kpi label='Lines +/−' value={`${fmtNum(run.lines_added)} / ${fmtNum(run.lines_removed)}`}
+          accent={run.lines_added > 0 || run.lines_removed > 0 ? 'text-emerald-400' : undefined} />
+        <Kpi label='Files / commits' value={`${run.files_changed || 0} / ${run.commits || 0}`} />
+        <Kpi label='Tests p/f' value={`${run.tests_passed || 0} / ${run.tests_failed || 0}`}
+          accent={run.tests_failed > 0 ? 'text-rose-400' : run.tests_passed > 0 ? 'text-emerald-400' : undefined} />
+      </div>
+      {(run.peak_cpu_pct > 0 || run.peak_rss_mb > 0 || run.model || run.agent_runtime) && (
+        <div className='grid grid-cols-3 gap-1.5 md:grid-cols-6 lg:grid-cols-9'>
+          {run.peak_cpu_pct > 0 && <Kpi label='Peak CPU' value={`${run.peak_cpu_pct.toFixed(0)}%`} sub={run.avg_cpu_pct ? `${run.avg_cpu_pct.toFixed(0)}% avg` : undefined} />}
+          {run.peak_rss_mb > 0 && <Kpi label='Peak RSS' value={`${fmtNum(run.peak_rss_mb)} MB`} sub={run.avg_rss_mb ? `${fmtNum(run.avg_rss_mb)} avg` : undefined} />}
+          {run.model && <Kpi label='Model' value={run.model} sub={run.provider || undefined} />}
+          {run.agent_runtime && <Kpi label='Agent' value={run.agent_runtime} sub={run.agent_version || undefined} />}
+          {run.trigger && <Kpi label='Trigger' value={run.trigger} />}
+          {run.branch && <Kpi label='Branch' value={run.branch.length > 24 ? run.branch.slice(0, 22) + '…' : run.branch}
+            sub={run.commit_sha ? run.commit_sha.slice(0, 7) : undefined} />}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const thCls = 'text-muted-foreground px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide'
@@ -165,7 +239,18 @@ function RunRow({ run, entityId, selectedRunUid, onSelect, onSelectHistory }: {
       </tr>
       {expanded && (
         <tr><td colSpan={7} className='border-b bg-white/3 px-4 py-3'>
-          <TurnAnalyticsBlock entityId={entityId} runUid={run.run_uid} />
+          <div className='space-y-4'>
+            <RunStatsStrip run={run} />
+            <div>
+              <div className='text-muted-foreground mb-1 text-[10px] uppercase tracking-wider'>
+                Output replay
+              </div>
+              <div className='rounded border bg-card/40'>
+                <RunOutput entityId={entityId} runUid={run.run_uid} isLive={false} />
+              </div>
+            </div>
+            <TurnAnalyticsBlock entityId={entityId} runUid={run.run_uid} />
+          </div>
         </td></tr>
       )}
     </Fragment>
@@ -248,9 +333,9 @@ export function RunsTab({ kind, entityId, onSelectLive, onSelectHistory }: RunsT
               <CopyButton text={liveRun.run_uid} />
             </span>
           </div>
-          {/* Live output — polls actions every 3s */}
+          {/* Live output — polls actions every 2s */}
           <div className='border-t border-emerald-500/20'>
-            <LiveOutput entityId={liveRun.entity_uid} runUid={liveRun.run_uid} />
+            <RunOutput entityId={liveRun.entity_uid} runUid={liveRun.run_uid} isLive={true} />
           </div>
         </div>
       )}
