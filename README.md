@@ -1,5 +1,14 @@
 # OpenPraxis
 
+> ## ⚠️ Superseded by [SuperX](https://github.com/k8nstantin/superx)
+>
+> **OpenPraxis is no longer developed.** Last commit May 2026. It is kept public as prior art and as a working record of what it proved.
+>
+> The successor is **[SuperX](https://github.com/k8nstantin/superx)** — the same thesis, rebuilt in Rust on an append-only substrate: [k8nstantin.github.io/superx](https://k8nstantin.github.io/superx/)
+>
+> **Reading this repository:** the documentation below describes the system as designed, and in several places the design outran the code before development stopped — the independent watcher was removed, cost tracking was gutted pending a redesign, retry and the proposer loop were partially wired, and forecasting was never built. Treat the README as intent and the code as the source of truth. That gap is itself part of what the rewrite was for, and the specifics are recorded in [What carried forward](#what-carried-forward-into-superx) below.
+
+
 [![CI](https://github.com/k8nstantin/OpenPraxis/actions/workflows/ci.yml/badge.svg)](https://github.com/k8nstantin/OpenPraxis/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/k8nstantin/OpenPraxis)](https://github.com/k8nstantin/OpenPraxis/blob/main/go.mod)
 [![Go Report Card](https://goreportcard.com/badge/github.com/k8nstantin/OpenPraxis)](https://goreportcard.com/report/github.com/k8nstantin/OpenPraxis)
@@ -48,6 +57,36 @@ flowchart TB
   <img src="docs/screenshots/v0.9/product-dag.png" alt="OpenPraxis v0.9 — product DAG showing skills, manifests, tasks, and linked idea" width="49%" />
   <img src="docs/screenshots/v0.9/settings-catalog.png" alt="OpenPraxis v0.9 — settings catalog with Prompt Context, Frontier & Scoring, and Proposer Loop groups" width="49%" />
 </p>
+
+## What carried forward into SuperX
+
+OpenPraxis was the first attempt at a governed execution layer for autonomous coding agents. What it established still holds, and is built into SuperX from the substrate up:
+
+- **Agents cannot be trusted to self-report completion.** Verification has to run somewhere the agent cannot see or skip.
+- **Work is a graph, not a ticket queue.** Products decompose into specs and specs into tasks, and dependency order is the plan.
+- **Constraints must be mechanical.** A rule the agent acknowledges and a check that runs afterwards are two different things, and only the second one counts.
+- **Cost and turns have to attribute back to the spec that caused them**, or there is no way to answer whether the work was worth it.
+- **Memory has to outlive the session**, or every run starts from zero.
+- **The protocol belongs in the substrate, not in code** — versioned, auditable, changeable without a release.
+
+What the rewrite changed, and why:
+
+| OpenPraxis | SuperX | Why |
+|---|---|---|
+| Five entity tables (products, manifests, tasks, ideas, skills), later collapsed into one | One node table + one edge table, kinds as rows in a registry | The collapse was forced. Starting there removes a whole class of type-specific special cases — and new kinds become a command instead of a migration. |
+| Status column updated in place; the documented state machine's only writer was never instantiated, so nothing ever closed a task | Lifecycle derived from append-only chains; "current" computed at read time | Two sources of truth disagree eventually. One of them has to be a projection. |
+| `valid_to` stamped on the superseded row; `Remove` overwrote `created_by`/`reason` on the row it closed | Retraction is a **new** row; nothing mutates history | Attribution is destroyed by editing the record you are superseding. |
+| Comment types aliased to one constant to keep call sites compiling — which silently made "was this approved?" unanswerable | Typed edges and enum-constrained fields, enforced by the engine | The alias compiled fine and deleted the semantics. Rust makes that collapse a build error. |
+| Prompt scaffold in a versioned template table — which ended up holding only seeded defaults, with every real prompt written as a comment instead | The per-entity instruction stream **is** the authoring surface, and each run pins the exact instruction version it dispatched with | Build the surface people actually use, then version that. |
+| Sixteen tables dropped at boot as the migration strategy | Insert-only; tolerant schema re-apply with a version gate | A migration that cannot be reversed is not a migration. |
+| An in-process mutex standing in for a storage invariant (defeated by the second process on the same file) | Uniqueness expressed in the schema | A lock in one process is not a constraint. |
+| Retry counters and failure streaks kept in the mutable settings table, with no history | Every fact, including the system's own decisions, is an inserted row | An autonomous system that cannot explain why it fired is not auditable. |
+
+Also worth knowing: **go-leiden was built by OpenPraxis.** The first native Go implementation of the Leiden algorithm was written end to end by autonomous agents driven through this engine, with no human code commits — [k8nstantin/go-leiden](https://github.com/k8nstantin/go-leiden). That experiment is the strongest evidence for the thesis, and the reason it was worth rebuilding properly.
+
+**Everything below is the original documentation, unchanged.**
+
+---
 
 ### Features
 
