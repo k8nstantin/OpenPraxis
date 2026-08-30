@@ -1,0 +1,44 @@
+name: leiden
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'leiden/**'
+      - '.github/workflows/leiden.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'leiden/**'
+      - '.github/workflows/leiden.yml'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: leiden
+
+jobs:
+  vet-test:
+    name: go vet + go test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: leiden/go.mod
+          cache: false
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./... -count=1

@@ -1,0 +1,39 @@
+# Zachary's karate club ground-truth 2-community split (Mr. Hi vs Officer).
+# 34 entries, one cluster ID per line, in node order 0..33.
+# 0 = Mr. Hi (faction around node 0), 1 = Officer (faction around node 33).
+# Reference: Zachary, "An Information Flow Model for Conflict and Fission in
+# Small Groups", J. Anthropological Research 33 (1977).
+0
+0
+0
+0
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+1
+1
+0
+0
+1
+0
+1
+0
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
